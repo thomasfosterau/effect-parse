@@ -384,10 +384,17 @@ add nothing: it too has to fall back when `new Function` is blocked.
 
 ### When the compiled code runs
 
-The runners use compiled code only for complete input without a tracer:
-`parse`, `parseSync`, `parsePeek`, `parseEffect`. `parsePartial`,
-`ParserStream`, `parseRecoverable` and any run with the `trace` option stay
-interpreted. Within those runners `Trace` is an identity, `ResumeAfter` is
+The runners use compiled code whenever there is no tracer and recovery is
+off: `parse`, `parseSync`, `parsePeek` and `parseEffect` run the plain
+build, and `parsePartial` and `ParserStream.parseAll` the resumable build
+(below), which handles partial input. `ParserStream.parseMany`,
+`parseRecoverable` and any run with the `trace` option stay interpreted.
+Every runner takes an `offset` and starts the `State` there, so a driver
+that reads one token at a time from a buffer (a lexer) runs compiled code
+without slicing the input: there is still no separate runner or parser
+type, and an option keeps the result types the ones callers already
+handle (`Done` reports where `parsePartial` stopped; `parsePeek`'s
+remaining input, where it did). Within those runners `Trace` is an identity, `ResumeAfter` is
 `map(Option.some)` and `RetryAfter` is an identity (recovery is inactive),
 so they compile for free. `Service` and `Provide` read and write
 `state.context` and fall back to their steps.
