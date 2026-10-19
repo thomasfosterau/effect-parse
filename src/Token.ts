@@ -26,7 +26,7 @@ import {
   codePointPredicate,
   compileAny,
   countTokens,
-  describeBytes,
+  describeLiteral,
   End,
   indexOf,
   matchLiteral,
@@ -241,11 +241,7 @@ export const literal: {
 
 /** @internal */
 export const literalImpl = (lit: Input, caseless: boolean): Parser<any, never, never, any> => {
-  const description = typeof lit === "string"
-    ? JSON.stringify(lit)
-    : lit instanceof Uint8Array
-    ? describeBytes(lit)
-    : `[${lit.map((t) => JSON.stringify(t)).join(", ")}]`
+  const description = describeLiteral(lit)
   const expected = [caseless ? `${description} (case insensitive)` : description]
   // A string literal may also be matched against byte input (as UTF-8)
   let asBytes: Uint8Array | undefined
@@ -408,11 +404,7 @@ export const takeUntil: {
   <T>(literal: ReadonlyArray<T>, range?: Range): Parser<ReadonlyArray<T>, never, never, ReadonlyArray<T>>
 } = (lit: Input, r?: Range): Parser<any, never, never, any> => {
   const [min, max] = normalize(r)
-  const description = typeof lit === "string"
-    ? JSON.stringify(lit)
-    : lit instanceof Uint8Array
-    ? describeBytes(lit)
-    : `[${lit.map((t) => JSON.stringify(t)).join(", ")}]`
+  const description = describeLiteral(lit)
   const expected = [description]
   return described((state: State<Input>) => {
     const start = state.pos

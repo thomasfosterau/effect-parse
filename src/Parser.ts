@@ -1486,10 +1486,27 @@ export const separatedPair = <
  * })
  * ```
  *
+ * The body runs on every parse, so parsers created inside it, like
+ * `Token.literal("=")` above, are rebuilt on every run. On hot paths, build
+ * them once outside the body:
+ *
+ * ```ts
+ * import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * const equals = Token.literal("=")
+ *
+ * const keyValue = Parser.gen(function*() {
+ *   const key = yield* Ascii.alpha1
+ *   yield* equals
+ *   const value = yield* Ascii.decInt
+ *   return [key, value] as const
+ * })
+ * ```
+ *
  * @since 0.1.0
  * @category sequencing
  */
-export const gen = <Eff extends Parser.Any, AEff>(
+export const gen =<Eff extends Parser.Any, AEff>(
   f: () => Generator<Eff, AEff, never>
 ): Parser<AEff, Parser.Error<Eff>, Parser.Services<Eff>, Parser.InputOf<Eff>> =>
   make((state: State<any>) => {

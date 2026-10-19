@@ -121,3 +121,28 @@ it("README: reusing a state for one run per token", () => {
   expect(() => token(2)).toThrow("expected digit or letter")
   expect(token(0)).toEqual({ value: "12", end: 3 })
 })
+
+it("README hoisted generator example behaves like the inline one", () => {
+  const inline = Parser.gen(function*() {
+    const name = yield* Token.takeWhile(Ascii.isAlphanumeric, { min: 1 })
+    yield* Token.literal(": ")
+    const value = yield* Ascii.tillLineEnding
+    yield* Ascii.lineEnding
+    return { name, value }
+  })
+
+  const colon = Token.literal(": ")
+  const name = Token.takeWhile(Ascii.isAlphanumeric, { min: 1 })
+  const header = Parser.gen(function*() {
+    const n = yield* name
+    yield* colon
+    const value = yield* Ascii.tillLineEnding
+    yield* Ascii.lineEnding
+    return { name: n, value }
+  })
+
+  expect(Parser.parse(header, "Host: example.com\r\n")).toEqual(Result.succeed({ name: "Host", value: "example.com" }))
+  for (const input of ["Host: example.com\n", "Host example.com\n", ": x\n"]) {
+    expect(Parser.parse(header, input)).toEqual(Parser.parse(inline, input))
+  }
+})

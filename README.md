@@ -119,6 +119,24 @@ const header = Parser.gen(function*() {
 })
 ```
 
+The generator body runs on every parse, so parsers created inside it, like
+`Token.literal(": ")` above, are rebuilt on every run. That is fine for most
+grammars, but on a hot path (a tokenizer, or a `gen` inside a `repeat`) build
+them once, outside the body, and `yield*` those:
+
+```ts
+const colon = Token.literal(": ")
+const name = Token.takeWhile(Ascii.isAlphanumeric, { min: 1 })
+
+const header = Parser.gen(function*() {
+  const n = yield* name
+  yield* colon
+  const value = yield* Ascii.tillLineEnding
+  yield* Ascii.lineEnding
+  return { name: n, value }
+})
+```
+
 **Records, tuples and Do notation**:
 
 ```ts
@@ -593,6 +611,7 @@ pnpm build   # emit dist/
 pnpm bench          # JSON example: interpreted vs compiled, per encoding (after a build)
 pnpm bench:native   # compiled JSON parser vs JSON.parse on several document shapes
 pnpm bench:stream   # parsing a fetch body as it downloads vs Response.json()
+pnpm bench:gen      # parsers built inside a Parser.gen body vs hoisted out of it
 ```
 
 ## License
