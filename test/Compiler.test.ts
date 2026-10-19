@@ -535,6 +535,20 @@ describe("compiled combinators", () => {
     }
   })
 
+  it("cut and lookahead errors (#21)", () => {
+    const ident = Parser.taken(Parser.seq(
+      Token.takeWhile("abcx", { min: 1 }),
+      Parser.optional(Parser.seq(Token.literal(":"), Token.takeWhile("abc", { min: 1 })))
+    ))
+    const notReserved = Parser.flatMap(Parser.peek(ident), (name) => name === "x" ? Parser.cut(Parser.reject) : ident)
+      .pipe(Parser.expected("identifier"))
+    const p = Parser.alt(
+      Parser.terminated(notReserved, Token.literal(";")),
+      Parser.preceded(Parser.not(Parser.seq(Token.literal("a"), Token.literal(":"))), Parser.cut(Token.literal("c;")))
+    )
+    for (const input of allStrings(["x", "a", "b", "c", ":", ";"], 4)) same(p, input)
+  })
+
   it("array inputs", () => {
     const p = Parser.separated(Token.oneOf<ReadonlyArray<string>>(["x", "y"]), Token.literal(["+"]))
     for (const input of allStrings(["x", "y", "+", "z"], 5)) same(p as any, Array.from(input))

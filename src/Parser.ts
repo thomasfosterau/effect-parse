@@ -890,8 +890,25 @@ const changeMode = <A, E, R, I extends Input>(
  * @since 0.1.0
  * @category error management
  */
-export const cut = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<A, E, R, I> =>
-  changeMode(self, "Backtrack", "Cut")
+export const cut = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<A, E, R, I> => {
+  const step = self.step
+  return described((state) => {
+    // A committed failure is reported where it happened (winnow's
+    // `cut_err`): only failures recorded inside `self` can outrank it as the
+    // furthest failure, not ones from abandoned branches or lookaheads before
+    // the commit.
+    const deepest = state.deepest
+    state.deepest = undefined
+    const a = step(state)
+    if (a === Fail && state.mode !== "Incomplete") {
+      state.mode = "Cut"
+      return a
+    }
+    const inner = state.deepest as Failure | undefined
+    if (deepest !== undefined && (inner === undefined || deepest.offset > inner.offset)) state.deepest = deepest
+    return a
+  }, self.name, { _tag: "Mode", self, from: "Backtrack", to: "Cut" })
+}
 
 /**
  * Turns unrecoverable failures back into recoverable ones (winnow's
@@ -1136,11 +1153,15 @@ export const peek = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser
     const start = state.pos
     const hintOffset = state.hintOffset
     const hintExpected = state.hintExpected
+    const deepest = state.deepest
     const a = step(state)
     if (a !== Fail) {
+      // Failures inside a lookahead that succeeded are about input that was
+      // never consumed, so they are not reported as the furthest failure
       state.pos = start
       state.hintOffset = hintOffset
       state.hintExpected = hintExpected
+      state.deepest = deepest
     }
     return a
   }, self.name, { _tag: "Peek", self })
@@ -1159,15 +1180,19 @@ export const not = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<
     const start = state.pos
     const hintOffset = state.hintOffset
     const hintExpected = state.hintExpected
+    const deepest = state.deepest
     const a = step(state)
     if (a !== Fail) {
+      // The failures inside `self` are not this parser's failure
       state.pos = start
+      state.deepest = deepest
       return state.backtrack("Not")
     }
     if (state.mode !== "Backtrack") return Fail
     state.pos = start
     state.hintOffset = hintOffset
     state.hintExpected = hintExpected
+    state.deepest = deepest
     return undefined
   }, self.name, { _tag: "Not", self })
 }

@@ -201,6 +201,13 @@ gives messages like `expected one of "true", "false", "null"` without any
 annotation, which is better than both nom and winnow out of the box (each
 keeps only one branch's error).
 
+When the final failure is a plain syntax error, the runner reports the
+*furthest* recoverable failure instead if it lies further into the input,
+including one swallowed by backtracking (a trailing separator followed by an
+invalid element). Two rules keep it honest: `cut` keeps only the failures
+recorded after the commit, and a lookahead that succeeds forgets the failures
+recorded inside it (see section 5).
+
 `Parser.expected(desc)` replaces the expected set when a parser fails without
 consuming input (Parsec's `<?>`). `Parser.context(label)` adds a context
 label (winnow `StrContext::Label`, nom `context`).
@@ -257,6 +264,13 @@ expected value
   failing, and *furthest failure*. The furthest heuristic may report a
   deeper failure from an abandoned branch instead of a shallower final one.
   It never overrides a failure that carries a user `cause` or message.
+  A committed (`cut`) failure is reported where it happened, as winnow does
+  for `cut_err`: only failures recorded inside the `cut` parser can outrank
+  it, not ones from branches or lookaheads tried before the commit. Failures
+  inside a lookahead that succeeded (`peek`, and `not` either way) never
+  count, because they are about input the parser did not consume. Failures
+  inside a successful `opt` or a repetition's last attempt do count; they are
+  what makes the heuristic useful.
 - **`resumeAfter` / `retryAfter`** run the recovery parser from the position
   where the failing parser *started*, not from where it failed.
 - **`ParserStream.parseMany` error offsets** are relative to the buffer of
