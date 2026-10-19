@@ -242,6 +242,10 @@ const b = Token.literal("b")
 const ab = Token.literal("ab")
 const digit = Token.oneOf(Token.range("0", "9"))
 
+// One predicate the compiler sees through (with ranges), one it must call
+const aOrAstral = Token.codePoints("a or astral", (c) => c === 0x61 || c > 0xffff, [[0x61, 0x61], [0x10000, 0x10ffff]])
+const digitOrSurrogate = Token.codePoints("digit or surrogate", (c) => (c >= 0x30 && c <= 0x39) || (c >= 0xd800 && c <= 0xdfff))
+
 const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, string>]> = [
   ["alt with pruning", Parser.alt(a, b, ab, Parser.succeed("none"))],
   ["alt of shared prefixes", Parser.alt(ab, a, Parser.seq(b, a))],
@@ -298,6 +302,8 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
   ["Token slices", Parser.seq(Token.takeWhile("ab", { min: 1, max: 2 }), Token.takeTill("0", { max: 3 }), Parser.opt(Token.takeUntil("0", { min: 1 })))],
   ["takeTill with surrogates", Parser.seq(Token.takeTill("0", { min: 2, max: 3 }), Token.rest)],
   ["takeWhile with a string predicate", Token.takeWhile((c: string) => c !== "b" && c < "😀")],
+  ["Token.codePoints with ranges", Parser.seq(Token.takeWhile([aOrAstral, "+"], { max: 3 }), Parser.opt(Token.oneOf(digitOrSurrogate)), Parser.opt(Token.noneOf([aOrAstral, "b"])))],
+  ["Token.codePoints without ranges", Parser.seq(Token.takeTill(digitOrSurrogate, { max: 2 }), Parser.opt(Token.oneOf([digitOrSurrogate, aOrAstral])))],
   ["takeUntil", Parser.seq(Token.takeUntil("ab"), Token.rest)],
   ["literal edge cases", Parser.seq(Token.literal(""), Parser.opt(Token.literal("a😀")), Parser.opt(Ascii.caseless("Ab")))],
   ["fromEntries of separated pairs", Parser.fromEntries(Parser.separated(Parser.separatedPair(Token.oneOf("ab"), Token.literal("+"), Parser.opt(digit)), Token.literal("\\")))],
@@ -344,7 +350,8 @@ describe("compiled combinators", () => {
     Parser.seq(Parser.opt(T.decInt), Parser.opt(T.float), Parser.opt(T.hexUint), T.multispace0),
     Parser.seq(T.escaped(T.takeTill("\\\""), "\\", Parser.alt(T.literal("n").pipe(Parser.as("\n")), T.literal("\\"))), Parser.opt(T.takeEscaped(T.alpha1, "\\", T.oneOf("an")))),
     Parser.dispatch(T.any, { a: Parser.succeed(1), é: T.alpha1, [x]: Parser.succeed(3) }, T.any),
-    Parser.seq(T.bom, Parser.alt(T.tillLineEnding, T.lineEnding))
+    Parser.seq(T.bom, Parser.alt(T.tillLineEnding, T.lineEnding)),
+    Parser.seq(T.takeWhile([aOrAstral, "+"], { max: 2 }), Parser.opt(T.oneOf(digitOrSurrogate)), Parser.opt(T.noneOf([digitOrSurrogate, "b"])))
   ]
   const textAlphabet = ["a", "b", "0", "é", "😀", "\\", "\"", "+", "\n", "\r", "\ufeff", "Ä"]
 
@@ -535,6 +542,20 @@ describe("compiled combinators", () => {
     }
   })
 
+  it("cut and lookahead errors (#21)", () => {
+    const ident = Parser.taken(Parser.seq(
+      Token.takeWhile("abcx", { min: 1 }),
+      Parser.optional(Parser.seq(Token.literal(":"), Token.takeWhile("abc", { min: 1 })))
+    ))
+    const notReserved = Parser.flatMap(Parser.peek(ident), (name) => name === "x" ? Parser.cut(Parser.reject) : ident)
+      .pipe(Parser.expected("identifier"))
+    const p = Parser.alt(
+      Parser.terminated(notReserved, Token.literal(";")),
+      Parser.preceded(Parser.not(Parser.seq(Token.literal("a"), Token.literal(":"))), Parser.cut(Token.literal("c;")))
+    )
+    for (const input of allStrings(["x", "a", "b", "c", ":", ";"], 4)) same(p, input)
+  })
+
   it("array inputs", () => {
     const p = Parser.separated(Token.oneOf<ReadonlyArray<string>>(["x", "y"]), Token.literal(["+"]))
     for (const input of allStrings(["x", "y", "+", "z"], 5)) same(p as any, Array.from(input))
@@ -608,6 +629,154 @@ describe.each(backends)("Parser.compile with the %s backend", (backend) => {
     const state = new State("aaa")
     state.end = 2
     expect(Registry.stepFor(p, state)!(state)).toEqual(["a", "a"])
+  })
+})
+
+// -----------------------------------------------------------------------------
+// Running from an offset
+// -----------------------------------------------------------------------------
+
+/**
+ * A compiled twin of `p` whose root `step` (the interpreter) counts its
+ * calls, so tests can tell whether a runner took the compiled path.
+ */
+const watched = <P extends Parser.Parser.Any>(p: P, backend: Backend) => {
+  const c = Parser.compile(Parser.named(p, "watched"), { backend })
+  const step = c.step
+  const counter = { parser: c as P, interpreted: 0 }
+  Object.defineProperty(c, "step", {
+    value: (state: State<any>) => {
+      counter.interpreted++
+      return step(state)
+    }
+  })
+  return counter
+}
+
+/**
+ * Shifts the offsets in an outcome of `parse`, `parsePeek` or
+ * `parsePartial` by `by`, leaving out the message, whose line and column
+ * are counted in the whole input.
+ */
+const shifted = (o: any, by: number) => {
+  if (!o.ok) return { ...o, error: { ...o.error, offset: o.error.offset + by, message: undefined } }
+  if (o.value?._tag === "Done") return { ...o, value: { ...o.value, offset: o.value.offset + by } }
+  return o
+}
+
+const concatInput = (a: Input.Input, b: Input.Input): Input.Input => {
+  if (typeof a === "string") return a + (b as string)
+  const out = new Uint8Array(a.length + b.length)
+  out.set(a as Uint8Array)
+  out.set(b as Uint8Array, a.length)
+  return out
+}
+
+/**
+ * Checks that running `p` from just after `prefix` gives the results of
+ * running it on `input`, with offsets moved by the length of the prefix
+ * (unless it returns `positions`); that it gives the same results compiled;
+ * and that compiled runs call the interpreter only to report a failure or
+ * `Incomplete`. With `leafRoot`, `p` may be a token parser, which the
+ * resumable build runs interpreted near the end of partial input, so
+ * partial runs are not counted.
+ */
+const sameAtOffset = (
+  p: Parser.Parser.Any,
+  prefix: Input.Input,
+  input: Input.Input,
+  options?: { readonly positions?: boolean; readonly leafRoot?: boolean }
+): void => {
+  const whole = concatInput(prefix, input)
+  const offset = prefix.length
+  const runners = {
+    parse: (q: Parser.Parser.Any, i: Input.Input, o?: Parser.ParseOptions) => Parser.parse(q, i as never, o as never),
+    peek: (q: Parser.Parser.Any, i: Input.Input, o?: Parser.ParseOptions) => Parser.parsePeek(q, i as never, o as never),
+    partial: (q: Parser.Parser.Any, i: Input.Input, o?: Parser.ParseOptions) => Parser.parsePartial(q, i as never, o as never)
+  }
+  const label = JSON.stringify(typeof input === "string" ? input : Array.from(input as any))
+  for (const [runner, run] of Object.entries(runners)) {
+    const expected: any = outcome(run(p, whole, { offset }))
+    // Values that are positions (spans, `location`) are positions in the whole input
+    if (!options?.positions) {
+      expect(shifted(expected, 0), `${runner}, interpreted on ${label}`).toEqual(shifted(outcome(run(p, input)), offset))
+    }
+    for (const backend of backends) {
+      const w = watched(p, backend)
+      expect(outcome(run(w.parser, whole, { offset })), `${runner}, ${backend} on ${label}`).toEqual(expected)
+      // Unless the root itself runs interpreted (`permutation`, say)
+      const kind = new State(whole).inputKind
+      const rootFallback = Registry.compiled(w.parser, kind, runner === "partial")!.fallbacks
+        .some((f) => f.name === "watched")
+      if (rootFallback || (runner === "partial" && options?.leafRoot)) continue
+      const rerun = !expected.ok || expected.value?._tag === "Incomplete"
+      expect(w.interpreted, `${runner}, ${backend} on ${label}: interpreted runs`).toBe(rerun ? 1 : 0)
+    }
+  }
+}
+
+describe("running from an offset", () => {
+  it("json (Token/Ascii)", () => {
+    for (const input of jsonInputs) sameAtOffset(Json.json, "[1, 2] ", input)
+  })
+
+  it("json-text with Text.utf8", () => {
+    const p = makeJson(Text.utf8)
+    const prefix = Encoding.utf8.encode("é😀{")
+    for (const input of jsonInputs) sameAtOffset(p, prefix, Encoding.utf8.encode(input))
+  })
+
+  it("combinators", () => {
+    for (const [name, g] of grammars) {
+      const positions = name === "taken and spans" || name === "eof, location, rest"
+      for (const input of allStrings(alphabet, 2)) sameAtOffset(g, "ab\n", input, { positions, leafRoot: true })
+    }
+  })
+
+  it.each(backends)("takes the compiled path with the %s backend, in complete and partial mode", (backend) => {
+    const token = Parser.preceded(Ascii.multispace0, Parser.alt(Ascii.alpha1, Ascii.digit1, Token.literal("=")))
+    const w = watched(token, backend)
+    const buffer = "let x = 10;"
+    // A lexer loop: one token at a time, in partial mode, until the buffer runs out
+    const tokens: Array<string> = []
+    let offset = 0
+    for (;;) {
+      const r = Parser.parsePartial(w.parser, buffer, { offset })
+      if (Result.isFailure(r)) break
+      if (r.success._tag === "Incomplete") break
+      tokens.push(r.success.value)
+      offset = r.success.offset
+    }
+    expect(tokens).toEqual(["let", "x", "=", "10"])
+    expect(offset).toBe(10)
+    // Only the final failure (at ";") ran interpreted
+    expect(w.interpreted).toBe(1)
+    w.interpreted = 0
+    expect(Parser.parsePartial(w.parser, "let x", { offset: 3 }))
+      .toEqual(Result.succeed({ _tag: "Incomplete", needed: Option.some(1) }))
+    expect(w.interpreted).toBe(1)
+    w.interpreted = 0
+    expect(Parser.parse(w.parser, buffer.slice(0, 10), { offset: 7 })).toEqual(Result.succeed("10"))
+    expect(Parser.parsePeek(w.parser, buffer, { offset: 3 })).toEqual(Result.succeed([" = 10;", "x"]))
+    expect(Parser.parseSync(w.parser, "let x", { offset: 3 })).toBe("x")
+    expect(w.interpreted).toBe(0)
+    expect(Registry.compiled(w.parser, 0, false)!.backend).toBe(backend === "auto" ? "jit" : "closure")
+    expect(Registry.compiled(w.parser, 0, true)!.backend).toBe(backend === "auto" ? "jit" : "closure")
+  })
+
+  it("reports offsets, lines and columns in the whole input", () => {
+    const p = Parser.compile(Parser.terminated(Ascii.decInt, Token.literal(";")))
+    const r = Parser.parse(p, "1;\n2;\n3?", { offset: 6 })
+    expect(Result.isFailure(r) && r.failure.offset).toBe(7)
+    expect(Result.isFailure(r) && r.failure.position).toMatchObject({ line: 3, column: 2 })
+    expect(Parser.parsePeek(Parser.span(Token.take(1)), "abc", { offset: 2 })).toEqual(Result.succeed(["", { start: 2, end: 3 }]))
+  })
+
+  it("rejects offsets outside the input", () => {
+    for (const offset of [-1, 4, 1.5, Number.NaN]) {
+      expect(() => Parser.parse(Token.rest, "abc", { offset })).toThrow(RangeError)
+    }
+    expect(Parser.parse(Token.rest, "abc", { offset: 3 })).toEqual(Result.succeed(""))
   })
 })
 

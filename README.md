@@ -120,6 +120,24 @@ const header = Parser.gen(function*() {
 })
 ```
 
+The generator body runs on every parse, so parsers created inside it, like
+`Token.literal(": ")` above, are rebuilt on every run. That is fine for most
+grammars, but on a hot path (a tokenizer, or a `gen` inside a `repeat`) build
+them once, outside the body, and `yield*` those:
+
+```ts
+const colon = Token.literal(": ")
+const name = Token.takeWhile(Ascii.isAlphanumeric, { min: 1 })
+
+const header = Parser.gen(function*() {
+  const n = yield* name
+  yield* colon
+  const value = yield* Ascii.tillLineEnding
+  yield* Ascii.lineEnding
+  return { name: n, value }
+})
+```
+
 **Records, tuples and Do notation**:
 
 ```ts
@@ -160,6 +178,26 @@ const upper = Parser.make<string>((state) => {
 })
 ```
 
+A driver that makes many small runs over one buffer, such as a tokenizer
+reading one token at a time, can run a parser's `step` on an
+`Input.State` itself and reuse that state between runs. `state.reset(offset,
+{ partial, context })` resets every per-run field, so afterwards the state
+behaves exactly like `new Input.State(state.input, { offset, partial,
+context })`, even after a run that failed or returned `Incomplete`:
+
+```ts
+const state = new Input.State(buffer)
+const token = (offset: number) => {
+  const value = lexeme.step(state.reset(offset, { partial: true }))
+  if (value !== Input.Fail) return { value, end: state.pos }
+  if (state.mode === "Incomplete") return undefined // wait for more input
+  throw ParseError.fromFailure(state.input, state.reportedFailure(), state.mode, state.encoding)
+}
+```
+
+`step` always runs the interpreter; only the runners use
+[compiled code](#compiled-parsers).
+
 ### Combinator overview
 
 | Category | Combinators |
@@ -187,13 +225,29 @@ times, `Parser.repeat(p, 3)` exactly three times, and
 |---|---|
 | `Parser.parse(p, input)` | `Result<A, ParseError<E>>`; the whole input must be consumed |
 | `Parser.parseSync(p, input)` | `A`; throws `ParseError<E>` |
-| `Parser.parsePeek(p, input)` | `Result<[remaining, A], ParseError<E>>`, nom-style |
-| `Parser.parsePartial(p, input)` | `Result<Done \| Incomplete, ParseError<E>>` for streaming input |
+| `Parser.parsePeek(p, input)` | `Result<[remaining, A], ParseError<E>>`, nom-style; the parser stopped at `input.length - remaining.length` |
+| `Parser.parsePartial(p, input)` | `Result<Done \| Incomplete, ParseError<E>>` for streaming input; `Done` has the `offset` it stopped at |
 | `Parser.parseEffect(p, input)` | `Effect<A, ParseError<E>, R>`; services come from the Effect context |
 | `Parser.parseRecoverable(p, input)` | `{ value: Option<A>, errors }` with error recovery enabled |
 | `ParserStream.parseMany(p)` | `Stream<I> => Stream<A>` (see [Streaming](#streaming-and-partial-input)) |
 | `ParserSchema.make(p)` | a `Schema` decoding strings with the parser |
 | `Syntax.parse(p, input)` | a `Syntax.Tree`: a syntax tree, the value and the errors (see [Syntax trees](#syntax-trees-and-incremental-parsing)) |
+
+Every `Parser` runner takes an `offset` option, to start parsing part-way
+into the input. The result is that of parsing `input.slice(offset)`, without
+the copy, and offsets (`Done`'s `offset`, spans, `ParseError` offsets, lines
+and columns) are positions in the whole input. A lexer can read one token at
+a time from a buffer, compiled parsers included:
+
+```ts
+const lexeme = Parser.compile(Parser.preceded(Ascii.multispace0, Ascii.alpha1))
+
+const buffer = "let x = 1"
+Parser.parsePartial(lexeme, buffer, { offset: 3 })
+// Result.succeed({ _tag: "Done", value: "x", offset: 5 })
+Parser.parsePeek(lexeme, buffer, { offset: 0 })
+// Result.succeed([" x = 1", "let"]): it stopped at 9 - 6 = 3
+```
 
 Parsers over bytes (`Uint8Array`) also accept an `ArrayBuffer`, a
 `SharedArrayBuffer`, a `DataView` or any other typed array, in the runners
@@ -230,8 +284,9 @@ time of `JSON.parse` depending on the document (see
 [the design notes](docs/DESIGN.md#results)).
 
 `compile` returns the same parser. The code is built on the first run, for
-each kind of input, and cached. `parse`, `parseSync`, `parsePeek` and
-`parseEffect` use it; partial input, `parseRecoverable` and tracing stay
+each kind of input, and cached. `parse`, `parseSync`, `parsePeek`,
+`parsePartial`, `parseEffect` and `ParserStream.parseAll` use it, from any
+`offset`; `ParserStream.parseMany`, `parseRecoverable` and tracing stay
 interpreted. With `{ backend: "auto" }` (the default) it generates
 JavaScript where `new Function` is allowed; `{ backend: "closure" }` never
 generates code, for pages with a Content Security Policy.
@@ -249,8 +304,20 @@ Some ways of writing a grammar compile to faster code than others:
   directly on a `separated` or `repeat` of pairs: compiled code assigns the
   properties as it parses, without the pairs and their array. A lambda that
   calls `Object.fromEntries` can't be recognized.
-- Prefer token sets (`"abc"`, `Token.range`, the `Ascii` predicates) to
-  arbitrary predicates: they compile to comparisons.
+- Prefer token sets (`"abc"`, `Token.range`, the `Ascii` and `Text`
+  predicates) to arbitrary predicates: they test code points without
+  allocating, and strings, ranges and the `Ascii` predicates compile to
+  comparisons. A `(c: string) => boolean` predicate receives each character
+  as a new string. For a class of your own, declare it over code points
+  with `Token.codePoints`, listing its ranges if you know them:
+
+  ```ts
+  const isNameStart = Token.codePoints(
+    "name start",
+    (c) => c === 0x5f || (c >= 0x61 && c <= 0x7a) || c >= 0xc0,
+    [[0x5f, 0x5f], [0x61, 0x7a], [0xc0, 0x10ffff]]
+  )
+  ```
 - Avoid `flatMap` on hot paths: the parser it returns runs interpreted.
 - `Ascii.float` and `Text.float` convert numbers as they match them.
 
@@ -528,7 +595,7 @@ top-level array; the tree is not rebalanced as Tree-sitter's is.
 | Module | Contents | winnow / nom equivalent |
 |---|---|---|
 | `Parser` | the type, combinators, runners | `Parser` trait, `combinator` / `combinator`, `branch`, `multi`, `sequence` |
-| `Token` | `any`, `literal`, `oneOf`, `noneOf`, `take`, `takeWhile`, `takeTill`, `takeUntil`, `rest`, `range` | `token` / `bytes` |
+| `Token` | `any`, `literal`, `oneOf`, `noneOf`, `take`, `takeWhile`, `takeTill`, `takeUntil`, `rest`, `range`, `codePoints` | `token` / `bytes` |
 | `Text` | Unicode parsers for any encoding: `string`, `utf8`, `utf16le`, `utf16be`, `latin1`, `make`; Unicode predicates | — |
 | `Encoding` | text encodings for `Text`, `sniff` | — |
 | `Ascii` | character classes, `lineEnding`, `decInt`, `decUint`, `hexUint`, `float`, `caseless`, `takeEscaped`, `escaped`, `Ascii.bytes.*` | `ascii` / `character`, `number` |
@@ -628,6 +695,7 @@ pnpm build   # emit dist/
 pnpm bench          # JSON example: interpreted vs compiled, per encoding (after a build)
 pnpm bench:native   # compiled JSON parser vs JSON.parse on several document shapes
 pnpm bench:stream   # parsing a fetch body as it downloads vs Response.json()
+pnpm bench:gen      # parsers built inside a Parser.gen body vs hoisted out of it
 pnpm bench:syntax   # building a syntax tree, and reparsing it after small edits
 ```
 

@@ -156,6 +156,56 @@ describe("Token", () => {
     })
   })
 
+  describe("codePoints", () => {
+    const seen: Array<unknown> = []
+    const isNameStart = Token.codePoints("name start", (c) => {
+      seen.push(c)
+      return c === 0x5f || (c >= 0x61 && c <= 0x7a) || c >= 0xc0
+    })
+    const isAstral = Token.codePoints("astral", (c) => c > 0xffff, [[0x10000, 0x10ffff]])
+
+    it("receives code points, for BMP and astral characters", () => {
+      seen.length = 0
+      expectSuccess(Token.takeWhile(isNameStart), "a_é😀", "a_é😀")
+      expect(seen).toEqual([0x61, 0x5f, 0xe9, 0x1f600])
+      expectSuccess(Token.oneOf(isAstral), "😀", "😀")
+      expectFailure(Token.oneOf(isAstral), "é")
+      expectSuccess(Token.noneOf(isAstral), "é", "é")
+      expectFailure(Token.noneOf(isAstral), "😀")
+    })
+
+    it("inside arrays, next to strings, ranges and string predicates", () => {
+      const name = Token.takeWhile([isNameStart, Token.range("0", "9"), (c: string) => c === "-"], { min: 1 })
+      expect(peek(name, "x-1😀 y")).toEqual(Result.succeed([" y", "x-1😀"]))
+      expect(peek(Token.takeTill([isAstral, " "]), "ab😀")).toEqual(Result.succeed(["😀", "ab"]))
+      expectFailure(name, " ")
+    })
+
+    it("names the set in errors", () => {
+      expect(expectFailure(Token.oneOf(isNameStart), "1").message).toContain("expected name start, found \"1\"")
+      expect(expectFailure(Token.oneOf([isAstral, "a"]), "1").message).toContain("expected astral or \"a\"")
+    })
+
+    it("bytes", () => {
+      expectSuccess(Token.takeWhile<Uint8Array>(isNameStart), bytes(0x61, 0xff), bytes(0x61, 0xff))
+      expectFailure(Token.oneOf<Uint8Array>(isNameStart), bytes(0x30))
+    })
+
+    it("leaves the given function unmarked", () => {
+      const f = (c: string) => c === "a"
+      Token.codePoints("a", f as unknown as (c: number) => boolean)
+      expectSuccess(Token.oneOf(f), "a", "a")
+    })
+  })
+
+  describe("string predicates", () => {
+    it("receive whole characters, astral ones included", () => {
+      const seen: Array<string> = []
+      expectSuccess(Token.takeWhile((c: string) => (seen.push(c), true)), "aé😀\ud800", "aé😀\ud800")
+      expect(seen).toEqual(["a", "é", "😀", "\ud800"])
+    })
+  })
+
   describe("takeUntil", () => {
     it("string", () => {
       expect(peek(Token.takeUntil("world"), "Hello world")).toEqual(Result.succeed(["world", "Hello "]))
@@ -185,6 +235,68 @@ describe("Token", () => {
       expectSuccess(Parser.preceded(Token.literal("a"), Token.rest), "abc", "bc")
       expect(peek(Token.restLen, "abc")).toEqual(Result.succeed(["abc", 3]))
       expectSuccess(Token.restOf<Uint8Array>(), bytes(1, 2), bytes(1, 2))
+    })
+  })
+
+  describe("built on every run", () => {
+    const message = (p: Parser.Parser<any, any, never, any>, input: any) => {
+      const r = Parser.parse(p, input)
+      return Result.isFailure(r) ? r.failure.message : r.success
+    }
+
+    it("parsers built inside Parser.gen behave like hoisted ones", () => {
+      const inline = Parser.gen(function*() {
+        const sign = yield* Parser.opt(Token.oneOf("+-"))
+        const digits = yield* Token.takeWhile("0123456789", { min: 1 })
+        yield* Token.literal(";")
+        return [sign, digits]
+      })
+      const sign = Parser.opt(Token.oneOf("+-"))
+      const digits = Token.takeWhile("0123456789", { min: 1 })
+      const semi = Token.literal(";")
+      const reference = Parser.map(Parser.seq(sign, digits, semi), ([s, d]) => [s, d])
+      for (let i = 0; i < 3; i++) {
+        for (const input of ["-12;", "12;", "+;", "12,", "x"]) {
+          expect(message(inline, input)).toEqual(message(reference, input))
+        }
+      }
+      expect(message(inline, "12,")).toMatch(/expected ";", found ","$/)
+    })
+
+    it("describes literals and sets the same way each time", () => {
+      for (let i = 0; i < 2; i++) {
+        expect(String(Token.literal("a\"\n"))).toBe("Parser(\"a\\\"\\n\")")
+        expect(String(Token.literal(bytes(0x47, 0x0a)))).toBe("Parser(b\"G\\n\")")
+        expect(String(Token.literal(["a", 1]))).toBe("Parser([\"a\", 1])")
+        expect(String(Token.oneOf("+-"))).toBe("Parser(one of \"+-\")")
+        expect(String(Token.noneOf("x"))).toBe("Parser(anything but \"x\")")
+        expect(message(Token.takeUntil("a\"b"), "xyz")).toMatch(/expected "a\\"b", found end of input$/)
+      }
+    })
+
+    it("returns a new parser each time", () => {
+      expect(Token.literal("x")).not.toBe(Token.literal("x"))
+      expect(Token.oneOf("xy")).not.toBe(Token.oneOf("xy"))
+    })
+
+    it("shares nothing that changes behaviour across input kinds", () => {
+      const p = Token.oneOf("ab")
+      expectSuccess(p, "b", "b")
+      expectSuccess(Token.oneOf<Uint8Array>("ab"), bytes(0x61), 0x61)
+      expectSuccess(Token.literal("é"), "é", "é")
+      expectSuccess(Parser.preceded(Token.literal("é"), Token.rest), new TextEncoder().encode("éx") as any, bytes(0x78) as any)
+    })
+
+    it("stays correct with many distinct literals and sets", () => {
+      const first = Token.takeWhile("ab")
+      for (let i = 0; i < 3000; i++) {
+        const s = `k${i}`
+        expectSuccess(Token.literal(s), s, s)
+        expect(String(Token.literal(s))).toBe(`Parser("${s}")`)
+        expect(peek(Token.takeWhile(s), `${s}${s}!`)).toEqual(Result.succeed(["!", `${s}${s}`]))
+        expect(String(Token.oneOf(s))).toBe(`Parser(one of "${s}")`)
+      }
+      expect(peek(first, "abbac")).toEqual(Result.succeed(["c", "abba"]))
     })
   })
 })

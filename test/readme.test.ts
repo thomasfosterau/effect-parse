@@ -1,6 +1,6 @@
 import { Context, Data, Effect, Option, Result, Stream } from "effect"
 import { expect, it } from "vitest"
-import { Ascii, Encoding, Parser, ParserStream, Syntax, Text, Token } from "../src/index.js"
+import { Ascii, Encoding, Input, Parser, ParseError, ParserStream, Syntax, Text, Token } from "../src/index.js"
 
 it("README examples behave as documented", () => {
   const point = Parser.gen(function*() {
@@ -21,6 +21,10 @@ it("README examples behave as documented", () => {
   ].join("\n"))
 
   expect(Parser.parsePartial(Ascii.digit1, "123")).toEqual(Result.succeed({ _tag: "Incomplete", needed: Option.some(1) }))
+
+  const lexeme = Parser.compile(Parser.preceded(Ascii.multispace0, Ascii.alpha1))
+  expect(Parser.parsePartial(lexeme, "let x = 1", { offset: 3 })).toEqual(Result.succeed({ _tag: "Done", value: "x", offset: 5 }))
+  expect(Parser.parsePeek(lexeme, "let x = 1", { offset: 0 })).toEqual(Result.succeed([" x = 1", "let"]))
 
   class Radix extends Context.Service<Radix, number>()("Radix") {}
   const number = Parser.service(Radix).pipe(
@@ -92,6 +96,55 @@ it("Text and Encoding doc examples behave as documented", () => {
 
   expect(Encoding.sniff(new Uint8Array([0xff, 0xfe, 0x41, 0x00]))).toEqual(Option.some(Encoding.utf16le))
   expect(Text.utf8.encoding).toBe(Encoding.utf8)
+
+  const isNameStart = Token.codePoints(
+    "name start",
+    (c) => c === 0x5f || (c >= 0x61 && c <= 0x7a) || c >= 0xc0,
+    [[0x5f, 0x5f], [0x61, 0x7a], [0xc0, 0x10ffff]]
+  )
+  expect(Parser.parse(Parser.compile(Token.takeWhile(isNameStart)), "_aé😀")).toEqual(Result.succeed("_aé😀"))
+})
+
+it("README: reusing a state for one run per token", () => {
+  const buffer = "12 abc 34"
+  const lexeme = Parser.terminated(Parser.alt(Ascii.digit1, Ascii.alpha1), Token.literal(" "))
+  const state = new Input.State(buffer)
+  const token = (offset: number) => {
+    const value = lexeme.step(state.reset(offset, { partial: true }))
+    if (value !== Input.Fail) return { value, end: state.pos }
+    if (state.mode === "Incomplete") return undefined // wait for more input
+    throw ParseError.fromFailure(state.input, state.reportedFailure(), state.mode, state.encoding)
+  }
+  expect(token(0)).toEqual({ value: "12", end: 3 })
+  expect(token(3)).toEqual({ value: "abc", end: 7 })
+  expect(token(7)).toBeUndefined()
+  expect(() => token(2)).toThrow("expected digit or letter")
+  expect(token(0)).toEqual({ value: "12", end: 3 })
+})
+
+it("README hoisted generator example behaves like the inline one", () => {
+  const inline = Parser.gen(function*() {
+    const name = yield* Token.takeWhile(Ascii.isAlphanumeric, { min: 1 })
+    yield* Token.literal(": ")
+    const value = yield* Ascii.tillLineEnding
+    yield* Ascii.lineEnding
+    return { name, value }
+  })
+
+  const colon = Token.literal(": ")
+  const name = Token.takeWhile(Ascii.isAlphanumeric, { min: 1 })
+  const header = Parser.gen(function*() {
+    const n = yield* name
+    yield* colon
+    const value = yield* Ascii.tillLineEnding
+    yield* Ascii.lineEnding
+    return { name: n, value }
+  })
+
+  expect(Parser.parse(header, "Host: example.com\r\n")).toEqual(Result.succeed({ name: "Host", value: "example.com" }))
+  for (const input of ["Host: example.com\n", "Host example.com\n", ": x\n"]) {
+    expect(Parser.parse(header, input)).toEqual(Parser.parse(inline, input))
+  }
 })
 
 it("Syntax examples behave as documented", () => {

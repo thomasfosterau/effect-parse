@@ -166,7 +166,10 @@ single-unit code points: below 0xD800 for strings, below 0x80 for UTF-8 and
 expression property escapes) cache their answers for the BMP in a lazily
 allocated table. They are marked as *code-point predicates*, so `Token` and
 `Text` call them with numbers instead of allocating a string per character.
-This also applies to the `Ascii` predicates.
+This also applies to the `Ascii` predicates, and to predicates declared with
+`Token.codePoints`. Other predicates receive strings, made with
+`String.fromCharCode` below U+10000 (several times cheaper than
+`String.fromCodePoint`, which only astral characters need).
 
 **Strictness.** Text parsers never match malformed input: invalid UTF-8,
 overlong forms, surrogates encoded in UTF-8, and unpaired UTF-16
@@ -200,6 +203,13 @@ branches fail at the same offset, their `expected` sets are combined. That
 gives messages like `expected one of "true", "false", "null"` without any
 annotation, which is better than both nom and winnow out of the box (each
 keeps only one branch's error).
+
+When the final failure is a plain syntax error, the runner reports the
+*furthest* recoverable failure instead if it lies further into the input,
+including one swallowed by backtracking (a trailing separator followed by an
+invalid element). Two rules keep it honest: `cut` keeps only the failures
+recorded after the commit, and a lookahead that succeeds forgets the failures
+recorded inside it (see section 5).
 
 `Parser.expected(desc)` replaces the expected set when a parser fails without
 consuming input (Parsec's `<?>`). `Parser.context(label)` adds a context
@@ -258,6 +268,13 @@ expected value
   failing, and *furthest failure*. The furthest heuristic may report a
   deeper failure from an abandoned branch instead of a shallower final one.
   It never overrides a failure that carries a user `cause` or message.
+  A committed (`cut`) failure is reported where it happened, as winnow does
+  for `cut_err`: only failures recorded inside the `cut` parser can outrank
+  it, not ones from branches or lookaheads tried before the commit. Failures
+  inside a lookahead that succeeded (`peek`, and `not` either way) never
+  count, because they are about input the parser did not consume. Failures
+  inside a successful `opt` or a repetition's last attempt do count; they are
+  what makes the heuristic useful.
 - **`resumeAfter` / `retryAfter`** run the recovery parser from the position
   where the failing parser *started*, not from where it failed.
 - **`ParserStream.parseMany` error offsets** are relative to the buffer of
@@ -320,7 +337,8 @@ Token nodes have an `encoding` field: `undefined` for `Token`/`Ascii`
 (code points of a string with lenient surrogates, bytes, or array
 elements), or the `Encoding` of a `Text` parser. Token sets are stored as
 the user wrote them; the built-in `Ascii` predicates are annotated with
-their code point ranges so they compile to comparisons.
+their code point ranges so they compile to comparisons, as are
+`Token.codePoints` predicates given ranges.
 
 Describing a grammar costs one small object per combinator call and nothing
 while parsing, so phase 1 changes no behaviour and no timings.
@@ -367,10 +385,17 @@ add nothing: it too has to fall back when `new Function` is blocked.
 
 ### When the compiled code runs
 
-The runners use compiled code only for complete input without a tracer:
-`parse`, `parseSync`, `parsePeek`, `parseEffect`. `parsePartial`,
-`ParserStream`, `parseRecoverable` and any run with the `trace` option stay
-interpreted. Within those runners `Trace` is an identity, `ResumeAfter` is
+The runners use compiled code whenever there is no tracer and recovery is
+off: `parse`, `parseSync`, `parsePeek` and `parseEffect` run the plain
+build, and `parsePartial` and `ParserStream.parseAll` the resumable build
+(below), which handles partial input. `ParserStream.parseMany`,
+`parseRecoverable` and any run with the `trace` option stay interpreted.
+Every runner takes an `offset` and starts the `State` there, so a driver
+that reads one token at a time from a buffer (a lexer) runs compiled code
+without slicing the input: there is still no separate runner or parser
+type, and an option keeps the result types the ones callers already
+handle (`Done` reports where `parsePartial` stopped; `parsePeek`'s
+remaining input, where it did). Within those runners `Trace` is an identity, `ResumeAfter` is
 `map(Option.some)` and `RetryAfter` is an identity (recovery is inactive),
 so they compile for free. `Service` and `Provide` read and write
 `state.context` and fall back to their steps.

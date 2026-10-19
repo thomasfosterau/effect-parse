@@ -8,7 +8,8 @@
  * failure.
  *
  * Most users never touch `State` directly. It is exposed for writing custom
- * low-level parsers with `Parser.make`.
+ * low-level parsers with `Parser.make`, and for drivers that run a parser's
+ * `step` many times over one input, reusing a state with {@link State.reset}.
  *
  * @since 0.1.0
  */
@@ -159,6 +160,9 @@ export class Failure {
 
 const empty: ReadonlyArray<string> = []
 
+/** The failure a {@link State} starts with, before any step has failed. */
+const initialFailure = /*#__PURE__*/ new Failure(0, "Fail", empty, empty, false, undefined, undefined, 0)
+
 /** @internal */
 export const emptyStrings = empty
 
@@ -218,7 +222,9 @@ export class State<I extends Input = Input> {
    * were later swallowed by backtracking (for example a trailing separator
    * followed by an invalid element). It is reported instead of the final
    * failure when it lies further into the input. This is the classic PEG
-   * "farthest failure" heuristic.
+   * "farthest failure" heuristic. `Parser.cut` keeps only the failures
+   * recorded inside it when it commits, and `Parser.peek` and `Parser.not`
+   * forget the failures of a lookahead that succeeded.
    */
   deepest: Failure | undefined = undefined
   /** When defined, `Parser.resumeAfter`/`retryAfter` record failures here. */
@@ -258,7 +264,56 @@ export class State<I extends Input = Input> {
     this.partial = options?.partial ?? false
     this.context = options?.context ?? Context.empty()
     this.inputKind = typeof input === "string" ? 0 : input instanceof Uint8Array ? 1 : 2
-    this.failure = new Failure(0, "Fail", empty, empty, false, undefined, undefined, 0)
+    this.failure = initialFailure
+  }
+
+  /**
+   * Prepares the state for another run over the same input, starting at
+   * `offset`: afterwards it behaves exactly like
+   * `new State(state.input, { ...options, offset })`, without allocating a
+   * new state.
+   *
+   * Every per-run field is reset: the cursor and end, the latest failure,
+   * hints and furthest failure, recorded recoveries, the tracer and tracing
+   * depth, the recorded encoding and streaming checkpoints. Like the
+   * constructor, `partial` defaults to `false` and `context` to the empty
+   * context, so pass them again on every reset.
+   *
+   * Use it to run many small parses over one buffer, for example one per
+   * token, with `parser.step`. A state can be reused after any run,
+   * including one that failed, returned `Incomplete` or threw.
+   *
+   * @example
+   * ```ts
+   * import { Ascii, Input } from "@thomasfosterau/effect-parse"
+   *
+   * const state = new Input.State("12 34")
+   * Ascii.decUint.step(state) // 12
+   * state.reset(3)
+   * Ascii.decUint.step(state) // 34
+   * ```
+   *
+   * @since 0.2.0
+   */
+  reset(offset: number = 0, options?: {
+    readonly partial?: boolean | undefined
+    readonly context?: Context.Context<never> | undefined
+  }): this {
+    this.pos = offset
+    this.end = this.input.length
+    this.partial = options?.partial ?? false
+    this.context = options?.context ?? Context.empty()
+    this.mode = "Backtrack"
+    this.failure = initialFailure
+    this.hintOffset = -1
+    this.hintExpected = empty
+    this.deepest = undefined
+    this.recovered = undefined
+    this.tracer = undefined
+    this.depth = 0
+    this.encoding = undefined
+    this.resume = undefined
+    return this
   }
 
   /**

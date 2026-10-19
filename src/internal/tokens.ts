@@ -1,4 +1,5 @@
 import type { Input, State } from "../Input.js"
+import { charOf } from "./text.js"
 
 /** A compiled token set. */
 export interface Matcher {
@@ -133,14 +134,15 @@ export const codePointPredicate = <F extends (c: never) => boolean>(
 
 /**
  * Compiles a token set. Predicates for string inputs receive the token as a
- * string, so they are wrapped here.
+ * string, so they are wrapped here; `charOf` avoids `String.fromCodePoint`,
+ * which is several times slower, for the Basic Multilingual Plane.
  */
 export const compile = (set: unknown, kind: "string" | "code" = "code"): Matcher => {
   const description = describeSet(set)
   let code: (code: number) => boolean
   if (typeof set === "function" && kind === "string" && !(CodePointPredicate in set)) {
     const pred = set as (c: string) => boolean
-    code = (x) => pred(String.fromCodePoint(x))
+    code = (x) => pred(charOf(x))
   } else {
     code = compileCodeSafe(set, kind)
   }
@@ -173,7 +175,40 @@ export interface AnyMatcher {
   readonly description: string
 }
 
-export const compileAny = (set: unknown): AnyMatcher => {
+/**
+ * A small cache keyed by value, for the parts of a parser that are costly to
+ * build and depend only on a string (compiled sets, descriptions). Parsers
+ * built inside `Parser.gen` bodies are rebuilt on every run, usually from the
+ * same few strings. Dynamic strings could grow it without bound, so it is
+ * cleared when full.
+ */
+const cached = <A>(cache: Map<string, A>, key: string, build: (key: string) => A): A => {
+  let a = cache.get(key)
+  if (a === undefined) {
+    if (cache.size >= 1024) cache.clear()
+    a = build(key)
+    cache.set(key, a)
+  }
+  return a
+}
+
+const literalDescriptions = /*#__PURE__*/ new Map<string, string>()
+
+/** Describes a literal for error messages: `"abc"`, `b"abc"` or `["a", 1]`. */
+export const describeLiteral = (lit: Input): string =>
+  typeof lit === "string"
+    ? cached(literalDescriptions, lit, describeChar)
+    : lit instanceof Uint8Array
+    ? describeBytes(lit)
+    : `[${lit.map((t) => JSON.stringify(t)).join(", ")}]`
+
+const stringMatchers = /*#__PURE__*/ new Map<string, AnyMatcher>()
+
+export const compileAny = (set: unknown): AnyMatcher =>
+  // Matchers for strings are pure functions of the string, so they're shared
+  typeof set === "string" ? cached(stringMatchers, set, compileAnyImpl) : compileAnyImpl(set)
+
+const compileAnyImpl = (set: unknown): AnyMatcher => {
   const forCode = compile(set, "code")
   const needsString = typeof set === "function" || Array.isArray(set)
   return {
