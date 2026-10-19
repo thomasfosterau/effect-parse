@@ -92,6 +92,13 @@ it("Text and Encoding doc examples behave as documented", () => {
 
   expect(Encoding.sniff(new Uint8Array([0xff, 0xfe, 0x41, 0x00]))).toEqual(Option.some(Encoding.utf16le))
   expect(Text.utf8.encoding).toBe(Encoding.utf8)
+
+  const isNameStart = Token.codePoints(
+    "name start",
+    (c) => c === 0x5f || (c >= 0x61 && c <= 0x7a) || c >= 0xc0,
+    [[0x5f, 0x5f], [0x61, 0x7a], [0xc0, 0x10ffff]]
+  )
+  expect(Parser.parse(Parser.compile(Token.takeWhile(isNameStart)), "_aé😀")).toEqual(Result.succeed("_aé😀"))
 })
 
 it("README: reusing a state for one run per token", () => {

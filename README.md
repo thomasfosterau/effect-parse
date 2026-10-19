@@ -267,8 +267,20 @@ Some ways of writing a grammar compile to faster code than others:
   directly on a `separated` or `repeat` of pairs: compiled code assigns the
   properties as it parses, without the pairs and their array. A lambda that
   calls `Object.fromEntries` can't be recognized.
-- Prefer token sets (`"abc"`, `Token.range`, the `Ascii` predicates) to
-  arbitrary predicates: they compile to comparisons.
+- Prefer token sets (`"abc"`, `Token.range`, the `Ascii` and `Text`
+  predicates) to arbitrary predicates: they test code points without
+  allocating, and strings, ranges and the `Ascii` predicates compile to
+  comparisons. A `(c: string) => boolean` predicate receives each character
+  as a new string. For a class of your own, declare it over code points
+  with `Token.codePoints`, listing its ranges if you know them:
+
+  ```ts
+  const isNameStart = Token.codePoints(
+    "name start",
+    (c) => c === 0x5f || (c >= 0x61 && c <= 0x7a) || c >= 0xc0,
+    [[0x5f, 0x5f], [0x61, 0x7a], [0xc0, 0x10ffff]]
+  )
+  ```
 - Avoid `flatMap` on hot paths: the parser it returns runs interpreted.
 - `Ascii.float` and `Text.float` convert numbers as they match them.
 
@@ -468,7 +480,7 @@ first.
 | Module | Contents | winnow / nom equivalent |
 |---|---|---|
 | `Parser` | the type, combinators, runners | `Parser` trait, `combinator` / `combinator`, `branch`, `multi`, `sequence` |
-| `Token` | `any`, `literal`, `oneOf`, `noneOf`, `take`, `takeWhile`, `takeTill`, `takeUntil`, `rest`, `range` | `token` / `bytes` |
+| `Token` | `any`, `literal`, `oneOf`, `noneOf`, `take`, `takeWhile`, `takeTill`, `takeUntil`, `rest`, `range`, `codePoints` | `token` / `bytes` |
 | `Text` | Unicode parsers for any encoding: `string`, `utf8`, `utf16le`, `utf16be`, `latin1`, `make`; Unicode predicates | — |
 | `Encoding` | text encodings for `Text`, `sniff` | — |
 | `Ascii` | character classes, `lineEnding`, `decInt`, `decUint`, `hexUint`, `float`, `caseless`, `takeEscaped`, `escaped`, `Ascii.bytes.*` | `ascii` / `character`, `number` |

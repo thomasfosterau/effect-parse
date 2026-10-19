@@ -166,7 +166,10 @@ single-unit code points: below 0xD800 for strings, below 0x80 for UTF-8 and
 expression property escapes) cache their answers for the BMP in a lazily
 allocated table. They are marked as *code-point predicates*, so `Token` and
 `Text` call them with numbers instead of allocating a string per character.
-This also applies to the `Ascii` predicates.
+This also applies to the `Ascii` predicates, and to predicates declared with
+`Token.codePoints`. Other predicates receive strings, made with
+`String.fromCharCode` below U+10000 (several times cheaper than
+`String.fromCodePoint`, which only astral characters need).
 
 **Strictness.** Text parsers never match malformed input: invalid UTF-8,
 overlong forms, surrogates encoded in UTF-8, and unpaired UTF-16
@@ -333,7 +336,8 @@ Token nodes have an `encoding` field: `undefined` for `Token`/`Ascii`
 (code points of a string with lenient surrogates, bytes, or array
 elements), or the `Encoding` of a `Text` parser. Token sets are stored as
 the user wrote them; the built-in `Ascii` predicates are annotated with
-their code point ranges so they compile to comparisons.
+their code point ranges so they compile to comparisons, as are
+`Token.codePoints` predicates given ranges.
 
 Describing a grammar costs one small object per combinator call and nothing
 while parsing, so phase 1 changes no behaviour and no timings.
