@@ -169,6 +169,25 @@ describe.each(sets)("Text.%s", (_, T, enc) => {
   })
 })
 
+describe("Token.codePoints in Text parsers", () => {
+  const isNameStart = Token.codePoints("name start", (c) => c === 0x5f || (c >= 0x61 && c <= 0x7a) || c >= 0xc0)
+  const isAstral = Token.codePoints("astral", (c) => c > 0xffff, [[0x10000, 0x10ffff]])
+
+  it.each(sets)("%s", (_, T, encode) => {
+    const seen: Array<unknown> = []
+    const spy = Token.codePoints("spy", (c) => (seen.push(c), c !== 0x20))
+    expectSuccess(T.takeWhile(spy), encode("aé😀"), "aé😀")
+    expect(seen).toEqual([0x61, 0xe9, 0x1f600])
+    expect(peek(T.takeWhile([isNameStart, Token.range("0", "9")], { min: 1 }), encode("x1é😀 y")))
+      .toEqual(Result.succeed([encode(" y"), "x1é😀"]))
+    expectSuccess(T.oneOf(isAstral), encode("😀"), "😀")
+    expectFailure(T.oneOf(isAstral), encode("é"))
+    expectSuccess(T.noneOf([isAstral, "b"]), encode("é"), "é")
+    expectFailure(T.noneOf([isAstral, "b"]), encode("😀"))
+    expect(expectFailure(T.oneOf([isNameStart, "1"]), encode("2")).message).toContain("expected name start or \"1\"")
+  })
+})
+
 describe("Text over bytes", () => {
   it("rejects malformed UTF-8", () => {
     for (

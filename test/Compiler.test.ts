@@ -242,6 +242,10 @@ const b = Token.literal("b")
 const ab = Token.literal("ab")
 const digit = Token.oneOf(Token.range("0", "9"))
 
+// One predicate the compiler sees through (with ranges), one it must call
+const aOrAstral = Token.codePoints("a or astral", (c) => c === 0x61 || c > 0xffff, [[0x61, 0x61], [0x10000, 0x10ffff]])
+const digitOrSurrogate = Token.codePoints("digit or surrogate", (c) => (c >= 0x30 && c <= 0x39) || (c >= 0xd800 && c <= 0xdfff))
+
 const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, string>]> = [
   ["alt with pruning", Parser.alt(a, b, ab, Parser.succeed("none"))],
   ["alt of shared prefixes", Parser.alt(ab, a, Parser.seq(b, a))],
@@ -298,6 +302,8 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
   ["Token slices", Parser.seq(Token.takeWhile("ab", { min: 1, max: 2 }), Token.takeTill("0", { max: 3 }), Parser.opt(Token.takeUntil("0", { min: 1 })))],
   ["takeTill with surrogates", Parser.seq(Token.takeTill("0", { min: 2, max: 3 }), Token.rest)],
   ["takeWhile with a string predicate", Token.takeWhile((c: string) => c !== "b" && c < "😀")],
+  ["Token.codePoints with ranges", Parser.seq(Token.takeWhile([aOrAstral, "+"], { max: 3 }), Parser.opt(Token.oneOf(digitOrSurrogate)), Parser.opt(Token.noneOf([aOrAstral, "b"])))],
+  ["Token.codePoints without ranges", Parser.seq(Token.takeTill(digitOrSurrogate, { max: 2 }), Parser.opt(Token.oneOf([digitOrSurrogate, aOrAstral])))],
   ["takeUntil", Parser.seq(Token.takeUntil("ab"), Token.rest)],
   ["literal edge cases", Parser.seq(Token.literal(""), Parser.opt(Token.literal("a😀")), Parser.opt(Ascii.caseless("Ab")))],
   ["fromEntries of separated pairs", Parser.fromEntries(Parser.separated(Parser.separatedPair(Token.oneOf("ab"), Token.literal("+"), Parser.opt(digit)), Token.literal("\\")))],
@@ -344,7 +350,8 @@ describe("compiled combinators", () => {
     Parser.seq(Parser.opt(T.decInt), Parser.opt(T.float), Parser.opt(T.hexUint), T.multispace0),
     Parser.seq(T.escaped(T.takeTill("\\\""), "\\", Parser.alt(T.literal("n").pipe(Parser.as("\n")), T.literal("\\"))), Parser.opt(T.takeEscaped(T.alpha1, "\\", T.oneOf("an")))),
     Parser.dispatch(T.any, { a: Parser.succeed(1), é: T.alpha1, [x]: Parser.succeed(3) }, T.any),
-    Parser.seq(T.bom, Parser.alt(T.tillLineEnding, T.lineEnding))
+    Parser.seq(T.bom, Parser.alt(T.tillLineEnding, T.lineEnding)),
+    Parser.seq(T.takeWhile([aOrAstral, "+"], { max: 2 }), Parser.opt(T.oneOf(digitOrSurrogate)), Parser.opt(T.noneOf([digitOrSurrogate, "b"])))
   ]
   const textAlphabet = ["a", "b", "0", "é", "😀", "\\", "\"", "+", "\n", "\r", "\ufeff", "Ä"]
 

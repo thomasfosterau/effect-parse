@@ -1,4 +1,5 @@
 import type { Input, State } from "../Input.js"
+import { charOf } from "./text.js"
 
 /** A compiled token set. */
 export interface Matcher {
@@ -133,14 +134,15 @@ export const codePointPredicate = <F extends (c: never) => boolean>(
 
 /**
  * Compiles a token set. Predicates for string inputs receive the token as a
- * string, so they are wrapped here.
+ * string, so they are wrapped here; `charOf` avoids `String.fromCodePoint`,
+ * which is several times slower, for the Basic Multilingual Plane.
  */
 export const compile = (set: unknown, kind: "string" | "code" = "code"): Matcher => {
   const description = describeSet(set)
   let code: (code: number) => boolean
   if (typeof set === "function" && kind === "string" && !(CodePointPredicate in set)) {
     const pred = set as (c: string) => boolean
-    code = (x) => pred(String.fromCodePoint(x))
+    code = (x) => pred(charOf(x))
   } else {
     code = compileCodeSafe(set, kind)
   }

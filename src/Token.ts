@@ -23,6 +23,7 @@
 import type { Input, Slice, State, Token } from "./Input.js"
 import {
   advance,
+  codePointPredicate,
   compileAny,
   countTokens,
   describeBytes,
@@ -67,9 +68,65 @@ export interface TokenRange<T> {
  */
 export const range = <T extends string | number>(from: T, to: T): TokenRange<T> => ({ _tag: "TokenRange", from, to })
 
+declare const CodePointsBrand: unique symbol
+
+/**
+ * A predicate over code points, made with {@link codePoints}. In a token set
+ * it receives each character as a number, so testing a character allocates
+ * nothing.
+ *
+ * @since 0.2.0
+ * @category models
+ */
+export interface CodePoints {
+  (codePoint: number): boolean
+  readonly [CodePointsBrand]: true
+}
+
+/**
+ * Declares a character class as a predicate over code points, for token sets
+ * on string, `Text` and byte inputs. `name` describes it in error messages.
+ *
+ * A plain `(char: string) => boolean` predicate receives each character as a
+ * string, which costs an allocation per character tested; a `codePoints`
+ * predicate receives the code point itself (a byte, on byte input).
+ *
+ * `ranges` optionally lists the code points the predicate accepts, as
+ * inclusive `[from, to]` pairs. Compiled parsers then test the ranges
+ * instead of calling the predicate, so they must agree with it exactly.
+ *
+ * @example
+ * ```ts
+ * import { Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * const isNameStart = Token.codePoints(
+ *   "name start",
+ *   (c) => (c >= 0x61 && c <= 0x7a) || c === 0x5f || c >= 0xc0,
+ *   [[0x5f, 0x5f], [0x61, 0x7a], [0xc0, 0x10ffff]]
+ * )
+ * const name = Token.takeWhile([isNameStart, Token.range("0", "9")], { min: 1 })
+ * ```
+ *
+ * @since 0.2.0
+ * @category constructors
+ */
+export const codePoints = (
+  name: string,
+  predicate: (codePoint: number) => boolean,
+  ranges?: ReadonlyArray<readonly [number, number]>
+): CodePoints =>
+  // Wrapped, so the caller's function is left unmarked
+  codePointPredicate(
+    name,
+    (c: number): boolean => predicate(c),
+    ranges?.map(([from, to]) => [from, to] as const)
+  ) as unknown as CodePoints
+
 /**
  * A set of string tokens: the characters of a string, a range, a predicate,
- * or an array of these.
+ * or an array of these. Strings, ranges, {@link codePoints} predicates and
+ * the `Ascii` and `Text` predicates test characters without allocating; a
+ * `(char: string) => boolean` predicate allocates a string per character.
  *
  * @since 0.1.0
  * @category models
@@ -77,6 +134,7 @@ export const range = <T extends string | number>(from: T, to: T): TokenRange<T> 
 export type StringTokenSet =
   | string
   | TokenRange<string>
+  | CodePoints
   | ((char: string) => boolean)
   | ReadonlyArray<StringTokenSet>
 
@@ -92,6 +150,7 @@ export type ByteTokenSet =
   | string
   | Uint8Array
   | TokenRange<number>
+  | CodePoints
   | ((byte: number) => boolean)
   | ReadonlyArray<ByteTokenSet>
 
