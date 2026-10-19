@@ -159,6 +159,26 @@ const upper = Parser.make<string>((state) => {
 })
 ```
 
+A driver that makes many small runs over one buffer, such as a tokenizer
+reading one token at a time, can run a parser's `step` on an
+`Input.State` itself and reuse that state between runs. `state.reset(offset,
+{ partial, context })` resets every per-run field, so afterwards the state
+behaves exactly like `new Input.State(state.input, { offset, partial,
+context })`, even after a run that failed or returned `Incomplete`:
+
+```ts
+const state = new Input.State(buffer)
+const token = (offset: number) => {
+  const value = lexeme.step(state.reset(offset, { partial: true }))
+  if (value !== Input.Fail) return { value, end: state.pos }
+  if (state.mode === "Incomplete") return undefined // wait for more input
+  throw ParseError.fromFailure(state.input, state.reportedFailure(), state.mode, state.encoding)
+}
+```
+
+`step` always runs the interpreter; only the runners use
+[compiled code](#compiled-parsers).
+
 ### Combinator overview
 
 | Category | Combinators |

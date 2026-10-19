@@ -1,6 +1,6 @@
 import { Context, Data, Effect, Option, Result, Stream } from "effect"
 import { expect, it } from "vitest"
-import { Ascii, Encoding, Parser, ParserStream, Text, Token } from "../src/index.js"
+import { Ascii, Encoding, Input, Parser, ParseError, ParserStream, Text, Token } from "../src/index.js"
 
 it("README examples behave as documented", () => {
   const point = Parser.gen(function*() {
@@ -92,4 +92,21 @@ it("Text and Encoding doc examples behave as documented", () => {
 
   expect(Encoding.sniff(new Uint8Array([0xff, 0xfe, 0x41, 0x00]))).toEqual(Option.some(Encoding.utf16le))
   expect(Text.utf8.encoding).toBe(Encoding.utf8)
+})
+
+it("README: reusing a state for one run per token", () => {
+  const buffer = "12 abc 34"
+  const lexeme = Parser.terminated(Parser.alt(Ascii.digit1, Ascii.alpha1), Token.literal(" "))
+  const state = new Input.State(buffer)
+  const token = (offset: number) => {
+    const value = lexeme.step(state.reset(offset, { partial: true }))
+    if (value !== Input.Fail) return { value, end: state.pos }
+    if (state.mode === "Incomplete") return undefined // wait for more input
+    throw ParseError.fromFailure(state.input, state.reportedFailure(), state.mode, state.encoding)
+  }
+  expect(token(0)).toEqual({ value: "12", end: 3 })
+  expect(token(3)).toEqual({ value: "abc", end: 7 })
+  expect(token(7)).toBeUndefined()
+  expect(() => token(2)).toThrow("expected digit or letter")
+  expect(token(0)).toEqual({ value: "12", end: 3 })
 })

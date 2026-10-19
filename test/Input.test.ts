@@ -1,6 +1,6 @@
-import { Effect, Result, Stream } from "effect"
+import { Context, Effect, Result, Stream } from "effect"
 import { describe, expect, it } from "vitest"
-import { Ascii, Binary, Input, Parser, ParserStream, Text, Token } from "../src/index.js"
+import { Ascii, Binary, Input, Parser, ParseError, ParserStream, Text, Token } from "../src/index.js"
 
 const encode = (s: string) => new TextEncoder().encode(s)
 
@@ -72,5 +72,102 @@ describe("binary inputs", () => {
       .toEqual(["αβγ", "δ"])
     expect(Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(Parser.repeat(line)))))
       .toEqual(["αβγ", "δ"])
+  })
+})
+
+describe("State.reset", () => {
+  // Everything a driver can observe after a step
+  const observe = <I extends Input.Input>(state: Input.State<I>, step: (state: Input.State<I>) => unknown) => {
+    const a = step(state)
+    if (a !== Input.Fail) return { value: a, pos: state.pos }
+    const failure = state.reportedFailure()
+    return {
+      mode: state.mode,
+      failure,
+      message: ParseError.fromFailure(state.input, failure, state.mode, state.encoding).message
+    }
+  }
+
+  const word = Parser.alt(Ascii.decUint, Ascii.alpha1)
+  const list = Parser.delimited(
+    Token.literal("["),
+    Parser.separated(Ascii.decUint, Token.literal(",")),
+    Token.literal("]")
+  )
+  const cut = Parser.preceded(Token.literal("#"), Parser.cut(Ascii.decUint)).pipe(Parser.context("tag"))
+  const traced = Parser.trace(list, "list")
+
+  type Run = {
+    readonly parser: Parser.Parser<unknown, unknown, never, string>
+    readonly offset: number
+    readonly partial?: boolean
+  }
+
+  const input = "abc 123 [1,2,] #x [4,5] 99"
+  const runs: ReadonlyArray<Run> = [
+    { parser: word, offset: 0 },
+    { parser: list, offset: 8 }, // fails with a hint and a deeper swallowed failure
+    { parser: word, offset: 4 },
+    { parser: cut, offset: 15 }, // Cut, with a context label
+    { parser: list, offset: 18 },
+    { parser: word, offset: 24, partial: true }, // Incomplete: more digits may follow
+    { parser: word, offset: 24 },
+    { parser: list, offset: 3 },
+    { parser: traced, offset: 18 },
+    { parser: word, offset: 3, partial: true }
+  ]
+
+  it("a reused state gives the same results and errors as a fresh one", () => {
+    const reused = new Input.State(input)
+    for (const run of runs) {
+      const options = { partial: run.partial ?? false }
+      const fresh = observe(new Input.State(input, { ...options, offset: run.offset }), run.parser.step)
+      expect(observe(reused.reset(run.offset, options), run.parser.step)).toEqual(fresh)
+    }
+    // The runs above did fail, return Incomplete and succeed
+    const outcomes = runs.map((run) =>
+      observe(new Input.State(input, { partial: run.partial ?? false, offset: run.offset }), run.parser.step)
+    )
+    expect(outcomes.map((o) => "mode" in o ? o.mode : "Ok")).toEqual(
+      expect.arrayContaining(["Ok", "Backtrack", "Cut", "Incomplete"])
+    )
+  })
+
+  it("resets every per-run field", () => {
+    const bytes = encode("café ")
+    const state = new Input.State(bytes, { partial: true, offset: 6 })
+    // Leave the state as a run might: failed, mid-trace, recording, encoded,
+    // and with `end` changed by a step that threw
+    expect(Text.utf8.alpha1.step(state)).toBe(Input.Fail)
+    state.setHint(2, ["x"])
+    state.recovered = []
+    state.tracer = () => {}
+    state.depth = 3
+    state.resume = new Map()
+    state.end = 2
+    state.context = Context.add(Context.empty(), Context.Service<never, number>("n"), 1)
+    expect([state.mode, state.encoding]).toEqual(["Incomplete", Text.utf8.encoding])
+
+    state.reset(2)
+    const fresh = new Input.State(bytes, { offset: 2 })
+    for (const key of Object.keys(fresh) as Array<keyof Input.State>) {
+      expect([key, state[key]]).toEqual([key, fresh[key]])
+    }
+    expect(state.context).toBe(fresh.context)
+    expect(state.failure).toBe(fresh.failure)
+
+    const context = Context.empty()
+    expect(state.reset(0, { partial: true, context })).toBe(state)
+    expect([state.pos, state.partial, state.context]).toEqual([0, true, context])
+  })
+
+  it("returns the same results as the runners", () => {
+    const state = new Input.State(input)
+    for (const [offset, expected] of [[4, 123], [24, 99]] as const) {
+      expect(Ascii.decUint.step(state.reset(offset))).toBe(expected)
+      expect(Parser.parsePeek(Ascii.decUint, input.slice(offset))).toEqual(
+        Result.succeed([input.slice(state.pos), expected])
+      )
+    }
   })
 })
