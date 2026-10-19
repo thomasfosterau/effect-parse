@@ -265,7 +265,7 @@ export const double = Ascii.float
  * @since 0.1.0
  * @category number
  */
-export const recognizeFloat: Parser<string> = P.taken(Ascii.float)
+export const recognizeFloat: Parser<string> = /*#__PURE__*/ P.taken(Ascii.float)
 
 /**
  * nom's `hex_u32`.

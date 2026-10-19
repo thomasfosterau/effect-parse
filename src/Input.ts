@@ -109,7 +109,7 @@ export type Slice<I> = I extends string ? string
  * @since 0.1.0
  * @category failure
  */
-export const Fail: unique symbol = Symbol.for("effect-parse/Fail")
+export const Fail: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/Fail")
 
 /**
  * @since 0.1.0

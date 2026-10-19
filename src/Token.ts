@@ -140,7 +140,7 @@ const anyStep = (state: State<Input>): unknown => {
  * @since 0.1.0
  * @category tokens
  */
-export const any: Parser<string> = described(anyStep as any, "any", { _tag: "Any", encoding: undefined })
+export const any: Parser<string> = /*#__PURE__*/ described(anyStep as any, "any", { _tag: "Any", encoding: undefined })
 
 /**
  * Matches any single token of an input of type `I`.
@@ -379,7 +379,7 @@ export const takeUntil: {
  * @since 0.1.0
  * @category slices
  */
-export const rest: Parser<string> = described((state: State<any>) => {
+export const rest: Parser<string> = /*#__PURE__*/ described((state: State<any>) => {
   const start = state.pos
   state.pos = state.end
   return state.slice(start, state.end) as string
@@ -400,7 +400,7 @@ export const restOf = <I extends Input = string>(): Parser<Slice<NoInfer<I>>, ne
  * @since 0.1.0
  * @category slices
  */
-export const restLen: Parser<number, never, never, Input> = described((state) => state.end - state.pos, "restLen", {
+export const restLen: Parser<number, never, never, Input> = /*#__PURE__*/ described((state) => state.end - state.pos, "restLen", {
   _tag: "RestLen"
 })
 

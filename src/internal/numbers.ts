@@ -29,7 +29,7 @@ export const toFloat = (s: Input): number => {
  * compilers replace them by {@link scanFloatString} and
  * {@link scanFloatBytes} when the text is in decimal notation.
  */
-export const floatTexts = new WeakSet<object>()
+export const floatTexts = /*#__PURE__*/ new WeakSet<object>()
 
 /** Adds a parser to {@link floatTexts}. */
 export const floatText = <P extends object>(p: P): P => {
@@ -38,7 +38,7 @@ export const floatText = <P extends object>(p: P): P => {
 }
 
 /** The powers of ten that doubles represent exactly. */
-const exact = Array.from({ length: 23 }, (_, i) => Number(`1e${i}`))
+const exact = /*#__PURE__*/ Array.from({ length: 23 }, (_, i) => Number(`1e${i}`))
 
 /**
  * Where the latest scan ended, when it succeeded, and the furthest offset it

@@ -135,7 +135,7 @@ export type Tag = Node["_tag"]
 export type NodeOf<T extends Tag> = Extract<Node, { readonly _tag: T }>
 
 /** Where a parser's description is stored. */
-export const NodeId: unique symbol = Symbol.for("effect-parse/Parser/node")
+export const NodeId: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/Parser/node")
 
 /** The description of a parser: `Opaque` when it has none. */
 export const nodeOf = (p: ParserLike): Node => (p as any)[NodeId] ?? { _tag: "Opaque", step: p.step }

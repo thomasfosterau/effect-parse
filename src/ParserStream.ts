@@ -97,7 +97,7 @@ export const parseMany: {
     parser: Parser<A, E, R, I>,
     options?: ParseManyOptions<I>
   ): Stream.Stream<A, E0 | ParseError.ParseError<E>, R0 | R>
-} = dual((args) => Stream.isStream(args[0]), <I extends Chunkable, E0, R0, A, E, R>(
+} = /*#__PURE__*/ dual((args) => Stream.isStream(args[0]), <I extends Chunkable, E0, R0, A, E, R>(
   self: Stream.Stream<Source<I>, E0, R0>,
   parser: Parser<A, E, R, I>,
   options?: ParseManyOptions<I>
@@ -296,7 +296,7 @@ export const parseAll: {
     parser: Parser<A, E, R, I>,
     options?: ParseManyOptions<I>
   ): Effect.Effect<A, E0 | ParseError.ParseError<E>, R0 | R>
-} = dual((args) => Stream.isStream(args[0]), <I extends Chunkable, E0, R0, A, E, R>(
+} = /*#__PURE__*/ dual((args) => Stream.isStream(args[0]), <I extends Chunkable, E0, R0, A, E, R>(
   self: Stream.Stream<Source<I>, E0, R0>,
   parser: Parser<A, E, R, I>,
   options?: ParseManyOptions<I>
@@ -318,7 +318,7 @@ export const parseAll: {
  * @since 0.1.0
  * @category errors
  */
-export class ReadError extends Data.TaggedError("ReadError")<{ readonly cause: unknown }> {}
+export class ReadError extends /*#__PURE__*/ Data.TaggedError("ReadError")<{ readonly cause: unknown }> {}
 
 /**
  * Parses a web `ReadableStream` of bytes, such as the body of a `fetch`
@@ -349,7 +349,7 @@ export const parseReadable: {
     self: ReadableStream<BinaryInput>,
     parser: Parser<A, E, R, Uint8Array>
   ): Effect.Effect<A, ParseError.ParseError<E> | ReadError, R>
-} = dual(2, <A, E, R>(
+} = /*#__PURE__*/ dual(2, <A, E, R>(
   self: ReadableStream<BinaryInput>,
   parser: Parser<A, E, R, Uint8Array>
 ): Effect.Effect<A, ParseError.ParseError<E> | ReadError, R> =>
@@ -383,7 +383,7 @@ export const parseResponse: {
     parser: Parser<A, E, R, Uint8Array>
   ): (self: Response) => Effect.Effect<A, ParseError.ParseError<E> | ReadError, R>
   <A, E, R>(self: Response, parser: Parser<A, E, R, Uint8Array>): Effect.Effect<A, ParseError.ParseError<E> | ReadError, R>
-} = dual(2, <A, E, R>(
+} = /*#__PURE__*/ dual(2, <A, E, R>(
   self: Response,
   parser: Parser<A, E, R, Uint8Array>
 ): Effect.Effect<A, ParseError.ParseError<E> | ReadError, R> =>

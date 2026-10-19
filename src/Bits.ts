@@ -186,7 +186,7 @@ export const pattern = (pattern: number, count: number): Parser<number, never, n
  * @since 0.1.0
  * @category parsers
  */
-export const bool: Parser<boolean, never, never, BitInput> = make((state: State<any>) => {
+export const bool: Parser<boolean, never, never, BitInput> = /*#__PURE__*/ make((state: State<any>) => {
   if (state.pos >= state.end) return state.eoi("Bits", ["1 bit"], 1)
   return readBits(state, 1) === 1
 }, "bool")

@@ -78,7 +78,7 @@ export const TypeId: "~effect-parse/ParseError" = "~effect-parse/ParseError"
  * @since 0.1.0
  * @category models
  */
-export class ParseError<out E = never> extends Data.TaggedError("ParseError")<{
+export class ParseError<out E = never> extends /*#__PURE__*/ Data.TaggedError("ParseError")<{
   /** The input that was being parsed. */
   readonly input: Input
   /** The offset of the failure in the input. */
