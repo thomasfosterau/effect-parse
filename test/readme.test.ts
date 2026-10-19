@@ -22,6 +22,10 @@ it("README examples behave as documented", () => {
 
   expect(Parser.parsePartial(Ascii.digit1, "123")).toEqual(Result.succeed({ _tag: "Incomplete", needed: Option.some(1) }))
 
+  const lexeme = Parser.compile(Parser.preceded(Ascii.multispace0, Ascii.alpha1))
+  expect(Parser.parsePartial(lexeme, "let x = 1", { offset: 3 })).toEqual(Result.succeed({ _tag: "Done", value: "x", offset: 5 }))
+  expect(Parser.parsePeek(lexeme, "let x = 1", { offset: 0 })).toEqual(Result.succeed([" x = 1", "let"]))
+
   class Radix extends Context.Service<Radix, number>()("Radix") {}
   const number = Parser.service(Radix).pipe(
     Parser.flatMap((radix) => Ascii.alphanumeric1.pipe(Parser.map((s) => parseInt(s, radix))))

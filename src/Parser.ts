@@ -2396,9 +2396,9 @@ export interface CompileOptions {
 /**
  * Compiles a parser into fused, specialized code, and returns the same
  * parser. Grammars are written as usual; compilation only makes
- * {@link parse}, {@link parseSync}, {@link parsePeek} and
- * {@link parseEffect} faster. Compile the root of a grammar once, where it
- * is defined:
+ * {@link parse}, {@link parseSync}, {@link parsePeek}, {@link parsePartial}
+ * and {@link parseEffect} faster, from any `offset`. Compile the root of a
+ * grammar once, where it is defined:
  *
  * ```ts
  * import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
@@ -2414,7 +2414,7 @@ export interface CompileOptions {
  *
  * **Results and errors are unchanged.** Compiled code records no
  * diagnostics. When it fails, the parser runs again, interpreted, from the
- * start, so every `ParseError` (offset, expected, context, cause and
+ * same offset, so every `ParseError` (offset, expected, context, cause and
  * message) is exactly the one the interpreter reports.
  *
  * **Callbacks should be pure.** On an input that fails, the callbacks given
@@ -2424,10 +2424,11 @@ export interface CompileOptions {
  * nor those of a branch that is certain to fail, and token-set predicates
  * may be called once per character code and cached.
  *
- * Runs on partial input ({@link parsePartial}, `ParserStream`), with
- * {@link parseRecoverable} or with the `trace` option are always
- * interpreted. Parsers that can't be described, such as {@link make} and
- * {@link gen}, run interpreted inside compiled code.
+ * {@link parsePartial} and `ParserStream.parseAll` run a build that
+ * handles partial input. `ParserStream.parseMany`, {@link parseRecoverable}
+ * and runs with the `trace` option are always interpreted. Parsers that
+ * can't be described, such as {@link make} and {@link gen}, run interpreted
+ * inside compiled code.
  *
  * @since 0.1.0
  * @category compilation
@@ -2446,11 +2447,17 @@ const NotCompiled: unique symbol = /*#__PURE__*/ Symbol("NotCompiled")
 /**
  * Runs the compiled form of `self`, if it has one: returns its value, or
  * `Fail` when it failed (or, with `whole`, did not consume the whole
- * input), in which case the state must be thrown away.
+ * input), in which case the state must be thrown away. `resumable` selects
+ * the build that handles partial input.
  */
-const runCompiled = <I extends Input>(self: Parser.Any, state: State<I>, whole: boolean): unknown => {
+const runCompiled = <I extends Input>(
+  self: Parser.Any,
+  state: State<I>,
+  whole: boolean,
+  resumable = false
+): unknown => {
   if (state.tracer !== undefined || state.recovered !== undefined) return NotCompiled
-  const step = Compiler.stepFor(self, state)
+  const step = Compiler.stepFor(self, state, resumable)
   if (step === undefined) return NotCompiled
   const a = step(state)
   if (a === Fail || (whole && state.pos < state.end)) return Fail
@@ -2473,6 +2480,19 @@ export interface ParseOptions {
    * {@link consoleTracer}.
    */
   readonly trace?: boolean | ((event: TraceEvent) => void) | undefined
+  /**
+   * Where to start parsing (default `0`): in code units for strings, bytes
+   * for byte input and elements for arrays. The result is that of parsing
+   * `input.slice(offset)`, but without copying the input, and every offset
+   * (`parsePartial`'s `Done`, `location`, spans, `ParseError.offset` and its
+   * line and column) is a position in the whole input. This is what an
+   * incremental driver, such as a lexer reading one token at a time from a
+   * buffer, needs: compiled parsers run compiled from any offset.
+   *
+   * Throws a `RangeError` unless it is an integer from `0` to the input's
+   * length.
+   */
+  readonly offset?: number | undefined
 }
 
 /**
@@ -2490,7 +2510,11 @@ const makeState = <I extends Input>(
   options: (ParseOptions & { readonly context?: Context.Context<any> }) | undefined,
   partial: boolean
 ): State<I> => {
-  const state = new State(input, { partial, context: options?.context })
+  const offset = options?.offset
+  const state = new State(input, { partial, context: options?.context, offset })
+  if (offset !== undefined && !(Number.isInteger(offset) && offset >= 0 && offset <= state.end)) {
+    throw new RangeError(`Invalid offset ${offset} for an input of length ${state.end}`)
+  }
   const t = options?.trace
   if (t !== undefined && t !== false) state.tracer = t === true ? consoleTracer : t
   return state
@@ -2583,6 +2607,10 @@ export const parseSync: {
  * input along with the output, nom-style (winnow's `parse_peek`, nom's
  * `IResult`).
  *
+ * The parser ended at offset `input.length - remaining.length`, which is
+ * how a caller running from an `offset` (see {@link ParseOptions}) finds
+ * where to continue.
+ *
  * @since 0.1.0
  * @category running
  */
@@ -2633,7 +2661,14 @@ export type PartialResult<A> =
  * of failing or succeeding early.
  *
  * The parser does not have to consume the whole input; the returned
- * `offset` says how much was consumed.
+ * `offset` says where it stopped. It is a position in the whole input, so
+ * with the `offset` option (see {@link ParseOptions}) it is where the next
+ * parse starts.
+ *
+ * A parser built with {@link compile} runs compiled, with a build that
+ * handles partial input. When it fails or needs more input, it runs again
+ * interpreted, so `Incomplete`'s `needed` and every `ParseError` are the
+ * interpreter's.
  *
  * @example
  * ```ts
@@ -2664,7 +2699,13 @@ export const parsePartial: {
   input: I | Source<I>,
   options?: ParseOptions & { readonly context?: Context.Context<R> }
 ): Result.Result<PartialResult<A>, ParseError.ParseError<E>> => {
-  const state = makeState(input, options, true)
+  let state = makeState(input, options, true)
+  const compiled = runCompiled(self, state, false, true)
+  if (compiled !== NotCompiled && compiled !== Fail) {
+    return Result.succeed({ _tag: "Done", value: compiled as A, offset: state.pos })
+  }
+  // Re-run interpreted for `needed` and the diagnostics
+  if (compiled === Fail) state = makeState(input, options, true)
   const a = self.step(state)
   if (a !== Fail) return Result.succeed({ _tag: "Done", value: a, offset: state.pos })
   if (state.mode === "Incomplete") {

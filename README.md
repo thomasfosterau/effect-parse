@@ -186,12 +186,28 @@ times, `Parser.repeat(p, 3)` exactly three times, and
 |---|---|
 | `Parser.parse(p, input)` | `Result<A, ParseError<E>>`; the whole input must be consumed |
 | `Parser.parseSync(p, input)` | `A`; throws `ParseError<E>` |
-| `Parser.parsePeek(p, input)` | `Result<[remaining, A], ParseError<E>>`, nom-style |
-| `Parser.parsePartial(p, input)` | `Result<Done \| Incomplete, ParseError<E>>` for streaming input |
+| `Parser.parsePeek(p, input)` | `Result<[remaining, A], ParseError<E>>`, nom-style; the parser stopped at `input.length - remaining.length` |
+| `Parser.parsePartial(p, input)` | `Result<Done \| Incomplete, ParseError<E>>` for streaming input; `Done` has the `offset` it stopped at |
 | `Parser.parseEffect(p, input)` | `Effect<A, ParseError<E>, R>`; services come from the Effect context |
 | `Parser.parseRecoverable(p, input)` | `{ value: Option<A>, errors }` with error recovery enabled |
 | `ParserStream.parseMany(p)` | `Stream<I> => Stream<A>` (see [Streaming](#streaming-and-partial-input)) |
 | `ParserSchema.make(p)` | a `Schema` decoding strings with the parser |
+
+Every `Parser` runner takes an `offset` option, to start parsing part-way
+into the input. The result is that of parsing `input.slice(offset)`, without
+the copy, and offsets (`Done`'s `offset`, spans, `ParseError` offsets, lines
+and columns) are positions in the whole input. A lexer can read one token at
+a time from a buffer, compiled parsers included:
+
+```ts
+const lexeme = Parser.compile(Parser.preceded(Ascii.multispace0, Ascii.alpha1))
+
+const buffer = "let x = 1"
+Parser.parsePartial(lexeme, buffer, { offset: 3 })
+// Result.succeed({ _tag: "Done", value: "x", offset: 5 })
+Parser.parsePeek(lexeme, buffer, { offset: 0 })
+// Result.succeed([" x = 1", "let"]): it stopped at 9 - 6 = 3
+```
 
 Parsers over bytes (`Uint8Array`) also accept an `ArrayBuffer`, a
 `SharedArrayBuffer`, a `DataView` or any other typed array, in the runners
@@ -228,8 +244,9 @@ time of `JSON.parse` depending on the document (see
 [the design notes](docs/DESIGN.md#results)).
 
 `compile` returns the same parser. The code is built on the first run, for
-each kind of input, and cached. `parse`, `parseSync`, `parsePeek` and
-`parseEffect` use it; partial input, `parseRecoverable` and tracing stay
+each kind of input, and cached. `parse`, `parseSync`, `parsePeek`,
+`parsePartial`, `parseEffect` and `ParserStream.parseAll` use it, from any
+`offset`; `ParserStream.parseMany`, `parseRecoverable` and tracing stay
 interpreted. With `{ backend: "auto" }` (the default) it generates
 JavaScript where `new Function` is allowed; `{ backend: "closure" }` never
 generates code, for pages with a Content Security Policy.
