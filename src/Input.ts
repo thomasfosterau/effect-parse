@@ -216,7 +216,9 @@ export class State<I extends Input = Input> {
    * were later swallowed by backtracking (for example a trailing separator
    * followed by an invalid element). It is reported instead of the final
    * failure when it lies further into the input. This is the classic PEG
-   * "farthest failure" heuristic.
+   * "farthest failure" heuristic. `Parser.cut` keeps only the failures
+   * recorded inside it when it commits, and `Parser.peek` and `Parser.not`
+   * forget the failures of a lookahead that succeeded.
    */
   deepest: Failure | undefined = undefined
   /** When defined, `Parser.resumeAfter`/`retryAfter` record failures here. */

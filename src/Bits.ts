@@ -68,9 +68,12 @@ const inUnits = <A>(state: State<any>, factor: number, step: (state: State<any>)
     state.pos = factor > 1 ? Math.floor(state.pos / factor) : state.pos / factor
     const f = state.failure
     state.failure = scale(f, 1 / factor)
+    // A committed failure keeps only the failures recorded after the commit
+    // (see `Parser.cut`), so none from before these units
+    if (state.mode === "Cut") state.deepest = undefined
     if (inner !== undefined) {
       const d = inner === f ? state.failure : scale(inner, 1 / factor)
-      if (deepest === undefined || d.offset >= deepest.offset) state.deepest = d
+      if (state.deepest === undefined || d.offset >= state.deepest.offset) state.deepest = d
     }
     return Fail
   }
