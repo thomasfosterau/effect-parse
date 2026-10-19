@@ -150,6 +150,7 @@ export class FirstSets {
       case "OrFail":
       case "Peek":
       case "Trace":
+      case "Syntax":
       case "ResumeAfter":
       case "RetryAfter":
         return this.of(node.self)

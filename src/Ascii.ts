@@ -312,6 +312,8 @@ export const tillLineEnding: Parser<string> = /*#__PURE__*/ P.described<string>(
     const c = isString ? (input as string).charCodeAt(i) : (input as Uint8Array)[i]
     if (c === 10) break
     if (c === 13) {
+      // The line feed after it is read, not consumed
+      state.syntax?.read(i + 2)
       if (i + 1 >= state.end) {
         if (state.partial) return state.incomplete(1, expectedLineEnding)
         return state.backtrack("LineEnding", expectedLineEnding, i)

@@ -486,7 +486,10 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
         if (cp === internal.End || cp === internal.Truncated) {
           return state.partial ? state.incomplete(1, expected) : backtrack(state, "Literal", expected)
         }
-        if (cp < 0 || internal.fold(cp) !== folded[i]) return backtrack(state, "Literal", expected)
+        if (cp < 0 || internal.fold(cp) !== folded[i]) {
+          state.syntax?.read(pos + Math.max(internal.width, 1))
+          return backtrack(state, "Literal", expected)
+        }
         pos += internal.width
       }
       state.pos = pos
@@ -542,6 +545,8 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
         if (state.partial) return state.incomplete(0, expected)
         return backtrack(state, "TakeUntil", expected, state.end)
       }
+      // The literal was read but is not consumed
+      state.syntax?.read(idx + needle.length)
       const count = internal.validate(enc, state, start, idx)
       if (count < 0) return backtrack(state, "TakeUntil", expected, -1 - count)
       // As in winnow, the first occurrence must lie within the range
@@ -621,7 +626,10 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
     }
     if (stop === internal.Invalid) return backtrack(state, "LineEnding", expectedLineEnding, offset)
     if (stop === 0 && internal.next(enc, state, offset) === 13) {
-      const after = internal.next(enc, state, offset + internal.width)
+      const cr = internal.width
+      // The line feed after it is read, not consumed
+      state.syntax?.read(offset + 2 * cr)
+      const after = internal.next(enc, state, offset + cr)
       if (after === internal.End && state.partial) return state.incomplete(1, expectedLineEnding)
       if (after !== 10) return backtrack(state, "LineEnding", expectedLineEnding, offset)
     }

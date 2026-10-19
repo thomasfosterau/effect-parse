@@ -63,6 +63,7 @@ managed with Changesets; see [PUBLISHING.md](PUBLISHING.md).
 - [Streaming and partial input](#streaming-and-partial-input)
 - [Services](#services)
 - [Unicode text and encodings](#unicode-text-and-encodings)
+- [Syntax trees and incremental parsing](#syntax-trees-and-incremental-parsing)
 - [Modules](#modules)
 - [Coming from nom or winnow](#coming-from-nom-or-winnow)
 - [Examples](#examples)
@@ -192,6 +193,7 @@ times, `Parser.repeat(p, 3)` exactly three times, and
 | `Parser.parseRecoverable(p, input)` | `{ value: Option<A>, errors }` with error recovery enabled |
 | `ParserStream.parseMany(p)` | `Stream<I> => Stream<A>` (see [Streaming](#streaming-and-partial-input)) |
 | `ParserSchema.make(p)` | a `Schema` decoding strings with the parser |
+| `Syntax.parse(p, input)` | a `Syntax.Tree`: a syntax tree, the value and the errors (see [Syntax trees](#syntax-trees-and-incremental-parsing)) |
 
 Parsers over bytes (`Uint8Array`) also accept an `ArrayBuffer`, a
 `SharedArrayBuffer`, a `DataView` or any other typed array, in the runners
@@ -443,6 +445,84 @@ In our runs `Text.string` was roughly 5–15% slower than the `Token`/`Ascii`
 parsers, and parsing UTF-8 directly was within about 10% of decoding it
 first.
 
+## Syntax trees and incremental parsing
+
+The `Syntax` module builds concrete syntax trees, like
+[Tree-sitter](https://tree-sitter.github.io): trees of nodes with spans,
+parents and siblings, which can be searched by position, walked with a
+cursor, and parsed again *incrementally* after an edit.
+
+Mark the rules that should appear in the tree with `Syntax.node`. Outside
+`Syntax.parse` the marks change nothing (compiled parsers compile them
+away), so a grammar can be used both for values and for trees:
+
+```ts
+import { Ascii, Parser, Syntax, Token } from "@thomasfosterau/effect-parse"
+
+const name = Syntax.node(Ascii.alpha1, "name")
+const number = Syntax.node(Ascii.decInt, "number")
+const pair = Syntax.node(
+  Parser.separatedPair(Syntax.field(name, "key"), Syntax.token(Token.literal("=")), Syntax.field(number, "value")),
+  "pair"
+)
+const config = Parser.separated(pair, Token.literal("\n"))
+
+const tree = Syntax.parse(config, "width=80\nheight=24")
+String(tree.root)
+// (document (pair key: (name) value: (number)) (pair key: (name) value: (number)))
+
+const node = tree.descendantAt(16)              // the deepest node at offset 16
+node.kind                                       // "number"
+node.text                                       // "24"
+node.value                                      // 24, the parser's output
+node.parent?.childByField("key")?.text          // "height"
+tree.lineColumn(node.start)                     // { line: 2, column: 8 }
+tree.value                                      // Option.some([["width", 80], ["height", 24]])
+```
+
+Each node's `value` is its parser's output, so a tree carries the parsed
+values as well as the structure. `Syntax.token` marks *anonymous* nodes
+(punctuation, keywords), which are left out of `namedChildren` and of the
+printed tree, and `Syntax.field` names a child in its parent. Nodes have
+`children`, `namedChildren`, `parent`, `nextSibling`, `previousSibling`,
+`childAt(offset)`, `descendantAt(start, end?)` and `descendants()`;
+`tree.walk()` returns a `TreeCursor` with Tree-sitter's `gotoFirstChild`,
+`gotoNextSibling`, `gotoParent`, `gotoFirstChildForOffset`, and so on.
+
+**Errors.** A syntax parse always returns a tree. Failures recovered with
+`Parser.resumeAfter` or `Parser.retryAfter` (recovery is always on here)
+become `ERROR` nodes over the input that was skipped, and so does any input
+left after a fatal failure. `tree.errors` lists them as `ParseError`s.
+
+**Incremental parsing.** After an edit, `Syntax.reparse(tree, newInput, edits?)`
+parses the new input reusing the nodes of the old tree that the edit leaves
+unchanged; `Syntax.replace(tree, start, end, text)` does the edit too. The
+result is exactly the tree a fresh parse gives (the test suite checks this
+on random edits), but only the nodes around the edit are parsed again:
+
+```ts
+const edited = Syntax.replace(tree, 6, 8, "100") // "width=100\nheight=24"
+edited.value       // Option.some([["width", 100], ["height", 24]])
+edited.reused      // 2: "width", and the second pair as a whole
+```
+
+The edits are Tree-sitter's `{ start, oldEnd, newEnd }`, applied in order;
+without them the edit is found by comparing the two inputs. A node is reused
+when it was built by the same `Syntax.node` and the input its parse *looked
+at* is unchanged. That includes lookahead: a node is parsed again when an
+edit lands just after it, if its parse read that far (to see that a number
+ended, say). Built-in parsers record how far they read; custom ones may need
+the `lookahead` option. Values are reused as they are, so a node's value
+should depend only on its input: not on services, closure state or absolute
+offsets (`Parser.span`, `Parser.location`); use the node's `start` and `end`
+instead.
+
+On a 0.58 M-character JSON document (`pnpm bench:syntax`), building the tree
+takes about twice as long as parsing the value interpreted, and reparsing
+after a one-character edit takes about 2 ms, against 80 ms for the full
+parse. Most of that is stepping over the 2000 reused elements of the
+top-level array; the tree is not rebalanced as Tree-sitter's is.
+
 ## Modules
 
 | Module | Contents | winnow / nom equivalent |
@@ -458,6 +538,7 @@ first.
 | `ParseError` | the error type, `lineColumn`, `formatExpected` | `error` |
 | `ParserStream` | `parseMany`, `parseAll` over Effect `Stream`s | `Partial` / `streaming` |
 | `ParserSchema` | `make`: a `Schema` from a parser | — |
+| `Syntax` | syntax trees: `node`, `token`, `field`, `parse`, incremental `reparse` and `replace`, `Tree`, `SyntaxNode`, `TreeCursor` | — (Tree-sitter) |
 | `Nom` | nom names and argument orders (`tag`, `many0`, `separatedList1`, `mapRes`, …) | nom |
 | `Input` | input types and the `State` cursor for `Parser.make` | `stream` |
 
@@ -525,6 +606,9 @@ in [`test/examples.test.ts`](test/examples.test.ts):
   streamed
 - [`sexpr.ts`](examples/sexpr.ts): s-expressions with typed evaluation
   errors
+- [`json-syntax.ts`](examples/json-syntax.ts): JSON as a syntax tree for
+  editors, with fields, `ERROR` nodes for malformed elements, and
+  incremental reparsing (tested in [`test/Syntax.test.ts`](test/Syntax.test.ts))
 
 `pnpm build && pnpm bench` compares the JSON examples, on each encoding,
 with `JSON.parse`.
@@ -544,6 +628,7 @@ pnpm build   # emit dist/
 pnpm bench          # JSON example: interpreted vs compiled, per encoding (after a build)
 pnpm bench:native   # compiled JSON parser vs JSON.parse on several document shapes
 pnpm bench:stream   # parsing a fetch body as it downloads vs Response.json()
+pnpm bench:syntax   # building a syntax tree, and reparsing it after small edits
 ```
 
 ## License

@@ -231,6 +231,7 @@ expected value
 | `Expression` | Pratt / precedence-climbing expression parser (from `nom-language::precedence`) |
 | `ParserStream` | Run a parser repeatedly over an Effect `Stream` of chunks (partial parsing) |
 | `ParserSchema` | Build an Effect `Schema` that decodes a string with a parser |
+| `Syntax` | Concrete syntax trees and incremental reparsing, after Tree-sitter (section 8) |
 | `Nom` | nom-named aliases: `tag`, `tagNoCase`, `char`, `many0`, `many1`, `manyMN`, `manyTill`, `count`, `separatedList0/1`, `foldMany0/1`, `mapRes`, `mapOpt`, `recognize`, `consumed`, `value`, `pair`, `tuple`, `isA`, `isNot`, `takeWhile1`, `takeWhileMN`, `takeTill1`, ... |
 
 ## 4. Implementation phases
@@ -616,3 +617,129 @@ one a one-shot parse gives.
 The differential suite checks resumable builds against the interpreter, in
 partial and complete mode, on every input, and streams every example in
 chunks of many sizes, interpreted and compiled.
+
+## 8. Syntax trees
+
+The `Syntax` module gives grammars a mode like
+[Tree-sitter](https://tree-sitter.github.io)'s: parse into a concrete syntax
+tree that can be searched by position and walked, and parse again after an
+edit, reusing what the edit didn't touch. nom and winnow have nothing like
+it; Tree-sitter is the model for the API (named and anonymous nodes, fields,
+`ERROR` nodes, `{ start, oldEnd, newEnd }` edits, cursors, S-expressions).
+
+### Annotations, not a second grammar
+
+`Syntax.node(p, kind)`, `Syntax.token(p, kind?)` and `Syntax.field(p, name)`
+mark a grammar's rules. Their description node is `Syntax`, which every
+compiler backend treats as an identity (like `Trace`), and their step only
+calls the inner step unless the state carries a tree builder
+(`state.syntax`). So one grammar serves `Parser.parse` (compiled or not)
+and `Syntax.parse`, and the marks cost one field check when interpreted.
+Tree-sitter's tokens, the leaves, are just nodes without children: the
+lexer is the grammar's token parsers.
+
+### Green and red nodes
+
+The tree is stored as *green* nodes, as in Roslyn and rust-analyzer: kind,
+width, children with their offsets *relative* to the parent, the value,
+and what incremental parsing needs (below). They know neither their
+absolute position nor their parent, so an unchanged subtree can be shared
+by the trees before and after an edit, at a different offset, without being
+copied or shifted. `SyntaxNode` is the *red* view built while navigating:
+a green node, its absolute start, its parent and its index. Tree-sitter has
+the same split between subtrees and `TSNode`s.
+
+### Building the tree while backtracking
+
+Completed nodes wait on a stack until their parent completes and adopts
+them. The difficulty is that a PEG parser abandons attempts all the time
+(`alt`, `opt`, the last iteration of `repeat`, `peek`, `not`), and the
+nodes built by an abandoned attempt must not reach the tree. Every such
+combinator, and any well-behaved `Parser.make` parser, moves the cursor
+back to where the attempt started, or before. Nodes are never empty (as in
+Tree-sitter, where rules can't match the empty string; an empty match just
+adds no node), so the nodes of an abandoned attempt are exactly those that
+end after the position the cursor moves back to. The syntax state makes
+`pos` an accessor whose setter pops them. No combinator had to change, and
+lookahead is handled too: `peek` moves the cursor back after succeeding,
+which drops what it built.
+
+`State.pos` became a declared field so that the subclass's accessor isn't
+shadowed by an own property; for ordinary states nothing changes (the
+benchmarks are unchanged within their noise).
+
+### Errors
+
+Like Tree-sitter, a syntax parse always returns a tree. Recovery is always
+on: `resumeAfter` and `retryAfter` call `state.syntax.skipped`, which wraps
+the skipped input (and any nodes the recovery parser built) in an `ERROR`
+node holding the failure. A fatal failure, or input left at the end,
+becomes an `ERROR` node up to the end of the input. `tree.errors` is
+collected from the `ERROR` nodes, so the errors of abandoned attempts are
+dropped with their nodes, and reused nodes keep theirs.
+
+### Incremental reparsing
+
+`Syntax.reparse(tree, input, edits)` maps the new input to the old one as
+*segments*: stretches copied unchanged, built by applying the edits in
+order. When `Syntax.node` is entered at a position, the builder looks for
+a node of the old tree built by the same `Syntax.node` (a per-call key,
+not the kind) at the corresponding old position: a binary search down the
+old tree, starting from the parent of the previous match, since reused
+nodes are mostly consecutive siblings. The node is reused, its value and
+all, when the input its parse looked at lies in one segment, or it looked
+up to the end and the segment is a common suffix of both inputs.
+
+This is incremental packrat parsing (Dubroy and Warth, *Incremental
+Packrat Parsing*, 2017) restricted to the annotated rules: PEG parsing is a
+function of the position, so a rule entered at a position whose input is
+unchanged gives the same result. It requires the rule's result to depend
+only on the input from where it starts, which is why values should not
+depend on services, closure state or absolute offsets.
+
+**What a parse looked at.** For every node the builder records a
+*lookahead*: the furthest position looked at while the node was parsed,
+including failed alternatives inside it. Three things raise it: moves of
+the cursor (the `pos` setter), failures (`failWith`) and hints
+(`setHint`). Most token parsers read only at positions they reach or fail
+at, plus one token where they stop (a code point: two units of a string at
+a high surrogate, up to four bytes, one array element); the reuse check
+adds that token. The few that read further report how far they read
+through `state.syntax.read`: a literal that fails part way
+(`matchLiteral`, `Text` `caseless`), `takeUntil`, which reads its
+delimiter without consuming it, and `tillLineEnding`, which reads the
+`\n` after a `\r`. The calls are on failure paths or behind an optional
+field check, so ordinary parses don't pay for them. Custom parsers that
+read further than one token past where they stop can widen the margin
+with the `lookahead` option.
+
+An earlier version used a fixed margin instead: the grammar's longest
+literal, found by walking its descriptions, with a floor of 32 units for
+grammars containing parts the walk can't see (`gen`, `make`, `flatMap`).
+It was not reliable, since `gen` grammars hide their literals, and it made
+nodes up to 32 units before an edit unusable. Recording reads made reuse
+both exact and cheaper.
+
+**Equal to a fresh parse.** A reparse returns the tree, values and errors
+that `Syntax.parse` of the new input returns. Values are shared, not
+recomputed. For errors to match too, each node stores what its parse left
+for error reporting (its furthest failure and its last hint, see "Error
+model"), and a reused node replays it. Otherwise a fatal error after a
+reused node could be reported at a different offset, or with fewer
+expected alternatives. The differential tests check that equality on
+random edits of random JSON documents, of expression grammars (including
+`Expression.make`), and of a grammar built on lookahead (keyword
+boundaries, comments, literals sharing a prefix); a targeted test covers
+each parser that reports a read, and fails if its report is removed.
+
+**Cost.** A reparse runs the parsers on the path from the root to the
+edit, and every repetition on that path steps over each reused child (a
+lookup and a stack push, about 1 µs). On a 0.58 M-character JSON document
+whose top-level array has 2000 records, building the tree takes about
+twice as long as an interpreted parse of the value (80 ms against 40 ms),
+and a one-character edit reparses in about 2 ms. Tree-sitter goes further
+by storing repetitions as balanced trees, so it can reuse runs of siblings
+in one step. The same could be done here by having `repeat` and
+`separated` look up a run of consecutive old children, which is left for
+later.
+
