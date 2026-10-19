@@ -47,7 +47,7 @@ const code = (c: string | number): number => typeof c === "number" ? c : c.charC
  * @since 0.1.0
  * @category predicates
  */
-export const isAlpha: (c: string | number) => boolean = codePointPredicate("isAlpha", (c: string | number): boolean => {
+export const isAlpha: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isAlpha", (c: string | number): boolean => {
   const x = code(c)
   return (x >= 65 && x <= 90) || (x >= 97 && x <= 122)
 }, [[65, 90], [97, 122]])
@@ -58,7 +58,7 @@ export const isAlpha: (c: string | number) => boolean = codePointPredicate("isAl
  * @since 0.1.0
  * @category predicates
  */
-export const isDigit: (c: string | number) => boolean = codePointPredicate("isDigit", (c: string | number): boolean => {
+export const isDigit: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isDigit", (c: string | number): boolean => {
   const x = code(c)
   return x >= 48 && x <= 57
 }, [[48, 57]])
@@ -69,7 +69,7 @@ export const isDigit: (c: string | number) => boolean = codePointPredicate("isDi
  * @since 0.1.0
  * @category predicates
  */
-export const isHexDigit: (c: string | number) => boolean = codePointPredicate("isHexDigit", (c: string | number): boolean => {
+export const isHexDigit: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isHexDigit", (c: string | number): boolean => {
   const x = code(c)
   return (x >= 48 && x <= 57) || (x >= 65 && x <= 70) || (x >= 97 && x <= 102)
 }, [[48, 57], [65, 70], [97, 102]])
@@ -80,7 +80,7 @@ export const isHexDigit: (c: string | number) => boolean = codePointPredicate("i
  * @since 0.1.0
  * @category predicates
  */
-export const isOctDigit: (c: string | number) => boolean = codePointPredicate("isOctDigit", (c: string | number): boolean => {
+export const isOctDigit: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isOctDigit", (c: string | number): boolean => {
   const x = code(c)
   return x >= 48 && x <= 55
 }, [[48, 55]])
@@ -91,7 +91,7 @@ export const isOctDigit: (c: string | number) => boolean = codePointPredicate("i
  * @since 0.1.0
  * @category predicates
  */
-export const isAlphanumeric: (c: string | number) => boolean = codePointPredicate(
+export const isAlphanumeric: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate(
   "isAlphanumeric",
   (c: string | number): boolean => isAlpha(c) || isDigit(c),
   [[48, 57], [65, 90], [97, 122]]
@@ -103,7 +103,7 @@ export const isAlphanumeric: (c: string | number) => boolean = codePointPredicat
  * @since 0.1.0
  * @category predicates
  */
-export const isSpace: (c: string | number) => boolean = codePointPredicate("isSpace", (c: string | number): boolean => {
+export const isSpace: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isSpace", (c: string | number): boolean => {
   const x = code(c)
   return x === 32 || x === 9
 }, [[9, 9], [32, 32]])
@@ -114,7 +114,7 @@ export const isSpace: (c: string | number) => boolean = codePointPredicate("isSp
  * @since 0.1.0
  * @category predicates
  */
-export const isMultispace: (c: string | number) => boolean = codePointPredicate("isMultispace", (c: string | number): boolean => {
+export const isMultispace: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isMultispace", (c: string | number): boolean => {
   const x = code(c)
   return x === 32 || x === 9 || x === 10 || x === 13
 }, [[9, 10], [13, 13], [32, 32]])
@@ -125,14 +125,14 @@ export const isMultispace: (c: string | number) => boolean = codePointPredicate(
  * @since 0.1.0
  * @category predicates
  */
-export const isNewline: (c: string | number) => boolean = codePointPredicate("isNewline", (c: string | number): boolean => code(c) === 10, [[10, 10]])
+export const isNewline: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isNewline", (c: string | number): boolean => code(c) === 10, [[10, 10]])
 
 // Token sets usable for both string and byte input
-const alphaSet = [range("a", "z"), range("A", "Z")]
-const digitSet = range("0", "9")
-const hexSet = [range("0", "9"), range("a", "f"), range("A", "F")]
-const octSet = range("0", "7")
-const alnumSet = [range("a", "z"), range("A", "Z"), range("0", "9")]
+const alphaSet = [/*#__PURE__*/ range("a", "z"), /*#__PURE__*/ range("A", "Z")]
+const digitSet = /*#__PURE__*/ range("0", "9")
+const hexSet = [/*#__PURE__*/ range("0", "9"), /*#__PURE__*/ range("a", "f"), /*#__PURE__*/ range("A", "F")]
+const octSet = /*#__PURE__*/ range("0", "7")
+const alnumSet = [/*#__PURE__*/ range("a", "z"), /*#__PURE__*/ range("A", "Z"), /*#__PURE__*/ range("0", "9")]
 const spaceSet = " \t"
 const multispaceSet = " \t\r\n"
 
@@ -149,7 +149,7 @@ const cls = (set: unknown, min: 0 | 1, description: string, kind: ErrorKind, hin
  * @since 0.1.0
  * @category character classes
  */
-export const alpha0: Parser<string> = cls(alphaSet, 0, "letter", "Alpha")
+export const alpha0: Parser<string> = /*#__PURE__*/ cls(alphaSet, 0, "letter", "Alpha")
 
 /**
  * One or more ASCII letters, `[a-zA-Z]+`.
@@ -157,7 +157,7 @@ export const alpha0: Parser<string> = cls(alphaSet, 0, "letter", "Alpha")
  * @since 0.1.0
  * @category character classes
  */
-export const alpha1: Parser<string> = cls(alphaSet, 1, "letter", "Alpha")
+export const alpha1: Parser<string> = /*#__PURE__*/ cls(alphaSet, 1, "letter", "Alpha")
 
 /**
  * Zero or more ASCII digits, `[0-9]*`.
@@ -165,7 +165,7 @@ export const alpha1: Parser<string> = cls(alphaSet, 1, "letter", "Alpha")
  * @since 0.1.0
  * @category character classes
  */
-export const digit0: Parser<string> = cls(digitSet, 0, "digit", "Digit")
+export const digit0: Parser<string> = /*#__PURE__*/ cls(digitSet, 0, "digit", "Digit")
 
 /**
  * One or more ASCII digits, `[0-9]+`.
@@ -173,7 +173,7 @@ export const digit0: Parser<string> = cls(digitSet, 0, "digit", "Digit")
  * @since 0.1.0
  * @category character classes
  */
-export const digit1: Parser<string> = cls(digitSet, 1, "digit", "Digit")
+export const digit1: Parser<string> = /*#__PURE__*/ cls(digitSet, 1, "digit", "Digit")
 
 /**
  * Zero or more hexadecimal digits, `[0-9a-fA-F]*`.
@@ -181,7 +181,7 @@ export const digit1: Parser<string> = cls(digitSet, 1, "digit", "Digit")
  * @since 0.1.0
  * @category character classes
  */
-export const hexDigit0: Parser<string> = cls(hexSet, 0, "hexadecimal digit", "HexDigit")
+export const hexDigit0: Parser<string> = /*#__PURE__*/ cls(hexSet, 0, "hexadecimal digit", "HexDigit")
 
 /**
  * One or more hexadecimal digits, `[0-9a-fA-F]+`.
@@ -189,7 +189,7 @@ export const hexDigit0: Parser<string> = cls(hexSet, 0, "hexadecimal digit", "He
  * @since 0.1.0
  * @category character classes
  */
-export const hexDigit1: Parser<string> = cls(hexSet, 1, "hexadecimal digit", "HexDigit")
+export const hexDigit1: Parser<string> = /*#__PURE__*/ cls(hexSet, 1, "hexadecimal digit", "HexDigit")
 
 /**
  * Zero or more octal digits, `[0-7]*`.
@@ -197,7 +197,7 @@ export const hexDigit1: Parser<string> = cls(hexSet, 1, "hexadecimal digit", "He
  * @since 0.1.0
  * @category character classes
  */
-export const octDigit0: Parser<string> = cls(octSet, 0, "octal digit", "OctDigit")
+export const octDigit0: Parser<string> = /*#__PURE__*/ cls(octSet, 0, "octal digit", "OctDigit")
 
 /**
  * One or more octal digits, `[0-7]+`.
@@ -205,7 +205,7 @@ export const octDigit0: Parser<string> = cls(octSet, 0, "octal digit", "OctDigit
  * @since 0.1.0
  * @category character classes
  */
-export const octDigit1: Parser<string> = cls(octSet, 1, "octal digit", "OctDigit")
+export const octDigit1: Parser<string> = /*#__PURE__*/ cls(octSet, 1, "octal digit", "OctDigit")
 
 /**
  * Zero or more ASCII letters or digits, `[0-9a-zA-Z]*`.
@@ -213,7 +213,7 @@ export const octDigit1: Parser<string> = cls(octSet, 1, "octal digit", "OctDigit
  * @since 0.1.0
  * @category character classes
  */
-export const alphanumeric0: Parser<string> = cls(alnumSet, 0, "letter or digit", "AlphaNumeric")
+export const alphanumeric0: Parser<string> = /*#__PURE__*/ cls(alnumSet, 0, "letter or digit", "AlphaNumeric")
 
 /**
  * One or more ASCII letters or digits, `[0-9a-zA-Z]+`.
@@ -221,7 +221,7 @@ export const alphanumeric0: Parser<string> = cls(alnumSet, 0, "letter or digit",
  * @since 0.1.0
  * @category character classes
  */
-export const alphanumeric1: Parser<string> = cls(alnumSet, 1, "letter or digit", "AlphaNumeric")
+export const alphanumeric1: Parser<string> = /*#__PURE__*/ cls(alnumSet, 1, "letter or digit", "AlphaNumeric")
 
 /**
  * Zero or more spaces and tabs, `[ \t]*`.
@@ -229,7 +229,7 @@ export const alphanumeric1: Parser<string> = cls(alnumSet, 1, "letter or digit",
  * @since 0.1.0
  * @category character classes
  */
-export const space0: Parser<string> = cls(spaceSet, 0, "space", "Space", false)
+export const space0: Parser<string> = /*#__PURE__*/ cls(spaceSet, 0, "space", "Space", false)
 
 /**
  * One or more spaces and tabs, `[ \t]+`.
@@ -237,7 +237,7 @@ export const space0: Parser<string> = cls(spaceSet, 0, "space", "Space", false)
  * @since 0.1.0
  * @category character classes
  */
-export const space1: Parser<string> = cls(spaceSet, 1, "space", "Space", false)
+export const space1: Parser<string> = /*#__PURE__*/ cls(spaceSet, 1, "space", "Space", false)
 
 /**
  * Zero or more spaces, tabs, carriage returns and line feeds,
@@ -246,7 +246,7 @@ export const space1: Parser<string> = cls(spaceSet, 1, "space", "Space", false)
  * @since 0.1.0
  * @category character classes
  */
-export const multispace0: Parser<string> = cls(multispaceSet, 0, "whitespace", "MultiSpace", false)
+export const multispace0: Parser<string> = /*#__PURE__*/ cls(multispaceSet, 0, "whitespace", "MultiSpace", false)
 
 /**
  * One or more spaces, tabs, carriage returns and line feeds,
@@ -255,7 +255,7 @@ export const multispace0: Parser<string> = cls(multispaceSet, 0, "whitespace", "
  * @since 0.1.0
  * @category character classes
  */
-export const multispace1: Parser<string> = cls(multispaceSet, 1, "whitespace", "MultiSpace", false)
+export const multispace1: Parser<string> = /*#__PURE__*/ cls(multispaceSet, 1, "whitespace", "MultiSpace", false)
 
 // -----------------------------------------------------------------------------
 // Line endings
@@ -267,7 +267,7 @@ export const multispace1: Parser<string> = cls(multispaceSet, 1, "whitespace", "
  * @since 0.1.0
  * @category line endings
  */
-export const crlf: Parser<"\r\n"> = Token.literal("\r\n")
+export const crlf: Parser<"\r\n"> = /*#__PURE__*/ Token.literal("\r\n")
 
 /**
  * A line feed, `\n` (nom's `newline`).
@@ -275,7 +275,7 @@ export const crlf: Parser<"\r\n"> = Token.literal("\r\n")
  * @since 0.1.0
  * @category line endings
  */
-export const newline: Parser<"\n"> = Token.literal("\n")
+export const newline: Parser<"\n"> = /*#__PURE__*/ Token.literal("\n")
 
 /**
  * A tab, `\t`.
@@ -283,7 +283,7 @@ export const newline: Parser<"\n"> = Token.literal("\n")
  * @since 0.1.0
  * @category line endings
  */
-export const tab: Parser<"\t"> = Token.literal("\t")
+export const tab: Parser<"\t"> = /*#__PURE__*/ Token.literal("\t")
 
 /**
  * A line ending: `\n` or `\r\n`.
@@ -291,7 +291,7 @@ export const tab: Parser<"\t"> = Token.literal("\t")
  * @since 0.1.0
  * @category line endings
  */
-export const lineEnding: Parser<"\n" | "\r\n"> = P.alt(newline, crlf).pipe(P.expected("line ending"))
+export const lineEnding: Parser<"\n" | "\r\n"> = /*#__PURE__*/ P.alt(newline, crlf).pipe(/*#__PURE__*/ P.expected("line ending"))
 
 const expectedLineEnding = ["line ending"]
 
@@ -303,7 +303,7 @@ const expectedLineEnding = ["line ending"]
  * @since 0.1.0
  * @category line endings
  */
-export const tillLineEnding: Parser<string> = P.described<string>((state: State<any>) => {
+export const tillLineEnding: Parser<string> = /*#__PURE__*/ P.described<string>((state: State<any>) => {
   const start = state.pos
   const input = state.input
   const isString = state.inputKind === 0
@@ -346,9 +346,9 @@ export const overflow = (value: number): Result.Result<number, string> =>
  * @since 0.1.0
  * @category numbers
  */
-export const decUint: Parser<number, string> = digit1.pipe(
-  P.tryMap((s) => overflow(Number(toText(s)))),
-  P.named("decUint")
+export const decUint: Parser<number, string> = /*#__PURE__*/ digit1.pipe(
+  /*#__PURE__*/ P.tryMap((s) => overflow(Number(toText(s)))),
+  /*#__PURE__*/ P.named("decUint")
 )
 
 /**
@@ -359,9 +359,9 @@ export const decUint: Parser<number, string> = digit1.pipe(
  * @since 0.1.0
  * @category numbers
  */
-export const decInt: Parser<number, string> = P.taken(P.seq(P.opt(Token.oneOf("+-")), digit1)).pipe(
-  P.tryMap((s) => overflow(Number(toText(s)))),
-  P.named("decInt")
+export const decInt: Parser<number, string> = /*#__PURE__*/ P.taken(/*#__PURE__*/ P.seq(/*#__PURE__*/ P.opt(/*#__PURE__*/ Token.oneOf("+-")), digit1)).pipe(
+  /*#__PURE__*/ P.tryMap((s) => overflow(Number(toText(s)))),
+  /*#__PURE__*/ P.named("decInt")
 )
 
 /**
@@ -370,7 +370,7 @@ export const decInt: Parser<number, string> = P.taken(P.seq(P.opt(Token.oneOf("+
  * @since 0.1.0
  * @category numbers
  */
-export const decBigUint: Parser<bigint> = digit1.pipe(P.map((s) => BigInt(toText(s))))
+export const decBigUint: Parser<bigint> = /*#__PURE__*/ digit1.pipe(/*#__PURE__*/ P.map((s) => BigInt(toText(s))))
 
 /**
  * A signed decimal integer as a `bigint`, of any size.
@@ -378,8 +378,8 @@ export const decBigUint: Parser<bigint> = digit1.pipe(P.map((s) => BigInt(toText
  * @since 0.1.0
  * @category numbers
  */
-export const decBigInt: Parser<bigint> = P.taken(P.seq(P.opt(Token.oneOf("+-")), digit1)).pipe(
-  P.map((s) => {
+export const decBigInt: Parser<bigint> = /*#__PURE__*/ P.taken(/*#__PURE__*/ P.seq(/*#__PURE__*/ P.opt(/*#__PURE__*/ Token.oneOf("+-")), digit1)).pipe(
+  /*#__PURE__*/ P.map((s) => {
     const t = toText(s)
     return BigInt(t.startsWith("+") ? t.slice(1) : t)
   })
@@ -392,22 +392,22 @@ export const decBigInt: Parser<bigint> = P.taken(P.seq(P.opt(Token.oneOf("+-")),
  * @since 0.1.0
  * @category numbers
  */
-export const hexUint: Parser<number, string> = hexDigit1.pipe(
-  P.tryMap((s) => overflow(parseInt(toText(s), 16))),
-  P.named("hexUint")
+export const hexUint: Parser<number, string> = /*#__PURE__*/ hexDigit1.pipe(
+  /*#__PURE__*/ P.tryMap((s) => overflow(parseInt(toText(s), 16))),
+  /*#__PURE__*/ P.named("hexUint")
 )
 
-const sign = P.opt(Token.oneOf("+-"))
-const exponent = P.opt(P.seq(Token.oneOf("eE"), sign, digit1))
-const unsignedFloat = P.alt(
-  P.seq(literalImpl("inf", true), P.opt(literalImpl("inity", true))),
-  P.seq(Token.literal("."), digit1, exponent),
-  P.seq(digit1, P.opt(P.seq(Token.literal("."), P.opt(digit1))), exponent)
+const sign = /*#__PURE__*/ P.opt(/*#__PURE__*/ Token.oneOf("+-"))
+const exponent = /*#__PURE__*/ P.opt(/*#__PURE__*/ P.seq(/*#__PURE__*/ Token.oneOf("eE"), sign, digit1))
+const unsignedFloat = /*#__PURE__*/ P.alt(
+  /*#__PURE__*/ P.seq(/*#__PURE__*/ literalImpl("inf", true), /*#__PURE__*/ P.opt(/*#__PURE__*/ literalImpl("inity", true))),
+  /*#__PURE__*/ P.seq(/*#__PURE__*/ Token.literal("."), digit1, exponent),
+  /*#__PURE__*/ P.seq(digit1, /*#__PURE__*/ P.opt(/*#__PURE__*/ P.seq(/*#__PURE__*/ Token.literal("."), /*#__PURE__*/ P.opt(digit1))), exponent)
 )
-const floatText = numbers.floatText(P.taken(P.alt(
-  literalImpl("nan", true),
-  P.seq(sign, unsignedFloat)
-)).pipe(P.expected("number")) as Parser<string>)
+const floatText = /*#__PURE__*/ numbers.floatText(/*#__PURE__*/ P.taken(/*#__PURE__*/ P.alt(
+  /*#__PURE__*/ literalImpl("nan", true),
+  /*#__PURE__*/ P.seq(sign, unsignedFloat)
+)).pipe(/*#__PURE__*/ P.expected("number")) as Parser<string>)
 
 /** @internal */
 export const toFloat: (s: Input) => number = numbers.toFloat
@@ -427,7 +427,7 @@ export const toFloat: (s: Input) => number = numbers.toFloat
  * @since 0.1.0
  * @category numbers
  */
-export const float: Parser<number> = floatText.pipe(P.map(toFloat), P.named("float"))
+export const float: Parser<number> = /*#__PURE__*/ floatText.pipe(/*#__PURE__*/ P.map(toFloat), /*#__PURE__*/ P.named("float"))
 
 // -----------------------------------------------------------------------------
 // Literals
@@ -707,7 +707,7 @@ export const bytes: {
   readonly decBigInt: Parser<bigint, never, never, Uint8Array>
   readonly hexUint: Parser<number, string, never, Uint8Array>
   readonly float: Parser<number, never, never, Uint8Array>
-} = (() => {
+} = /*#__PURE__*/ (() => {
   const lit = (s: string) => Token.literal(new TextEncoder().encode(s))
   const crlfB = lit("\r\n")
   const newlineB = lit("\n")

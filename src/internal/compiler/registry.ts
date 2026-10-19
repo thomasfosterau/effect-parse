@@ -31,7 +31,7 @@ interface Entry {
   readonly byKind: Array<Compiled | undefined>
 }
 
-const registry = new WeakMap<ParserLike, Entry>()
+const registry = /*#__PURE__*/ new WeakMap<ParserLike, Entry>()
 
 export const register = (p: ParserLike, backend: Backend): void => {
   const entry = registry.get(p)

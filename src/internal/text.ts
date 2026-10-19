@@ -20,13 +20,13 @@ export const End = -3
  * Units below this value decode to themselves with width 1, so hot loops can
  * skip `decode`. Defaults to 0x80 for ASCII compatible encodings.
  */
-const FastLimit: unique symbol = Symbol.for("effect-parse/Encoding/FastLimit")
+const FastLimit: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/Encoding/FastLimit")
 
 /** @internal */
 export const fastLimit = (enc: Encoding<any>): number =>
   (enc as any)[FastLimit] ?? (enc.asciiCompatible && enc.unit === 1 ? 0x80 : 0)
 
-const asciiChars: ReadonlyArray<string> = Array.from({ length: 128 }, (_, i) => String.fromCharCode(i))
+const asciiChars: ReadonlyArray<string> = /*#__PURE__*/ Array.from({ length: 128 }, (_, i) => String.fromCharCode(i))
 
 /** `String.fromCodePoint`, with the ASCII characters cached. */
 export const charOf = (cp: number): string =>
@@ -95,7 +95,7 @@ const decodeUtf8 = (b: Uint8Array, i: number, end: number): number => {
 // `TextDecoder` call, which has a high fixed cost.
 const SHORT = 24
 
-const utf8Decoder = new TextDecoder("utf-8", { ignoreBOM: true })
+const utf8Decoder = /*#__PURE__*/ new TextDecoder("utf-8", { ignoreBOM: true })
 
 /**
  * Decodes `b[start, end)`. Some platforms' `TextDecoder` rejects views of a
@@ -105,7 +105,7 @@ const decodeRange = (decoder: TextDecoder, b: Uint8Array, start: number, end: nu
   const view = b.subarray(start, end)
   return decoder.decode(b.buffer instanceof ArrayBuffer ? view : view.slice())
 }
-const utf8Encoder = new TextEncoder()
+const utf8Encoder = /*#__PURE__*/ new TextEncoder()
 
 /** UTF-8 bytes. */
 export const utf8: Encoding<Uint8Array> = {
@@ -174,10 +174,10 @@ const makeUtf16 = (littleEndian: boolean): Encoding<Uint8Array> => {
 }
 
 /** UTF-16 bytes, little endian. */
-export const utf16le: Encoding<Uint8Array> = makeUtf16(true)
+export const utf16le: Encoding<Uint8Array> = /*#__PURE__*/ makeUtf16(true)
 
 /** UTF-16 bytes, big endian. */
-export const utf16be: Encoding<Uint8Array> = makeUtf16(false)
+export const utf16be: Encoding<Uint8Array> = /*#__PURE__*/ makeUtf16(false)
 
 /** ISO-8859-1: every byte is the code point of the same value. */
 export const latin1: Encoding<Uint8Array> = {
@@ -345,7 +345,7 @@ export const validate = (enc: Encoding<any>, state: State<any>, start: number, e
 // Case folding
 // -----------------------------------------------------------------------------
 
-const foldCache = new Map<number, number>()
+const foldCache = /*#__PURE__*/ new Map<number, number>()
 
 const single = (s: string): number => {
   const cp = s.codePointAt(0)!

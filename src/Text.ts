@@ -108,7 +108,7 @@ export const property = (name: string): CharPredicate => makePredicate(name, new
  * @since 0.1.0
  * @category predicates
  */
-export const isAlphabetic: CharPredicate = makePredicate("isAlphabetic", /^\p{Alphabetic}$/u)
+export const isAlphabetic: CharPredicate = /*#__PURE__*/ makePredicate("isAlphabetic", /^\p{Alphabetic}$/u)
 
 /**
  * Letters (general category `L`).
@@ -116,7 +116,7 @@ export const isAlphabetic: CharPredicate = makePredicate("isAlphabetic", /^\p{Al
  * @since 0.1.0
  * @category predicates
  */
-export const isLetter: CharPredicate = makePredicate("isLetter", /^\p{L}$/u)
+export const isLetter: CharPredicate = /*#__PURE__*/ makePredicate("isLetter", /^\p{L}$/u)
 
 /**
  * Uppercase characters (the Unicode `Uppercase` property).
@@ -124,7 +124,7 @@ export const isLetter: CharPredicate = makePredicate("isLetter", /^\p{L}$/u)
  * @since 0.1.0
  * @category predicates
  */
-export const isUppercase: CharPredicate = makePredicate("isUppercase", /^\p{Uppercase}$/u)
+export const isUppercase: CharPredicate = /*#__PURE__*/ makePredicate("isUppercase", /^\p{Uppercase}$/u)
 
 /**
  * Lowercase characters (the Unicode `Lowercase` property).
@@ -132,7 +132,7 @@ export const isUppercase: CharPredicate = makePredicate("isUppercase", /^\p{Uppe
  * @since 0.1.0
  * @category predicates
  */
-export const isLowercase: CharPredicate = makePredicate("isLowercase", /^\p{Lowercase}$/u)
+export const isLowercase: CharPredicate = /*#__PURE__*/ makePredicate("isLowercase", /^\p{Lowercase}$/u)
 
 /**
  * Decimal digits of any script (general category `Nd`): `0`–`9`, `٠`–`٩`,
@@ -141,7 +141,7 @@ export const isLowercase: CharPredicate = makePredicate("isLowercase", /^\p{Lowe
  * @since 0.1.0
  * @category predicates
  */
-export const isDecimalDigit: CharPredicate = makePredicate("isDecimalDigit", /^\p{Nd}$/u)
+export const isDecimalDigit: CharPredicate = /*#__PURE__*/ makePredicate("isDecimalDigit", /^\p{Nd}$/u)
 
 /**
  * Numeric characters (general category `N`), including `½` and `Ⅻ` (Rust's
@@ -150,7 +150,7 @@ export const isDecimalDigit: CharPredicate = makePredicate("isDecimalDigit", /^\
  * @since 0.1.0
  * @category predicates
  */
-export const isNumeric: CharPredicate = makePredicate("isNumeric", /^\p{N}$/u)
+export const isNumeric: CharPredicate = /*#__PURE__*/ makePredicate("isNumeric", /^\p{N}$/u)
 
 /**
  * Alphabetic or numeric characters (Rust's `char::is_alphanumeric`).
@@ -158,7 +158,7 @@ export const isNumeric: CharPredicate = makePredicate("isNumeric", /^\p{N}$/u)
  * @since 0.1.0
  * @category predicates
  */
-export const isAlphanumeric: CharPredicate = makePredicate("isAlphanumeric", /^[\p{Alphabetic}\p{N}]$/u)
+export const isAlphanumeric: CharPredicate = /*#__PURE__*/ makePredicate("isAlphanumeric", /^[\p{Alphabetic}\p{N}]$/u)
 
 /**
  * Whitespace, including line breaks (the Unicode `White_Space` property,
@@ -167,7 +167,7 @@ export const isAlphanumeric: CharPredicate = makePredicate("isAlphanumeric", /^[
  * @since 0.1.0
  * @category predicates
  */
-export const isWhitespace: CharPredicate = makePredicate("isWhitespace", /^\p{White_Space}$/u)
+export const isWhitespace: CharPredicate = /*#__PURE__*/ makePredicate("isWhitespace", /^\p{White_Space}$/u)
 
 /**
  * Whitespace that does not break lines: `White_Space` except `\n`, `\v`,
@@ -176,7 +176,7 @@ export const isWhitespace: CharPredicate = makePredicate("isWhitespace", /^\p{Wh
  * @since 0.1.0
  * @category predicates
  */
-export const isSpace: CharPredicate = makePredicate(
+export const isSpace: CharPredicate = /*#__PURE__*/ makePredicate(
   "isSpace",
   /^(?![\n\v\f\r\u0085\u2028\u2029])\p{White_Space}$/u
 )
@@ -188,7 +188,7 @@ export const isSpace: CharPredicate = makePredicate(
  * @since 0.1.0
  * @category predicates
  */
-export const isIdStart: CharPredicate = makePredicate("isIdStart", /^\p{ID_Start}$/u)
+export const isIdStart: CharPredicate = /*#__PURE__*/ makePredicate("isIdStart", /^\p{ID_Start}$/u)
 
 /**
  * Characters that can continue an identifier (the Unicode `ID_Continue`
@@ -197,7 +197,7 @@ export const isIdStart: CharPredicate = makePredicate("isIdStart", /^\p{ID_Start
  * @since 0.1.0
  * @category predicates
  */
-export const isIdContinue: CharPredicate = makePredicate("isIdContinue", /^\p{ID_Continue}$/u)
+export const isIdContinue: CharPredicate = /*#__PURE__*/ makePredicate("isIdContinue", /^\p{ID_Continue}$/u)
 
 /**
  * Punctuation (general category `P`).
@@ -205,7 +205,7 @@ export const isIdContinue: CharPredicate = makePredicate("isIdContinue", /^\p{ID
  * @since 0.1.0
  * @category predicates
  */
-export const isPunctuation: CharPredicate = makePredicate("isPunctuation", /^\p{P}$/u)
+export const isPunctuation: CharPredicate = /*#__PURE__*/ makePredicate("isPunctuation", /^\p{P}$/u)
 
 /**
  * Control characters (general category `Cc`).
@@ -213,7 +213,7 @@ export const isPunctuation: CharPredicate = makePredicate("isPunctuation", /^\p{
  * @since 0.1.0
  * @category predicates
  */
-export const isControl: CharPredicate = makePredicate("isControl", /^\p{Cc}$/u)
+export const isControl: CharPredicate = /*#__PURE__*/ makePredicate("isControl", /^\p{Cc}$/u)
 
 // -----------------------------------------------------------------------------
 // Parsers
@@ -358,8 +358,8 @@ const normalize = (r: Range | undefined): [number, number] => {
   return [r.min ?? 0, r.max ?? Infinity]
 }
 
-const isAsciiDigit = codePointPredicate("isAsciiDigit", (c: number): boolean => c >= 48 && c <= 57, [[48, 57]])
-const isAsciiHexDigit = codePointPredicate(
+const isAsciiDigit = /*#__PURE__*/ codePointPredicate("isAsciiDigit", (c: number): boolean => c >= 48 && c <= 57, [[48, 57]])
+const isAsciiHexDigit = /*#__PURE__*/ codePointPredicate(
   "isAsciiHexDigit",
   (c: number): boolean => (c >= 48 && c <= 57) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102),
   [[48, 57], [65, 70], [97, 102]]
@@ -713,7 +713,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
  * @since 0.1.0
  * @category instances
  */
-export const string: TextParsers<string> = make(Encodings.string)
+export const string: TextParsers<string> = /*#__PURE__*/ make(Encodings.string)
 
 /**
  * Text parsers for UTF-8 encoded bytes.
@@ -730,7 +730,7 @@ export const string: TextParsers<string> = make(Encodings.string)
  * @since 0.1.0
  * @category instances
  */
-export const utf8: TextParsers<Uint8Array> = make(Encodings.utf8)
+export const utf8: TextParsers<Uint8Array> = /*#__PURE__*/ make(Encodings.utf8)
 
 /**
  * Text parsers for UTF-16 little endian bytes.
@@ -738,7 +738,7 @@ export const utf8: TextParsers<Uint8Array> = make(Encodings.utf8)
  * @since 0.1.0
  * @category instances
  */
-export const utf16le: TextParsers<Uint8Array> = make(Encodings.utf16le)
+export const utf16le: TextParsers<Uint8Array> = /*#__PURE__*/ make(Encodings.utf16le)
 
 /**
  * Text parsers for UTF-16 big endian bytes.
@@ -746,7 +746,7 @@ export const utf16le: TextParsers<Uint8Array> = make(Encodings.utf16le)
  * @since 0.1.0
  * @category instances
  */
-export const utf16be: TextParsers<Uint8Array> = make(Encodings.utf16be)
+export const utf16be: TextParsers<Uint8Array> = /*#__PURE__*/ make(Encodings.utf16be)
 
 /**
  * Text parsers for ISO-8859-1 (Latin-1) bytes.
@@ -754,4 +754,4 @@ export const utf16be: TextParsers<Uint8Array> = make(Encodings.utf16be)
  * @since 0.1.0
  * @category instances
  */
-export const latin1: TextParsers<Uint8Array> = make(Encodings.latin1)
+export const latin1: TextParsers<Uint8Array> = /*#__PURE__*/ make(Encodings.latin1)

@@ -83,7 +83,7 @@ export const jitSupported = (): boolean => {
 
 const BT = `$S.mode="Backtrack";`
 
-const builtinEncodings: ReadonlySet<Encoding<any>> = new Set([string, utf8, utf16le, utf16be, latin1])
+const builtinEncodings: ReadonlySet<Encoding<any>> = /*#__PURE__*/ new Set([string, utf8, utf16le, utf16be, latin1])
 
 /** How many units past the cursor a single token can depend on (see the closure compiler). */
 const Margin = 4

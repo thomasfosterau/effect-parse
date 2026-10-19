@@ -113,6 +113,7 @@
     "@changesets/cli": "^3.0.3",
     "@types/node": "^26.6.5",
     "effect": "4.0.5",
+    "rolldown": "^1.2.14",
     "typescript": "^7.0.2",
     "vitest": "^5.0.4"
   }

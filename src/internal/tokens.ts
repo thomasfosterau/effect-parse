@@ -107,14 +107,14 @@ const compileToken = (u: unknown): (token: unknown) => boolean => {
  * number), so string inputs can call it without allocating a string per
  * character.
  */
-export const CodePointPredicate: unique symbol = Symbol.for("effect-parse/CodePointPredicate")
+export const CodePointPredicate: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/CodePointPredicate")
 
 /**
  * The code points accepted by a predicate, as sorted, disjoint, inclusive
  * ranges, when they are known. The compiler turns such predicates into
  * comparisons or tables.
  */
-export const PredicateRanges: unique symbol = Symbol.for("effect-parse/PredicateRanges")
+export const PredicateRanges: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/PredicateRanges")
 
 /**
  * Marks `f` as a {@link CodePointPredicate} named `name` (used in error
@@ -208,8 +208,8 @@ export const codePointAt = (s: string, i: number): number => {
  * Tests the token at the current position. Returns the token (as the input's
  * token type) and advances, or returns `NoMatch`/`End`.
  */
-export const NoMatch: unique symbol = Symbol("NoMatch")
-export const End: unique symbol = Symbol("End")
+export const NoMatch: unique symbol = /*#__PURE__*/ Symbol("NoMatch")
+export const End: unique symbol = /*#__PURE__*/ Symbol("End")
 
 export const nextIf = (
   state: State<Input>,

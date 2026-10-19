@@ -97,4 +97,4 @@ export const kindOfEncoding = (enc: Encoding<any>): 0 | 1 => {
   return k
 }
 
-const kinds = new WeakMap<Encoding<any>, 0 | 1>()
+const kinds = /*#__PURE__*/ new WeakMap<Encoding<any>, 0 | 1>()

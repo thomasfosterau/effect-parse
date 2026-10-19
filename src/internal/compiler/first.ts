@@ -32,8 +32,8 @@ export interface First {
   readonly high: boolean
 }
 
-const none = new Uint8Array(TableSize)
-const all = new Uint8Array(TableSize).fill(1)
+const none = /*#__PURE__*/ new Uint8Array(TableSize)
+const all = /*#__PURE__*/ new Uint8Array(TableSize).fill(1)
 
 const unknown: First = { mode: Unknown, units: all, high: true }
 const emptyOptional: First = { mode: Optional, units: none, high: false }

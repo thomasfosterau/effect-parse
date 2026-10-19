@@ -306,7 +306,7 @@ const nodeOfParser = (p: Parser.Any): Node | undefined => (p as any)[NodeId]
 export const named: {
   (name: string): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E, R, I>
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I>
-} = dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I> =>
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I> =>
   new ParserImpl(self.step, name, nodeOfParser(self)))
 
 /**
@@ -334,7 +334,7 @@ export const sync = <A>(evaluate: () => A): Parser<A, never, never, Input> =>
  * @since 0.1.0
  * @category constructors
  */
-export const empty: Parser<void, never, never, Input> = described(() => undefined, "empty", {
+export const empty: Parser<void, never, never, Input> = /*#__PURE__*/ described(() => undefined, "empty", {
   _tag: "Succeed",
   value: undefined
 })
@@ -374,7 +374,7 @@ const failBacktrack: Node = { _tag: "Fail", mode: "Backtrack" }
  * @since 0.1.0
  * @category constructors
  */
-export const reject: Parser<never, never, never, Input> = described<never, never, never, Input>(
+export const reject: Parser<never, never, never, Input> = /*#__PURE__*/ described<never, never, never, Input>(
   (state) => state.backtrack("Fail"),
   "reject",
   failBacktrack
@@ -400,7 +400,7 @@ export const failMessage = (message: string): Parser<never, never, never, Input>
  * @since 0.1.0
  * @category constructors
  */
-export const todo: Parser<never, never, never, Input> = described<never, never, never, Input>(
+export const todo: Parser<never, never, never, Input> = /*#__PURE__*/ described<never, never, never, Input>(
   (state) => state.failMessage("Cut", "Assert", "`todo` parser reached"),
   "todo",
   { _tag: "Fail", mode: "Cut" }
@@ -441,7 +441,7 @@ export const suspend = <A, E = never, R = never, I extends Input = string>(
  * @since 0.1.0
  * @category constructors
  */
-export const location: Parser<number, never, never, Input> = described((state) => state.pos, "location", {
+export const location: Parser<number, never, never, Input> = /*#__PURE__*/ described((state) => state.pos, "location", {
   _tag: "Location"
 })
 
@@ -453,7 +453,7 @@ export const location: Parser<number, never, never, Input> = described((state) =
  * @since 0.1.0
  * @category constructors
  */
-export const eof: Parser<void, never, never, Input> = described((state) => {
+export const eof: Parser<void, never, never, Input> = /*#__PURE__*/ described((state) => {
   if (state.pos < state.end) return state.backtrack("Eof", expectedEof)
   if (state.partial) return state.incomplete(1, expectedEof)
   return undefined
@@ -474,7 +474,7 @@ const expectedEof = ["end of input"]
 export const map: {
   <A, B>(f: (a: A) => B): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<B, E, R, I>
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, E, R, I>
-} = dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, E, R, I> => {
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, E, R, I> => {
   const step = self.step
   return described((state) => {
     const a = step(state)
@@ -518,7 +518,7 @@ export const fromEntries = <K extends PropertyKey, V, E, R, I extends Input>(
 export const as: {
   <B>(value: B): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<B, E, R, I>
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, value: B): Parser<B, E, R, I>
-} = dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, value: B): Parser<B, E, R, I> => {
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, value: B): Parser<B, E, R, I> => {
   const step = self.step
   return described((state) => step(state) === Fail ? Fail : value, self.name, { _tag: "As", self, value })
 })
@@ -550,7 +550,7 @@ export const asSome = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Pars
 export const tap: {
   <A>(f: (a: A) => void): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E, R, I>
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, f: (a: A) => void): Parser<A, E, R, I>
-} = dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, f: (a: A) => void): Parser<A, E, R, I> => {
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, f: (a: A) => void): Parser<A, E, R, I> => {
   const step = self.step
   return described((state) => {
     const a = step(state)
@@ -574,7 +574,7 @@ export const flatMap: {
     self: Parser<A, E, R, I>,
     f: (a: A) => Parser<B, E2, R2, I2>
   ): Parser<B, E | E2, R | R2, I & I2>
-} = dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
   self: Parser<A, E, R, I>,
   f: (a: A) => Parser<B, E2, R2, I2>
 ): Parser<B, E | E2, R | R2, I & I2> => {
@@ -613,7 +613,7 @@ export const mapParser: {
     self: Parser<A, E, R, I>,
     inner: Parser<B, E2, R2, A>
   ): Parser<B, E | E2, R | R2, I>
-} = dual(2, <A extends Input, E, R, I extends Input, B, E2, R2>(
+} = /*#__PURE__*/ dual(2, <A extends Input, E, R, I extends Input, B, E2, R2>(
   self: Parser<A, E, R, I>,
   inner: Parser<B, E2, R2, A>
 ): Parser<B, E | E2, R | R2, I> => {
@@ -659,7 +659,7 @@ export const tryMap: {
     self: Parser<A, E, R, I>,
     f: (a: A) => Result.Result<B, E2>
   ): Parser<B, E | E2, R, I>
-} = dual(2, <A, E, R, I extends Input, B, E2>(
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2>(
   self: Parser<A, E, R, I>,
   f: (a: A) => Result.Result<B, E2>
 ): Parser<B, E | E2, R, I> => {
@@ -685,7 +685,7 @@ export const tryMap: {
 export const tryMapUnknown: {
   <A, B>(f: (a: A) => B): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<B, E | unknown, R, I>
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, E | unknown, R, I>
-} = dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, unknown, R, I> =>
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, unknown, R, I> =>
   tryMap(self, (a) => {
     try {
       return Result.succeed(f(a))
@@ -705,7 +705,7 @@ export const tryMapUnknown: {
 export const filterMap: {
   <A, B>(f: (a: A) => Option.Option<B>): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<B, E, R, I>
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => Option.Option<B>): Parser<B, E, R, I>
-} = dual(2, <A, E, R, I extends Input, B>(
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(
   self: Parser<A, E, R, I>,
   f: (a: A) => Option.Option<B>
 ): Parser<B, E, R, I> => {
@@ -735,7 +735,7 @@ export const filter: {
   <A>(predicate: (a: NoInfer<A>) => boolean): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E, R, I>
   <A, E, R, I extends Input, B extends A>(self: Parser<A, E, R, I>, refinement: (a: A) => a is B): Parser<B, E, R, I>
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, predicate: (a: A) => boolean): Parser<A, E, R, I>
-} = dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, predicate: (a: A) => boolean) => {
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, predicate: (a: A) => boolean) => {
   const step = self.step
   return described<A, E, R, I>((state) => {
     const start = state.pos
@@ -773,7 +773,7 @@ export const filterOrFail: {
     predicate: (a: A) => boolean,
     orFailWith: (a: A) => E2
   ): Parser<A, E | E2, R, I>
-} = dual(3, <A, E, R, I extends Input, E2>(
+} = /*#__PURE__*/ dual(3, <A, E, R, I extends Input, E2>(
   self: Parser<A, E, R, I>,
   predicate: (a: A) => boolean,
   orFailWith: (a: A) => E2
@@ -934,7 +934,7 @@ export const complete = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Pa
 export const context: {
   (label: string): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E, R, I>
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, label: string): Parser<A, E, R, I>
-} = dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, label: string): Parser<A, E, R, I> => {
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, label: string): Parser<A, E, R, I> => {
   const step = self.step
   return described((state) => {
     const a = step(state)
@@ -967,7 +967,7 @@ export const context: {
 export const expected: {
   (description: string): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E, R, I>
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, description: string): Parser<A, E, R, I>
-} = dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, description: string): Parser<A, E, R, I> => {
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, description: string): Parser<A, E, R, I> => {
   const step = self.step
   const desc = [description]
   return described((state) => {
@@ -993,7 +993,7 @@ export const expected: {
 export const mapError: {
   <E, E2>(f: (e: E) => E2): <A, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E2, R, I>
   <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, f: (e: E) => E2): Parser<A, E2, R, I>
-} = dual(2, <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, f: (e: E) => E2): Parser<A, E2, R, I> => {
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, f: (e: E) => E2): Parser<A, E2, R, I> => {
   const step = self.step
   return described((state) => {
     const a = step(state)
@@ -1015,7 +1015,7 @@ export const mapError: {
 export const orFail: {
   <E2>(error: () => E2): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E2, R, I>
   <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, error: () => E2): Parser<A, E2, R, I>
-} = dual(2, <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, error: () => E2): Parser<A, E2, R, I> => {
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, error: () => E2): Parser<A, E2, R, I> => {
   const step = self.step
   return described((state) => {
     const start = state.pos
@@ -1043,7 +1043,7 @@ export const orElse: {
     self: Parser<A, E, R, I>,
     that: () => Parser<B, E2, R2, I2>
   ): Parser<A | B, E | E2, R | R2, I & I2>
-} = dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
   self: Parser<A, E, R, I>,
   that: () => Parser<B, E2, R2, I2>
 ): Parser<A | B, E | E2, R | R2, I & I2> => alt(self, suspend(that)))
@@ -1058,7 +1058,7 @@ export const orElse: {
 export const orElseSucceed: {
   <B>(value: () => B): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A | B, E, R, I>
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, value: () => B): Parser<A | B, E, R, I>
-} = dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, value: () => B): Parser<A | B, E, R, I> => {
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, value: () => B): Parser<A | B, E, R, I> => {
   const step = self.step
   return described((state) => {
     const start = state.pos
@@ -1257,7 +1257,7 @@ export const zip: {
     self: Parser<A, E, R, I>,
     that: Parser<B, E2, R2, I2>
   ): Parser<[A, B], E | E2, R | R2, I & I2>
-} = dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
   self: Parser<A, E, R, I>,
   that: Parser<B, E2, R2, I2>
 ): Parser<[A, B], E | E2, R | R2, I & I2> => zipWith(self, that, (a, b) => [a, b]))
@@ -1278,7 +1278,7 @@ export const zipWith: {
     that: Parser<B, E2, R2, I2>,
     f: (a: A, b: B) => C
   ): Parser<C, E | E2, R | R2, I & I2>
-} = dual(3, <A, E, R, I extends Input, B, E2, R2, I2 extends Input, C>(
+} = /*#__PURE__*/ dual(3, <A, E, R, I extends Input, B, E2, R2, I2 extends Input, C>(
   self: Parser<A, E, R, I>,
   that: Parser<B, E2, R2, I2>,
   f: (a: A, b: B) => C
@@ -1308,7 +1308,7 @@ export const zipLeft: {
     self: Parser<A, E, R, I>,
     that: Parser<B, E2, R2, I2>
   ): Parser<A, E | E2, R | R2, I & I2>
-} = dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
   self: Parser<A, E, R, I>,
   that: Parser<B, E2, R2, I2>
 ): Parser<A, E | E2, R | R2, I & I2> => terminated(self, that))
@@ -1327,7 +1327,7 @@ export const zipRight: {
     self: Parser<A, E, R, I>,
     that: Parser<B, E2, R2, I2>
   ): Parser<B, E | E2, R | R2, I & I2>
-} = dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
   self: Parser<A, E, R, I>,
   that: Parser<B, E2, R2, I2>
 ): Parser<B, E | E2, R | R2, I & I2> => preceded(self, that))
@@ -1498,7 +1498,7 @@ export const gen = <Eff extends Parser.Any, AEff>(
  * @since 0.1.0
  * @category do notation
  */
-export const Do: Parser<{}, never, never, Input> = succeed({})
+export const Do: Parser<{}, never, never, Input> = /*#__PURE__*/ succeed({})
 
 /**
  * Binds the output of a parser to a field of the Do record.
@@ -1518,7 +1518,7 @@ export const bind: {
     name: Exclude<N, keyof A>,
     f: (a: NoInfer<A>) => Parser<B, E2, R2, I2>
   ): Parser<Simplify<Omit<A, N> & { [K in N]: B }>, E | E2, R | R2, I & I2>
-} = dual(3, (self: Parser.Any, name: string, f: (a: any) => Parser.Any): Parser.Any =>
+} = /*#__PURE__*/ dual(3, (self: Parser.Any, name: string, f: (a: any) => Parser.Any): Parser.Any =>
   flatMap(self, (a) => map(f(a), (b) => ({ ...a, [name]: b }))))
 
 /**
@@ -1530,7 +1530,7 @@ export const bind: {
 export const bindTo: {
   <N extends string>(name: N): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<{ [K in N]: A }, E, R, I>
   <A, E, R, I extends Input, N extends string>(self: Parser<A, E, R, I>, name: N): Parser<{ [K in N]: A }, E, R, I>
-} = dual(2, (self: Parser.Any, name: string): Parser.Any => map(self, (a) => ({ [name]: a })))
+} = /*#__PURE__*/ dual(2, (self: Parser.Any, name: string): Parser.Any => map(self, (a) => ({ [name]: a })))
 
 const let_: {
   <N extends string, A extends object, B>(
@@ -1542,7 +1542,7 @@ const let_: {
     name: Exclude<N, keyof A>,
     f: (a: NoInfer<A>) => B
   ): Parser<Simplify<Omit<A, N> & { [K in N]: B }>, E, R, I>
-} = dual(3, (self: Parser.Any, name: string, f: (a: any) => unknown): Parser.Any =>
+} = /*#__PURE__*/ dual(3, (self: Parser.Any, name: string, f: (a: any) => unknown): Parser.Any =>
   map(self, (a) => ({ ...a, [name]: f(a) })))
 
 export {
@@ -1828,7 +1828,7 @@ export const repeat: {
     self: Parser<A, E, R, I>,
     range?: Rg
   ): Parser<Repeated<A, Rg>, E, R, I>
-} = dual(isParserArg, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, range?: Range) =>
+} = /*#__PURE__*/ dual(isParserArg, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, range?: Range) =>
   foldImpl<A, Array<A>, E, R, I>(self, range, () => [], (acc, a) => {
     acc.push(a)
     return acc
@@ -1853,7 +1853,7 @@ export const fold: {
     readonly f: (acc: B, a: A) => B
     readonly range?: Range | undefined
   }): Parser<B, E, R, I>
-} = dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, options: {
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, options: {
   readonly init: () => B
   readonly f: (acc: B, a: A) => B
   readonly range?: Range | undefined
@@ -1879,7 +1879,7 @@ export const repeatTill: {
     end: Parser<B, E2, R2, I2>,
     range?: Rg
   ): Parser<[Repeated<A, Rg>, B], E | E2, R | R2, I & I2>
-} = dual(isTwoParserArgs, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+} = /*#__PURE__*/ dual(isTwoParserArgs, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
   self: Parser<A, E, R, I>,
   end: Parser<B, E2, R2, I2>,
   range?: Range
@@ -1945,7 +1945,7 @@ export const separated: {
     separator: Parser<S, E2, R2, I2>,
     range?: Rg
   ): Parser<Repeated<A, Rg>, E | E2, R | R2, I & I2>
-} = dual(isTwoParserArgs, <A, E, R, I extends Input, S, E2, R2, I2 extends Input>(
+} = /*#__PURE__*/ dual(isTwoParserArgs, <A, E, R, I extends Input, S, E2, R2, I2 extends Input>(
   self: Parser<A, E, R, I>,
   separator: Parser<S, E2, R2, I2>,
   range?: Range
@@ -2173,7 +2173,7 @@ export const provideService: {
     key: Context.Key<Id, S>,
     service: NoInfer<S>
   ): Parser<A, E, Exclude<R, Id>, I>
-} = dual(3, <A, E, R, I extends Input, Id, S>(
+} = /*#__PURE__*/ dual(3, <A, E, R, I extends Input, Id, S>(
   self: Parser<A, E, R, I>,
   key: Context.Key<Id, S>,
   service: S
@@ -2204,7 +2204,7 @@ export const provide: {
     self: Parser<A, E, R, I>,
     context: Context.Context<R2>
   ): Parser<A, E, Exclude<R, R2>, I>
-} = dual(2, <A, E, R, I extends Input, R2>(
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, R2>(
   self: Parser<A, E, R, I>,
   context: Context.Context<R2>
 ): Parser<A, E, Exclude<R, R2>, I> => {
@@ -2242,7 +2242,7 @@ export const resumeAfter: {
     self: Parser<A, E, R, I>,
     recover: Parser<B, E2, R2, I2>
   ): Parser<Option.Option<A>, E | E2, R | R2, I & I2>
-} = dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
   self: Parser<A, E, R, I>,
   recover: Parser<B, E2, R2, I2>
 ): Parser<Option.Option<A>, E | E2, R | R2, I & I2> => {
@@ -2280,7 +2280,7 @@ export const retryAfter: {
     self: Parser<A, E, R, I>,
     recover: Parser<B, E2, R2, I2>
   ): Parser<A, E | E2, R | R2, I & I2>
-} = dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
   self: Parser<A, E, R, I>,
   recover: Parser<B, E2, R2, I2>
 ): Parser<A, E | E2, R | R2, I & I2> => {
@@ -2317,7 +2317,7 @@ export const retryAfter: {
 export const trace: {
   (name: string): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E, R, I>
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I>
-} = dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I> => {
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I> => {
   const step = self.step
   return described((state) => {
     const tracer = state.tracer
@@ -2435,13 +2435,13 @@ export interface CompileOptions {
 export const compile: {
   (options?: CompileOptions): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E, R, I>
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, options?: CompileOptions): Parser<A, E, R, I>
-} = dual(isParserArg, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, options?: CompileOptions) => {
+} = /*#__PURE__*/ dual(isParserArg, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, options?: CompileOptions) => {
   Compiler.register(self, options?.backend ?? "auto")
   return self
 })
 
 /** Returned by {@link runCompiled} when there is no compiled form to run. */
-const NotCompiled: unique symbol = Symbol("NotCompiled")
+const NotCompiled: unique symbol = /*#__PURE__*/ Symbol("NotCompiled")
 
 /**
  * Runs the compiled form of `self`, if it has one: returns its value, or
