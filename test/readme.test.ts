@@ -93,3 +93,28 @@ it("Text and Encoding doc examples behave as documented", () => {
   expect(Encoding.sniff(new Uint8Array([0xff, 0xfe, 0x41, 0x00]))).toEqual(Option.some(Encoding.utf16le))
   expect(Text.utf8.encoding).toBe(Encoding.utf8)
 })
+
+it("README hoisted generator example behaves like the inline one", () => {
+  const inline = Parser.gen(function*() {
+    const name = yield* Token.takeWhile(Ascii.isAlphanumeric, { min: 1 })
+    yield* Token.literal(": ")
+    const value = yield* Ascii.tillLineEnding
+    yield* Ascii.lineEnding
+    return { name, value }
+  })
+
+  const colon = Token.literal(": ")
+  const name = Token.takeWhile(Ascii.isAlphanumeric, { min: 1 })
+  const header = Parser.gen(function*() {
+    const n = yield* name
+    yield* colon
+    const value = yield* Ascii.tillLineEnding
+    yield* Ascii.lineEnding
+    return { name: n, value }
+  })
+
+  expect(Parser.parse(header, "Host: example.com\r\n")).toEqual(Result.succeed({ name: "Host", value: "example.com" }))
+  for (const input of ["Host: example.com\n", "Host example.com\n", ": x\n"]) {
+    expect(Parser.parse(header, input)).toEqual(Parser.parse(inline, input))
+  }
+})
