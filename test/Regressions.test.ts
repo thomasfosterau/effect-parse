@@ -1,6 +1,6 @@
 import { Effect, Option, Result, Stream } from "effect"
 import { describe, expect, it } from "vitest"
-import { Ascii, Expression, Parser, ParserStream, Token } from "../src/index.js"
+import { Ascii, Compiler, Expression, Parser, ParserStream, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 
 describe("regressions", () => {
@@ -67,7 +67,7 @@ describe("furthest failure and commits (#21)", () => {
 
   const errorOf = (p: Parser.Parser<unknown>, input: string) => {
     const e = expectFailure(p, input)
-    const compiled = expectFailure(Parser.compile(p), input)
+    const compiled = expectFailure(Compiler.jit(p), input)
     expect({ offset: compiled.offset, mode: compiled.mode, expected: compiled.expected, message: compiled.message })
       .toEqual({ offset: e.offset, mode: e.mode, expected: e.expected, message: e.message })
     return e

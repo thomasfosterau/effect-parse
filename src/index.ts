@@ -3,6 +3,7 @@
  */
 export * as Input from "./Input.js"
 export * as Parser from "./Parser.js"
+export * as Compiler from "./Compiler.js"
 export * as ParseError from "./ParseError.js"
 export * as Token from "./Token.js"
 export * as Ascii from "./Ascii.js"

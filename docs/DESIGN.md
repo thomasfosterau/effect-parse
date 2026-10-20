@@ -239,6 +239,7 @@ expected value
 | `Binary` | `u8`, `i8`, `be*/le*` numbers (16/24/32 as `number`, 64/128 as `bigint`), floats, `lengthTake`, `lengthRepeat`, `lengthAndThen`, `bits` |
 | `Bits` | Bit-level parsers inside `Binary.bits`: `take`, `pattern`, `bool`, `bytes` |
 | `Expression` | Pratt / precedence-climbing expression parser (from `nom-language::precedence`) |
+| `Compiler` | Compile a parser with the JIT (`jit`) or the closure compiler (`closure`) (section 6) |
 | `ParserStream` | Run a parser repeatedly over an Effect `Stream` of chunks (partial parsing) |
 | `ParserSchema` | Build an Effect `Schema` that decodes a string with a parser |
 | `Syntax` | Concrete syntax trees and incremental reparsing, after Tree-sitter (section 8) |
@@ -343,14 +344,15 @@ their code point ranges so they compile to comparisons, as are
 Describing a grammar costs one small object per combinator call and nothing
 while parsing, so phase 1 changes no behaviour and no timings.
 
-### Opt-in compilation: `Parser.compile`
+### Opt-in compilation: the `Compiler` module
 
 ```ts
-export const json = Parser.compile(Parser.preceded(ws, value))
+export const json = Compiler.jit(Parser.preceded(ws, value))
 Parser.parse(json, text) // compiled on first use, same Result as before
 ```
 
-`Parser.compile(p, options?)` registers `p` in a `WeakMap` and returns `p`
+`Compiler.jit(p)` and `Compiler.closure(p)` register `p` in a `WeakMap`, with
+the backend that compiles it, and return `p`
 itself, so there is no new parser type and no new runner. The compiled code
 is built lazily on the first run, once per input kind (string, bytes,
 array), and cached. `parse`, `parseSync`, `parsePeek` and `parseEffect` look
@@ -375,13 +377,21 @@ Compilation is opt-in, not automatic, because:
   CSP reports as a violation even when the probe is caught. It should only
   happen when the user asked for compilation.
 - **Ergonomics.** Grammars are module-level constants, so one
-  `Parser.compile(...)` around the root is all it takes. Sub-parsers need
+  `Compiler.jit(...)` around the root is all it takes. Sub-parsers need
   nothing.
 
-`options.backend` is `"auto"` (the default: the JIT when `new Function`
-works, otherwise the closure compiler) or `"closure"` (never generates code,
-not even the probe, for CSP environments). A separate `"jit"` choice would
-add nothing: it too has to fall back when `new Function` is blocked.
+`Compiler.jit` uses the JIT when `new Function` works, and otherwise the
+closure compiler. `Compiler.closure` never generates code, not even the
+probe, for CSP environments.
+
+The two backends are separate functions, not an option of one function,
+so that bundles contain only the backends a program uses. `Parser` and
+the runners don't import any compiler: they look a parser up in the
+registry (`internal/compiler/registry.ts`), and the registry entry holds
+the backend that was passed in. A program that never compiles bundles
+neither backend. A program that uses only `Compiler.closure` bundles no
+`new Function`, which CSP and supply-chain scanners flag even when it never
+runs. The JIT imports the closure compiler, for its fallbacks.
 
 ### When the compiled code runs
 

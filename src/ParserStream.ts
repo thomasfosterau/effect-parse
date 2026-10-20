@@ -31,7 +31,7 @@ import * as Stream from "effect/Stream"
 import type { BinaryInput, Input, Source } from "./Input.js"
 import { Fail, Failure, fromSource, State } from "./Input.js"
 import * as ParseError from "./ParseError.js"
-import * as Compiler from "./internal/compiler/registry.js"
+import * as Registry from "./internal/compiler/registry.js"
 import type * as Resume from "./internal/resume.js"
 import type { Parser } from "./Parser.js"
 
@@ -225,7 +225,7 @@ class Incremental<A, E, I extends Chunkable> {
 
   /** The step attempts run: the parser's resumable compiled code if it was compiled, else the interpreter. */
   private step(state: State<I>): unknown {
-    return (Compiler.stepFor(this.parser, state, true) ?? this.parser.step)(state)
+    return (Registry.stepFor(this.parser, state, true) ?? this.parser.step)(state)
   }
 
   private attempt(): void {
@@ -277,8 +277,8 @@ class Incremental<A, E, I extends Chunkable> {
  *
  * The result and any `ParseError` are those of parsing the whole input at
  * once: errors are reported once the stream has ended, by an ordinary
- * interpreted parse of the whole input. A parser compiled with
- * `Parser.compile` streams compiled too (with a build that handles partial
+ * interpreted parse of the whole input. A parser compiled with the
+ * `Compiler` module streams compiled too (with a build that handles partial
  * input), which is several times faster. As with compiled parsers,
  * callbacks should be pure: the elements parsed before a checkpoint are
  * not parsed again, and on failure everything is parsed again.

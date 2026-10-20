@@ -42,7 +42,7 @@ import type { ErrMode, Input, Slice, Source, TraceEvent } from "./Input.js"
 import { Fail, Failure, mergeExpected, mergeFailures, State } from "./Input.js"
 import type { ErrorKind } from "./ParseError.js"
 import * as ParseError from "./ParseError.js"
-import * as Compiler from "./internal/compiler/registry.js"
+import * as Registry from "./internal/compiler/registry.js"
 import * as Entries from "./internal/entries.js"
 import * as Resume from "./internal/resume.js"
 import type { Node } from "./internal/node.js"
@@ -2415,75 +2415,8 @@ export const consoleTracer = (event: TraceEvent): void => {
 }
 
 // -----------------------------------------------------------------------------
-// Compilation
+// Compiled parsers
 // -----------------------------------------------------------------------------
-
-/**
- * Options for {@link compile}.
- *
- * @since 0.1.0
- * @category compilation
- */
-export interface CompileOptions {
-  /**
-   * Which compiler to use:
-   *
-   * - `"auto"` (the default): generated code (a JIT) where `new Function`
-   *   is allowed, otherwise specialized closures
-   * - `"closure"`: specialized closures only. It never generates code, so
-   *   it is the choice under a Content Security Policy, where even probing
-   *   for `new Function` is reported as a violation.
-   */
-  readonly backend?: "auto" | "closure" | undefined
-}
-
-/**
- * Compiles a parser into fused, specialized code, and returns the same
- * parser. Grammars are written as usual; compilation only makes
- * {@link parse}, {@link parseSync}, {@link parsePeek}, {@link parsePartial}
- * and {@link parseEffect} faster, from any `offset`. Compile the root of a
- * grammar once, where it is defined:
- *
- * ```ts
- * import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
- *
- * export const list = Parser.compile(
- *   Parser.separated(Ascii.decInt, Token.literal(","))
- * )
- * Parser.parse(list, "1,2,3") // Result.succeed([1, 2, 3]), compiled
- * ```
- *
- * The code is generated lazily on the first run, for each kind of input
- * (string, bytes or array), and cached with the parser.
- *
- * **Results and errors are unchanged.** Compiled code records no
- * diagnostics. When it fails, the parser runs again, interpreted, from the
- * same offset, so every `ParseError` (offset, expected, context, cause and
- * message) is exactly the one the interpreter reports.
- *
- * **Callbacks should be pure.** On an input that fails, the callbacks given
- * to `map`, `filter`, `tryMap`, `tap`, `fold`, ... may run twice, once
- * compiled and once interpreted. Callbacks whose results are discarded
- * (a `map` inside `taken` or `preceded`, for example) may not run at all,
- * nor those of a branch that is certain to fail, and token-set predicates
- * may be called once per character code and cached.
- *
- * {@link parsePartial} and `ParserStream.parseAll` run a build that
- * handles partial input. `ParserStream.parseMany`, {@link parseRecoverable}
- * and runs with the `trace` option are always interpreted. Parsers that
- * can't be described, such as {@link make} and {@link gen}, run interpreted
- * inside compiled code.
- *
- * @since 0.1.0
- * @category compilation
- */
-export const compile: {
-  (options?: CompileOptions): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E, R, I>
-  <A, E, R, I extends Input>(self: Parser<A, E, R, I>, options?: CompileOptions): Parser<A, E, R, I>
-} = /*#__PURE__*/ dual(isParserArg, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, options?: CompileOptions) => {
-  Compiler.register(self, options?.backend ?? "auto")
-  return self
-})
 
 /** Returned by {@link runCompiled} when there is no compiled form to run. */
 const NotCompiled: unique symbol = /*#__PURE__*/ Symbol("NotCompiled")
@@ -2501,7 +2434,7 @@ const runCompiled = <I extends Input>(
   resumable = false
 ): unknown => {
   if (state.tracer !== undefined || state.recovered !== undefined) return NotCompiled
-  const step = Compiler.stepFor(self, state, resumable)
+  const step = Registry.stepFor(self, state, resumable)
   if (step === undefined) return NotCompiled
   const a = step(state)
   if (a === Fail || (whole && state.pos < state.end)) return Fail
@@ -2709,8 +2642,8 @@ export type PartialResult<A> =
  * with the `offset` option (see {@link ParseOptions}) it is where the next
  * parse starts.
  *
- * A parser built with {@link compile} runs compiled, with a build that
- * handles partial input. When it fails or needs more input, it runs again
+ * A parser compiled with the `Compiler` module runs compiled, with a build
+ * that handles partial input. When it fails or needs more input, it runs again
  * interpreted, so `Incomplete`'s `needed` and every `ParseError` are the
  * interpreter's.
  *

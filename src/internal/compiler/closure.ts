@@ -19,6 +19,7 @@ import { charOf, fastLimit, fold, validate } from "../text.js"
 import { countTokens, indexOf } from "../tokens.js"
 import type { AltPlan } from "./first.js"
 import * as Resume from "../resume.js"
+import type { Backend } from "./registry.js"
 import { entriesShape, pairOf } from "./entries.js"
 import { FirstSets, planAlt } from "./first.js"
 import type { CharSet } from "./sets.js"
@@ -1581,4 +1582,16 @@ export const compileClosure = (
   const compiler = new Compiler(kind, resumable)
   const step = compiler.compile(root, true)
   return { step, fallbacks: compiler.fallbacks }
+}
+
+/** The closure compiler as a backend. */
+export const backend: Backend = {
+  build: (p, kind, resumable) => {
+    try {
+      const { fallbacks, step } = compileClosure(p, kind, resumable)
+      return { backend: "closure", step, fallbacks, error: undefined }
+    } catch (error) {
+      return { backend: undefined, step: undefined, fallbacks: [], error }
+    }
+  }
 }

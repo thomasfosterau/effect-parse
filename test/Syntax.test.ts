@@ -2,7 +2,7 @@ import { Option, Result } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Json from "../examples/json-syntax.js"
 import type { Input } from "../src/index.js"
-import { Ascii, Expression, Parser, Syntax, Text, Token } from "../src/index.js"
+import { Ascii, Compiler, Expression, Parser, Syntax, Text, Token } from "../src/index.js"
 import { randomJson, rng } from "./generators.js"
 
 const ws = Ascii.multispace0
@@ -212,8 +212,8 @@ describe("Syntax", () => {
   describe("annotations outside Syntax", () => {
     it("change nothing, interpreted or compiled", () => {
       const docs = ["[1, tru, 3]", "{\"a\": [1, {\"b\": null}], \"c\": \"x\"}", "[1,,2]", "[", " 12 "]
-      for (const backend of ["closure", "auto"] as const) {
-        const compiled = Parser.compile(Parser.named(Json.json, "json"), { backend })
+      for (const backend of ["closure", "jit"] as const) {
+        const compiled = Compiler[backend](Parser.named(Json.json, "json"))
         for (const doc of docs) {
           const interpreted = Parser.parse(Json.json, doc)
           const fast = Parser.parse(compiled, doc)

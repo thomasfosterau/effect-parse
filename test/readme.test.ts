@@ -1,6 +1,6 @@
 import { Context, Data, Effect, Option, Result, Stream } from "effect"
 import { expect, it } from "vitest"
-import { Ascii, Encoding, Input, Parser, ParseError, ParserStream, Syntax, Text, Token } from "../src/index.js"
+import { Ascii, Compiler, Encoding, Input, Parser, ParseError, ParserStream, Syntax, Text, Token } from "../src/index.js"
 
 it("README examples behave as documented", () => {
   const point = Parser.gen(function*() {
@@ -22,7 +22,7 @@ it("README examples behave as documented", () => {
 
   expect(Parser.parsePartial(Ascii.digit1, "123")).toEqual(Result.succeed({ _tag: "Incomplete", needed: Option.some(1) }))
 
-  const lexeme = Parser.compile(Parser.preceded(Ascii.multispace0, Ascii.alpha1))
+  const lexeme = Compiler.jit(Parser.preceded(Ascii.multispace0, Ascii.alpha1))
   expect(Parser.parsePartial(lexeme, "let x = 1", { offset: 3 })).toEqual(Result.succeed({ _tag: "Done", value: "x", offset: 5 }))
   expect(Parser.parsePeek(lexeme, "let x = 1", { offset: 0 })).toEqual(Result.succeed([" x = 1", "let"]))
 
@@ -102,7 +102,7 @@ it("Text and Encoding doc examples behave as documented", () => {
     (c) => c === 0x5f || (c >= 0x61 && c <= 0x7a) || c >= 0xc0,
     [[0x5f, 0x5f], [0x61, 0x7a], [0xc0, 0x10ffff]]
   )
-  expect(Parser.parse(Parser.compile(Token.takeWhile(isNameStart)), "_aé😀")).toEqual(Result.succeed("_aé😀"))
+  expect(Parser.parse(Compiler.jit(Token.takeWhile(isNameStart)), "_aé😀")).toEqual(Result.succeed("_aé😀"))
 })
 
 it("README: reusing a state for one run per token", () => {

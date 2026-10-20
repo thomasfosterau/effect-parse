@@ -11,8 +11,8 @@
  * - The string body is a token set (a lookup table), not a predicate.
  *
  * ```ts
- * Parser.parse(Parser.compile(json), '{"a": [1, "é"]}')
- * Parser.parse(Parser.compile(makeJson(Text.utf8)), new TextEncoder().encode('{"a": [1, "é"]}'))
+ * Parser.parse(Compiler.jit(json), '{"a": [1, "é"]}')
+ * Parser.parse(Compiler.jit(makeJson(Text.utf8)), new TextEncoder().encode('{"a": [1, "é"]}'))
  * ```
  */
 import { Ascii, Parser, Text, Token } from "@thomasfosterau/effect-parse"
