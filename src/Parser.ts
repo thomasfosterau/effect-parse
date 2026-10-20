@@ -45,6 +45,7 @@ import * as ParseError from "./ParseError.js"
 import * as Compiler from "./internal/compiler/registry.js"
 import * as Entries from "./internal/entries.js"
 import * as Resume from "./internal/resume.js"
+import * as Stack from "./internal/stack.js"
 import type { Node } from "./internal/node.js"
 import { bounds, NodeId } from "./internal/node.js"
 
@@ -410,6 +411,11 @@ export const todo: Parser<never, never, never, Input> = /*#__PURE__*/ described<
  * Lazily constructs a parser, which is needed to define recursive grammars.
  * The thunk is evaluated once, on first use.
  *
+ * Each level of recursion uses some of the call stack, interpreted or
+ * compiled, so input nested a few thousand levels deep exhausts it. The
+ * runners catch the overflow and fail with an unrecoverable `ParseError` of
+ * kind `"TooDeep"` at the offset reached, instead of throwing.
+ *
  * @example
  * ```ts
  * import { Parser, Token } from "@thomasfosterau/effect-parse"
@@ -690,6 +696,7 @@ export const tryMapUnknown: {
     try {
       return Result.succeed(f(a))
     } catch (e) {
+      if (Stack.isStackOverflow(e)) throw e
       return Result.fail(e)
     }
   }))
@@ -2503,7 +2510,7 @@ const runCompiled = <I extends Input>(
   if (state.tracer !== undefined || state.recovered !== undefined) return NotCompiled
   const step = Compiler.stepFor(self, state, resumable)
   if (step === undefined) return NotCompiled
-  const a = step(state)
+  const a = Stack.run(step, state)
   if (a === Fail || (whole && state.pos < state.end)) return Fail
   return a
 }
@@ -2585,7 +2592,7 @@ const runComplete = <A, E, R, I extends Input>(
   self: Parser<A, E, R, I>,
   state: State<I>
 ): Result.Result<A, ParseError.ParseError<E>> => {
-  const a = self.step(state)
+  const a = Stack.run(self.step, state)
   if (a === Fail) return Result.fail(toError(state))
   if (state.pos < state.end) {
     state.backtrack("Eof", expectedEof)
@@ -2680,7 +2687,7 @@ export const parsePeek: {
     return Result.succeed([state.slice(state.pos, state.end), compiled as A])
   }
   if (compiled === Fail) state = makeState(input, options, false)
-  const a = self.step(state)
+  const a = Stack.run(self.step, state)
   if (a === Fail) return Result.fail(toError(state))
   return Result.succeed([state.slice(state.pos, state.end), a])
 }
@@ -2750,7 +2757,7 @@ export const parsePartial: {
   }
   // Re-run interpreted for `needed` and the diagnostics
   if (compiled === Fail) state = makeState(input, options, true)
-  const a = self.step(state)
+  const a = Stack.run(self.step, state)
   if (a !== Fail) return Result.succeed({ _tag: "Done", value: a, offset: state.pos })
   if (state.mode === "Incomplete") {
     const needed = state.failure.needed
