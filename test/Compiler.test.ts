@@ -630,6 +630,17 @@ describe.each(backends)("Parser.compile with the %s backend", (backend) => {
     state.end = 2
     expect(Registry.stepFor(p, state)!(state)).toEqual(["a", "a"])
   })
+
+  it("takeUntil does not match past a state's end (#30)", () => {
+    const p = Parser.compile(Token.takeUntil("-->"), { backend })
+    Parser.parse(p, "-->")
+    const state = new State("abcdefg-->h")
+    state.end = 3
+    expect(typeof Registry.stepFor(p, state)!(state)).toBe("symbol")
+    const fits = new State("abc-->h")
+    fits.end = 6
+    expect(Registry.stepFor(p, fits)!(fits)).toBe("abc")
+  })
 })
 
 // -----------------------------------------------------------------------------

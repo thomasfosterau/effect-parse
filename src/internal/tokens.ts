@@ -368,18 +368,23 @@ export const countTokens = (state: State<Input>, start: number, end: number): nu
   return count
 }
 
-/** Finds `needle` in the input at or after `from`; returns -1 if absent. */
+/** Finds `needle` within `[from, state.end)`; returns -1 if absent. */
 export const indexOf = (state: State<Input>, needle: Input, from: number): number => {
+  // The whole needle must lie before `state.end`, which may narrow the input
+  const last = state.end - needle.length
+  if (from > last) return -1
   switch (state.inputKind) {
-    case 0:
-      return (state.input as string).indexOf(needle as string, from)
+    case 0: {
+      const i = (state.input as string).indexOf(needle as string, from)
+      return i <= last ? i : -1
+    }
     case 1: {
       const hay = state.input as Uint8Array
       const n = needle as Uint8Array
-      if (n.length === 0) return from <= hay.length ? from : -1
+      if (n.length === 0) return from
       const first = n[0]!
       let i = hay.indexOf(first, from)
-      while (i !== -1 && i + n.length <= hay.length) {
+      while (i !== -1 && i <= last) {
         let j = 1
         while (j < n.length && hay[i + j] === n[j]) j++
         if (j === n.length) return i
@@ -390,7 +395,7 @@ export const indexOf = (state: State<Input>, needle: Input, from: number): numbe
     default: {
       const hay = state.input as ReadonlyArray<unknown>
       const n = needle as ReadonlyArray<unknown>
-      outer: for (let i = from; i + n.length <= hay.length; i++) {
+      outer: for (let i = from; i <= last; i++) {
         for (let j = 0; j < n.length; j++) if (hay[i + j] !== n[j]) continue outer
         return i
       }
