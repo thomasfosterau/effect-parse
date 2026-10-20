@@ -112,6 +112,8 @@ export type Node =
     readonly self: P
     readonly init: () => unknown
     readonly f: (acc: any, a: any) => unknown
+    /** Stops the repetition once false of the accumulator (after `min` elements). */
+    readonly while: ((acc: any) => boolean) | undefined
     readonly name: string
   } & Bounds)
   | ({ readonly _tag: "RepeatTill"; readonly self: P; readonly end: P } & Bounds)
