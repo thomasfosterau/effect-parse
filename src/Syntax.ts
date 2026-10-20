@@ -53,6 +53,7 @@ import type { Input, Slice, Source } from "./Input.js"
 import { Fail, fromSource } from "./Input.js"
 import * as ParseError from "./ParseError.js"
 import { nodeOf } from "./internal/node.js"
+import * as Stack from "./internal/stack.js"
 import type { ErrorInfo, Green, Previous, Segment } from "./internal/syntax.js"
 import { absolute, errorKind, SyntaxState } from "./internal/syntax.js"
 import type { Parser } from "./Parser.js"
@@ -698,7 +699,7 @@ const run = <A, E, I extends Input>(
   previous: Previous | undefined
 ): Tree<A, E, I> => {
   const state = new SyntaxState<I>(input, { context: config.context }, previous)
-  const a = config.inner.step(state)
+  const a = Stack.run(config.inner.step, state)
   // Text parsers record the encoding when they fail, which they may have done inside reused nodes
   if (state.encoding === undefined && previous !== undefined) state.encoding = previous.encoding
   let fatal: ErrorInfo | undefined
