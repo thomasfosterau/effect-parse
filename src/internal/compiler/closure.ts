@@ -304,6 +304,7 @@ class Compiler {
       case "MapError":
       case "OrFail":
       case "Trace":
+      case "Syntax":
       case "RetryAfter":
         // Diagnostics only, or inactive outside parseRecoverable / tracing
         return this.compile(node.self, used)

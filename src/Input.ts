@@ -16,6 +16,7 @@
 import * as Context from "effect/Context"
 import type { Encoding } from "./Encoding.js"
 import type { ErrorKind } from "./ParseError.js"
+import type { Builder as SyntaxBuilder } from "./internal/syntax.js"
 
 /**
  * The kinds of input a parser can consume.
@@ -193,7 +194,8 @@ export class State<I extends Input = Input> {
   /** The full input being parsed. */
   readonly input: I
   /** The current offset. Advanced by parsers, rewound on backtracking. */
-  pos: number
+  // Declared, not defined, so that a subclass can make it an accessor
+  declare pos: number
   /** The end offset (the input's length; in bits inside `Bits.bits`). */
   end: number
   /** 0 = string, 1 = Uint8Array, 2 = array. */
@@ -243,6 +245,12 @@ export class State<I extends Input = Input> {
    * @internal
    */
   resume: Map<object, Map<number, unknown>> | undefined = undefined
+  /**
+   * The tree builder of a `Syntax` parse; `undefined` otherwise.
+   *
+   * @internal
+   */
+  syntax: SyntaxBuilder | undefined = undefined
 
   constructor(source: I | Source<I>, options?: {
     readonly partial?: boolean | undefined

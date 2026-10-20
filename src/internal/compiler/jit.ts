@@ -469,6 +469,7 @@ class Emitter {
       case "MapError":
       case "OrFail":
       case "Trace":
+      case "Syntax":
       case "RetryAfter":
         return this.gen(node.self, used, out, fail, fn, d)
       case "ResumeAfter": {

@@ -413,6 +413,8 @@ export const takeUntil: {
       if (state.partial) return state.incomplete(0, expected)
       return state.backtrack("TakeUntil", expected, state.end)
     }
+    // The literal was read but is not consumed (a string literal is up to three bytes per unit of UTF-8)
+    state.syntax?.read(idx + lit.length * (typeof lit === "string" && state.inputKind === 1 ? 3 : 1))
     // As in winnow, the first occurrence must lie within the range
     if (min > 0 || max !== Infinity) {
       const count = countTokens(state, start, idx)

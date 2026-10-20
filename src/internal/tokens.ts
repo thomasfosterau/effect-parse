@@ -405,6 +405,13 @@ export const indexOf = (state: State<Input>, needle: Input, from: number): numbe
  * -1 on mismatch, or -2 when the input ends while matching a prefix.
  */
 export const matchLiteral = (state: State<Input>, lit: Input, caseless: boolean): number => {
+  const r = match(state, lit, caseless)
+  // A failed match may have read up to its length past where it fails (see `Syntax`)
+  if (r < 0 && state.syntax !== undefined) state.syntax.read(state.pos + Math.min(lit.length, state.end - state.pos))
+  return r
+}
+
+const match = (state: State<Input>, lit: Input, caseless: boolean): number => {
   const pos = state.pos
   const len = lit.length
   const avail = state.end - pos

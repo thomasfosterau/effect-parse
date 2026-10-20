@@ -129,6 +129,14 @@ export type Node =
   | { readonly _tag: "ResumeAfter"; readonly self: P; readonly recover: P }
   | { readonly _tag: "RetryAfter"; readonly self: P; readonly recover: P }
   | { readonly _tag: "Trace"; readonly self: P; readonly name: string }
+  /** `Syntax.node`, `Syntax.token` and `Syntax.field`: identities outside `Syntax` parses. */
+  | {
+    readonly _tag: "Syntax"
+    readonly self: P
+    /** The node kind, or `undefined` for a field. */
+    readonly kind: string | undefined
+    readonly named: boolean
+  }
 
 export type Tag = Node["_tag"]
 
@@ -176,6 +184,7 @@ export const children = (node: Node): ReadonlyArray<P> => {
     case "Fold":
     case "Provide":
     case "Trace":
+    case "Syntax":
       return [node.self]
     case "ResumeAfter":
     case "RetryAfter":

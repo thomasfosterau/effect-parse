@@ -83,6 +83,10 @@
       "types": "./dist/ParserStream.d.ts",
       "default": "./dist/ParserStream.js"
     },
+    "./Syntax": {
+      "types": "./dist/Syntax.d.ts",
+      "default": "./dist/Syntax.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -101,6 +105,7 @@
     "bench:native": "node --experimental-strip-types bench/native.bench.ts",
     "bench:stream": "node --experimental-strip-types bench/stream.bench.ts",
     "bench:gen": "node --experimental-strip-types bench/gen.bench.ts",
+    "bench:syntax": "node --experimental-strip-types bench/syntax.bench.ts",
     "check:dist": "node scripts/check-dist.mjs",
     "changeset": "changeset",
     "version": "changeset version && pnpm install --lockfile-only",

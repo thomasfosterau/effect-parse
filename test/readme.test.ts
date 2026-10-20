@@ -1,6 +1,6 @@
 import { Context, Data, Effect, Option, Result, Stream } from "effect"
 import { expect, it } from "vitest"
-import { Ascii, Encoding, Input, Parser, ParseError, ParserStream, Text, Token } from "../src/index.js"
+import { Ascii, Encoding, Input, Parser, ParseError, ParserStream, Syntax, Text, Token } from "../src/index.js"
 
 it("README examples behave as documented", () => {
   const point = Parser.gen(function*() {
@@ -145,4 +145,43 @@ it("README hoisted generator example behaves like the inline one", () => {
   for (const input of ["Host: example.com\n", "Host example.com\n", ": x\n"]) {
     expect(Parser.parse(header, input)).toEqual(Parser.parse(inline, input))
   }
+})
+
+it("Syntax examples behave as documented", () => {
+  const name = Syntax.node(Ascii.alpha1, "name")
+  const number = Syntax.node(Ascii.decInt, "number")
+  const pair = Syntax.node(
+    Parser.separatedPair(Syntax.field(name, "key"), Syntax.token(Token.literal("=")), Syntax.field(number, "value")),
+    "pair"
+  )
+  const config = Parser.separated(pair, Token.literal("\n"))
+
+  const tree = Syntax.parse(config, "width=80\nheight=24")
+  expect(String(tree.root)).toBe("(document (pair key: (name) value: (number)) (pair key: (name) value: (number)))")
+  const node = tree.descendantAt(16)
+  expect([node.kind, node.text, node.value]).toEqual(["number", "24", 24])
+  expect(node.parent?.childByField("key")?.text).toBe("height")
+  expect(tree.lineColumn(node.start)).toEqual({ line: 2, column: 8 })
+  expect(tree.value).toEqual(Option.some([["width", 80], ["height", 24]]))
+
+  const edited = Syntax.replace(tree, 6, 8, "100")
+  expect(edited.value).toEqual(Option.some([["width", 100], ["height", 24]]))
+  expect(edited.reused).toBe(2)
+
+  // The module's own example
+  const ws = Ascii.multispace0
+  const n = Syntax.node(Ascii.decInt, "number")
+  const list = Syntax.node(
+    Parser.delimited(Token.literal("["), Parser.separated(Parser.delimited(ws, n, ws), Token.literal(",")), Token.literal("]")),
+    "list"
+  )
+  const t = Syntax.parse(list, "[1, 2, 3]")
+  expect(String(t.root)).toBe("(list (number) (number) (number))")
+  expect(t.root.descendantAt(4).text).toBe("2")
+  const e = Syntax.replace(t, 4, 5, "20")
+  expect(e.root.namedChild(1)?.value).toBe(20)
+  expect(e.reused).toBe(2)
+  expect(Syntax.reparse(Syntax.parse(n, "12"), "123", [{ start: 2, oldEnd: 2, newEnd: 3 }]).root.value).toBe(123)
+  const comma = Syntax.token(Token.literal(","))
+  expect(Syntax.parse(comma, ",").root.child(0)?.kind).toBe(",")
 })

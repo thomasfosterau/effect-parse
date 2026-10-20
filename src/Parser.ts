@@ -2300,6 +2300,7 @@ export const resumeAfter: {
     state.pos = start
     if (recoverStep(state) === Fail) return state.failWith(mode, failure)
     state.recovered.push(failure)
+    state.syntax?.skipped(start, failure, mode)
     return Option.none()
   }, self.name, { _tag: "ResumeAfter", self, recover })
 })
@@ -2339,6 +2340,7 @@ export const retryAfter: {
       state.pos = start
       if (recoverStep(state) === Fail || state.pos === start) return state.failWith(mode, failure)
       state.recovered.push(failure)
+      state.syntax?.skipped(start, failure, mode)
     }
   }, self.name, { _tag: "RetryAfter", self, recover })
 })

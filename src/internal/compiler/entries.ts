@@ -18,9 +18,9 @@ export const pairOf = (p: ParserLike): { readonly parsers: ReadonlyArray<ParserL
 
 const isDiagnostic = (
   node: Node
-): node is NodeOf<"Context" | "Expected" | "MapError" | "OrFail" | "Trace" | "RetryAfter"> =>
+): node is NodeOf<"Context" | "Expected" | "MapError" | "OrFail" | "Trace" | "Syntax" | "RetryAfter"> =>
   node._tag === "Context" || node._tag === "Expected" || node._tag === "MapError" || node._tag === "OrFail" ||
-  node._tag === "Trace" || node._tag === "RetryAfter"
+  node._tag === "Trace" || node._tag === "Syntax" || node._tag === "RetryAfter"
 
 /**
  * Whether `map(p, Object.fromEntries)` can build its object directly: `p`
