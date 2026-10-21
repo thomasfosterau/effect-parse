@@ -25,8 +25,9 @@ import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from 
 import * as Resume from "../resume.js"
 import { charOf, fastLimit, latin1, string, utf16be, utf16le, utf8, validate } from "../text.js"
 import type { ClosureCompiler, Fallback, Step } from "./closure.js"
-import { createClosureCompiler } from "./closure.js"
+import { backend as closureBackend, createClosureCompiler } from "./closure.js"
 import { entriesShape, pairOf } from "./entries.js"
+import type { Backend } from "./registry.js"
 import type { First } from "./first.js"
 import { planAlt, Strict } from "./first.js"
 import type { CharSet } from "./sets.js"
@@ -1093,4 +1094,21 @@ export const compileJit = (root: ParserLike, kind: 0 | 1 | 2, resumable = false)
   const step: Step = (state) =>
     state.end === state.input.length ? run(state) : (closure ??= createClosureCompiler(kind, resumable).compile(root, true))(state)
   return { step, fallbacks, source }
+}
+
+/**
+ * The JIT as a backend: generated code where `new Function` is allowed,
+ * otherwise (or if generating fails) the closure compiler.
+ */
+export const backend: Backend = {
+  build: (p, kind, resumable) => {
+    if (!jitSupported()) return closureBackend.build(p, kind, resumable)
+    try {
+      const { fallbacks, source, step } = compileJit(p, kind, resumable)
+      return { backend: "jit", step, fallbacks, error: undefined, source }
+    } catch (error) {
+      // Fall back to the closure compiler, remembering why
+      return { ...closureBackend.build(p, kind, resumable), jitError: error }
+    }
+  }
 }

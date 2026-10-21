@@ -7,7 +7,7 @@ import * as Json from "../examples/json.js"
 import * as JsonFast from "../examples/json-fast.js"
 import { makeJson } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
-import { Encoding, Parser, ParserStream, Text } from "../src/index.js"
+import { Compiler, Encoding, Parser, ParserStream, Text } from "../src/index.js"
 import { expectFailure, expectSuccess } from "./utils.js"
 
 describe("examples/json", () => {
@@ -82,7 +82,7 @@ describe("examples/json-fast", () => {
       "{\"__proto__\": {\"toString\": 1}, \"a\": 1, \"a\": 2}",
       "[]", "{}", " [ {} , [ ] ] "
     ]
-    const compiled = Parser.compile(Parser.named(JsonFast.json, "json-fast"))
+    const compiled = Compiler.jit(Parser.named(JsonFast.json, "json-fast"))
     for (const doc of docs) {
       expectSuccess(JsonFast.json, doc, JSON.parse(doc))
       expectSuccess(compiled, doc, JSON.parse(doc))

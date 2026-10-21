@@ -39,6 +39,10 @@
       "types": "./dist/Parser.d.ts",
       "default": "./dist/Parser.js"
     },
+    "./Compiler": {
+      "types": "./dist/Compiler.d.ts",
+      "default": "./dist/Compiler.js"
+    },
     "./ParseError": {
       "types": "./dist/ParseError.d.ts",
       "default": "./dist/ParseError.js"

@@ -11,7 +11,7 @@
  *
  * Run with `pnpm build && pnpm bench:native`.
  */
-import { Parser, Text } from "@thomasfosterau/effect-parse"
+import { Compiler, Parser, Text } from "@thomasfosterau/effect-parse"
 import { json } from "../examples/json.ts"
 import { makeJson as makeFastJson } from "../examples/json-fast.ts"
 import { makeJson } from "../examples/json-text.ts"
@@ -75,11 +75,11 @@ const docs: Array<Doc> = [
 ]
 
 const decoder = new TextDecoder()
-const tokenAscii = Parser.compile(json)
-const textString = Parser.compile(makeJson(Text.string))
-const textUtf8 = Parser.compile(makeJson(Text.utf8))
-const fastString = Parser.compile(makeFastJson(Text.string))
-const fastUtf8 = Parser.compile(makeFastJson(Text.utf8))
+const tokenAscii = Compiler.jit(json)
+const textString = Compiler.jit(makeJson(Text.string))
+const textUtf8 = Compiler.jit(makeJson(Text.utf8))
+const fastString = Compiler.jit(makeFastJson(Text.string))
+const fastUtf8 = Compiler.jit(makeFastJson(Text.utf8))
 
 interface Case {
   readonly name: string

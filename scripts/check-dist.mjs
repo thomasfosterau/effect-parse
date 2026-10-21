@@ -66,4 +66,41 @@ for (const file of (await readdir(dist, { recursive: true })).filter((f) => f.en
 }
 if (failures === 0) console.log("ok: every top-level call in dist/ is marked /*#__PURE__*/")
 
+// The compilers are reached only through the `Compiler` module, so that a
+// program bundles only the ones it uses: no other module may import them, and
+// the closure compiler (the one for CSP pages) must not import the JIT.
+const importsOf = async (file) => {
+  const source = await readFile(new URL(file, dist), "utf8")
+  return parseAst(source, undefined, file).body
+    .filter((s) => (s.type === "ImportDeclaration" || s.type.startsWith("Export")) && s.source != null)
+    .map((s) => new URL(s.source.value, new URL(file, dist)).href.slice(dist.href.length))
+    .filter((f) => !f.startsWith("..") && f.endsWith(".js") && !f.includes(":"))
+}
+const reachable = async (entry) => {
+  const seen = new Set()
+  const visit = async (file) => {
+    if (seen.has(file)) return
+    seen.add(file)
+    for (const next of await importsOf(file)) await visit(next)
+  }
+  await visit(entry)
+  return seen
+}
+const compilers = ["internal/compiler/closure.js", "internal/compiler/jit.js"]
+let compilerFailures = 0
+for (const file of (await readdir(dist)).filter((f) => f.endsWith(".js") && f !== "index.js" && f !== "Compiler.js")) {
+  for (const compiler of compilers) {
+    if ((await reachable(file)).has(compiler)) {
+      compilerFailures++
+      console.error(`fail: dist/${file} imports dist/${compiler}`)
+    }
+  }
+}
+if ((await reachable("internal/compiler/closure.js")).has("internal/compiler/jit.js")) {
+  compilerFailures++
+  console.error("fail: dist/internal/compiler/closure.js imports dist/internal/compiler/jit.js")
+}
+failures += compilerFailures
+if (compilerFailures === 0) console.log("ok: only the Compiler module imports the compilers")
+
 if (failures > 0) process.exit(1)

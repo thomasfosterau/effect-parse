@@ -16,7 +16,7 @@
  * Run with `pnpm build && pnpm bench:stream`.
  */
 import { Effect } from "effect"
-import { Parser, ParserStream, Text } from "@thomasfosterau/effect-parse"
+import { Compiler, Parser, ParserStream, Text } from "@thomasfosterau/effect-parse"
 import { makeJson } from "../examples/json-text.ts"
 
 const doc = JSON.stringify(
@@ -34,7 +34,7 @@ const bytes = new TextEncoder().encode(doc)
 const chunkSize = 64 * 1024
 
 const interpretedJson = makeJson(Text.utf8)
-const compiledJson = Parser.compile(makeJson(Text.utf8))
+const compiledJson = Compiler.jit(makeJson(Text.utf8))
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 

@@ -1,7 +1,7 @@
 import { Effect, Option, Result, Stream } from "effect"
 import type { ParseError } from "../src/index.js"
 import { describe, expect, it } from "vitest"
-import { Ascii, Expression, Parser, ParserStream, Syntax, Text, Token } from "../src/index.js"
+import { Ascii, Compiler, Expression, Parser, ParserStream, Syntax, Text, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 
 describe("regressions", () => {
@@ -105,7 +105,7 @@ describe("furthest failure and commits (#21)", () => {
 
   const errorOf = (p: Parser.Parser<unknown>, input: string) => {
     const e = expectFailure(p, input)
-    const compiled = expectFailure(Parser.compile(p), input)
+    const compiled = expectFailure(Compiler.jit(p), input)
     expect({ offset: compiled.offset, mode: compiled.mode, expected: compiled.expected, message: compiled.message })
       .toEqual({ offset: e.offset, mode: e.mode, expected: e.expected, message: e.message })
     return e
@@ -206,9 +206,9 @@ describe("deeply nested input reports TooDeep instead of throwing (#14)", () => 
     expect(recoverable.errors.at(-1)!.kind).toBe("TooDeep")
   })
 
-  for (const backend of ["closure", "auto"] as const) {
+  for (const backend of ["closure", "jit"] as const) {
     it(`compiled (${backend})`, () => {
-      const p = Parser.compile(braced(), { backend })
+      const p = Compiler[backend](braced())
       expect(Result.isSuccess(Parser.parse(p, "{".repeat(500) + "}".repeat(500)))).toBe(true)
       expectTooDeep(Parser.parse(p, deep))
       expectTooDeep(Parser.parsePeek(p, deep))
@@ -217,7 +217,7 @@ describe("deeply nested input reports TooDeep instead of throwing (#14)", () => 
   }
 
   it("streaming", () => {
-    const p = Parser.compile(braced())
+    const p = Compiler.jit(braced())
     const chunks = Array.from({ length: 10 }, () => "{".repeat(10_000))
     expectTooDeep(Effect.runSync(Effect.result(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(p)))))
     expectTooDeep(

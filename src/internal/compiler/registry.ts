@@ -1,15 +1,13 @@
 /**
- * The registry of compiled parsers, keyed by parser (see `Parser.compile`).
- * Compiled steps are built lazily, once per input kind.
+ * The registry of compiled parsers, keyed by parser (see the `Compiler`
+ * module). Compiled steps are built lazily, once per input kind.
+ *
+ * Nothing here imports a compiler: a parser is registered with the backend
+ * that compiles it, so a program bundles only the backends it uses.
  */
 import type { State } from "../../Input.js"
 import type { ParserLike } from "../node.js"
 import type { Fallback, Step } from "./closure.js"
-import { compileClosure } from "./closure.js"
-import { compileJit, jitSupported } from "./jit.js"
-
-/** Which compiler to use. */
-export type Backend = "auto" | "closure"
 
 /** What was compiled for a parser and an input kind. */
 export interface Compiled {
@@ -26,6 +24,11 @@ export interface Compiled {
   readonly source?: string
 }
 
+/** A compiler: builds the compiled form of a parser for an input kind. */
+export interface Backend {
+  readonly build: (p: ParserLike, kind: 0 | 1 | 2, resumable: boolean) => Compiled
+}
+
 interface Entry {
   readonly backend: Backend
   readonly byKind: Array<Compiled | undefined>
@@ -40,28 +43,6 @@ export const register = (p: ParserLike, backend: Backend): void => {
 
 export const isRegistered = (p: ParserLike): boolean => registry.has(p)
 
-const build = (p: ParserLike, kind: 0 | 1 | 2, backend: Backend, resumable: boolean): Compiled => {
-  if (backend === "auto" && jitSupported()) {
-    try {
-      const { fallbacks, source, step } = compileJit(p, kind, resumable)
-      return { backend: "jit", step, fallbacks, error: undefined, source }
-    } catch (error) {
-      // Fall back to the closure compiler, remembering why
-      return { ...buildClosure(p, kind, resumable), jitError: error }
-    }
-  }
-  return buildClosure(p, kind, resumable)
-}
-
-const buildClosure = (p: ParserLike, kind: 0 | 1 | 2, resumable: boolean): Compiled => {
-  try {
-    const { fallbacks, step } = compileClosure(p, kind, resumable)
-    return { backend: "closure", step, fallbacks, error: undefined }
-  } catch (error) {
-    return { backend: undefined, step: undefined, fallbacks: [], error }
-  }
-}
-
 /**
  * The compiled form of a registered parser for an input kind, compiling it
  * if needed. `resumable` selects the build used by streaming parses, which
@@ -71,7 +52,7 @@ export const compiled = (p: ParserLike, kind: 0 | 1 | 2, resumable = false): Com
   const entry = registry.get(p)
   if (entry === undefined) return undefined
   const index = resumable ? kind + 3 : kind
-  return entry.byKind[index] ??= build(p, kind, entry.backend, resumable)
+  return entry.byKind[index] ??= entry.backend.build(p, kind, resumable)
 }
 
 /** The compiled step for running `p` on `state`, if it is registered. */

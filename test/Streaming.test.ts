@@ -13,7 +13,7 @@ import * as JsonFast from "../examples/json-fast.js"
 import { makeJson } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
 import type { Input } from "../src/index.js"
-import { Ascii, Encoding, Parser, ParserStream, Text, Token } from "../src/index.js"
+import { Ascii, Compiler, Encoding, Parser, ParserStream, Text, Token } from "../src/index.js"
 import * as Registry from "../src/internal/compiler/registry.js"
 import { mutations, randomJson, rng } from "./generators.js"
 
@@ -52,7 +52,7 @@ const twins = new Map<Parser.Parser.Any, ReadonlyArray<Parser.Parser.Any>>()
 const variants = <P extends Parser.Parser.Any>(p: P): ReadonlyArray<P> => {
   let v = twins.get(p)
   if (v === undefined) {
-    v = [p, ...(["closure", "auto"] as const).map((backend) => Parser.compile(Parser.named(p, "twin"), { backend }))]
+    v = [p, ...(["closure", "jit"] as const).map((backend) => Compiler[backend](Parser.named(p, "twin")))]
     twins.set(p, v)
   }
   return v as ReadonlyArray<P>
@@ -156,11 +156,11 @@ describe("streaming parses", () => {
 })
 
 describe("incremental parsing", () => {
-  it.each(["interpreted", "closure", "auto"] as const)("does not parse elements again when more input arrives (%s)", (backend) => {
+  it.each(["interpreted", "closure", "jit"] as const)("does not parse elements again when more input arrives (%s)", (backend) => {
     let parsed = 0
     const element = Ascii.decUint.pipe(Parser.tap(() => parsed++))
     const list = Parser.delimited(Token.literal("["), Parser.separated(element, Token.literal(",")), Token.literal("]"))
-    if (backend !== "interpreted") Parser.compile(list, { backend })
+    if (backend !== "interpreted") Compiler[backend](list)
     const doc = `[${Array.from({ length: 2000 }, (_, i) => i).join(",")}]`
     const chunks = split(doc, rng(1), 16)
     expect(Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(list)))).toHaveLength(2000)
@@ -168,15 +168,15 @@ describe("incremental parsing", () => {
     expect(chunks.length).toBeGreaterThan(500)
     expect(parsed).toBeLessThan(2000 * 1.5)
     if (backend !== "interpreted") {
-      expect(Registry.compiled(list, 0, true)!.backend).toBe(backend === "auto" ? "jit" : "closure")
+      expect(Registry.compiled(list, 0, true)!.backend).toBe(backend)
     }
   })
 
-  it.each(["interpreted", "closure", "auto"] as const)("resumes long strings where they stopped (%s)", (backend) => {
+  it.each(["interpreted", "closure", "jit"] as const)("resumes long strings where they stopped (%s)", (backend) => {
     let segments = 0
     const normal = Text.utf8.takeTill("\\\"", { min: 1 }).pipe(Parser.tap(() => segments++))
     const string = Parser.delimited(Text.utf8.literal("\""), Text.utf8.escaped(normal, "\\", Text.utf8.oneOf("\\\"")), Text.utf8.literal("\""))
-    if (backend !== "interpreted") Parser.compile(string, { backend })
+    if (backend !== "interpreted") Compiler[backend](string)
     const text = Array.from({ length: 500 }, (_, i) => `segment ${i}\\"`).join("")
     const bytes = new TextEncoder().encode(`"${text}"`)
     const chunks = split(bytes, rng(2), 32)

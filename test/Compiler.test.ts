@@ -12,13 +12,13 @@ import * as JsonFast from "../examples/json-fast.js"
 import { makeJson } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
 import type { Input } from "../src/index.js"
-import { Ascii, Binary, Encoding, Expression, Parser, Text, Token } from "../src/index.js"
+import { Ascii, Binary, Compiler, Encoding, Expression, Parser, Text, Token } from "../src/index.js"
 import { State } from "../src/Input.js"
 import { Fail } from "../src/Input.js"
 import * as Registry from "../src/internal/compiler/registry.js"
 import { allStrings, mutations, randomJson, rng } from "./generators.js"
 
-const backends = ["closure", "auto"] as const
+const backends = ["closure", "jit"] as const
 type Backend = typeof backends[number]
 
 // -----------------------------------------------------------------------------
@@ -48,7 +48,7 @@ const twin = <P extends Parser.Parser.Any>(p: P, backend: Backend): P => {
   if (byParser === undefined) compiledCopy.set(backend, byParser = new Map())
   let c = byParser.get(p)
   if (c === undefined) {
-    c = Parser.compile(Parser.named(p, p.name ?? "root"), { backend })
+    c = Compiler[backend](Parser.named(p, p.name ?? "root"))
     byParser.set(p, c)
     backendOf.set(c, backend)
   }
@@ -63,7 +63,7 @@ const fast = (p: Parser.Parser.Any, input: Input.Input, context?: Context.Contex
   const compiled = Registry.compiled(p, kind)!
   if (compiled.error !== undefined) throw compiled.error
   if (compiled.jitError !== undefined) throw compiled.jitError
-  if (backendOf.get(p) === "auto") expect(compiled.backend).toBe("jit")
+  if (backendOf.get(p) === "jit") expect(compiled.backend).toBe("jit")
   const a = step(state)
   return a === Fail ? undefined : { value: a, pos: state.pos, end: state.end }
 }
@@ -582,22 +582,23 @@ describe("compiled combinators", () => {
 })
 
 // -----------------------------------------------------------------------------
-// Behaviour of Parser.compile
+// Behaviour of Compiler.jit and Compiler.closure
 // -----------------------------------------------------------------------------
 
-describe.each(backends)("Parser.compile with the %s backend", (backend) => {
+describe.each(backends)("Compiler.%s", (backend) => {
+  const compile: typeof Compiler.jit = Compiler[backend]
   it("returns the same parser, and is pipeable", () => {
     const p = Parser.repeat(a)
-    expect(Parser.compile(p, { backend })).toBe(p)
+    expect(Compiler[backend](p)).toBe(p)
     const q = Parser.repeat(b)
-    expect(q.pipe(Parser.compile({ backend }))).toBe(q)
+    expect(q.pipe(compile)).toBe(q)
     expect(Parser.parse(q, "bb")).toEqual(Result.succeed(["b", "b"]))
-    expect(Registry.compiled(q, 0)!.backend).toBe(backend === "auto" ? "jit" : "closure")
+    expect(Registry.compiled(q, 0)!.backend).toBe(backend)
   })
 
   it("re-runs the interpreter for errors, so callbacks may run twice", () => {
     let calls = 0
-    const p = Parser.compile(Parser.terminated(digit.pipe(Parser.tap(() => calls++)), b), { backend })
+    const p = Compiler[backend](Parser.terminated(digit.pipe(Parser.tap(() => calls++)), b))
     expect(Result.isSuccess(Parser.parse(p, "1b"))).toBe(true)
     expect(calls).toBe(1)
     calls = 0
@@ -608,7 +609,7 @@ describe.each(backends)("Parser.compile with the %s backend", (backend) => {
 
   it("stays interpreted with tracing and recovery", () => {
     const events: Array<string> = []
-    const p = Parser.compile(Parser.trace(Parser.resumeAfter(a, Token.any), "t"), { backend })
+    const p = Compiler[backend](Parser.trace(Parser.resumeAfter(a, Token.any), "t"))
     Parser.parse(p, "a", { trace: (e) => events.push(e._tag) })
     expect(events).toEqual(["Enter", "Exit"])
     const r = Parser.parseRecoverable(p, "x")
@@ -616,10 +617,9 @@ describe.each(backends)("Parser.compile with the %s backend", (backend) => {
   })
 
   it("is safe to re-enter from a callback", () => {
-    const inner = Parser.compile(Parser.repeat(digit), { backend })
-    const outer = Parser.compile(
-      Parser.separated(Token.takeWhile("0123456789", { min: 1 }).pipe(Parser.map((s) => Parser.parseSync(inner, s).length)), b),
-      { backend }
+    const inner = Compiler[backend](Parser.repeat(digit))
+    const outer = Compiler[backend](
+      Parser.separated(Token.takeWhile("0123456789", { min: 1 }).pipe(Parser.map((s) => Parser.parseSync(inner, s).length)), b)
     )
     expect(Parser.parseSync(outer, "12b345")).toEqual([2, 3])
   })
@@ -632,7 +632,7 @@ describe.each(backends)("Parser.compile with the %s backend", (backend) => {
   })
 
   it("runs a state whose end is not the input's length", () => {
-    const p = Parser.compile(Parser.repeat(a), { backend })
+    const p = Compiler[backend](Parser.repeat(a))
     Parser.parse(p, "")
     const state = new State("aaa")
     state.end = 2
@@ -640,7 +640,7 @@ describe.each(backends)("Parser.compile with the %s backend", (backend) => {
   })
 
   it("takeUntil does not match past a state's end (#30)", () => {
-    const p = Parser.compile(Token.takeUntil("-->"), { backend })
+    const p = Compiler[backend](Token.takeUntil("-->"))
     Parser.parse(p, "-->")
     const state = new State("abcdefg-->h")
     state.end = 3
@@ -660,7 +660,7 @@ describe.each(backends)("Parser.compile with the %s backend", (backend) => {
  * calls, so tests can tell whether a runner took the compiled path.
  */
 const watched = <P extends Parser.Parser.Any>(p: P, backend: Backend) => {
-  const c = Parser.compile(Parser.named(p, "watched"), { backend })
+  const c = Compiler[backend](Parser.named(p, "watched"))
   const step = c.step
   const counter = { parser: c as P, interpreted: 0 }
   Object.defineProperty(c, "step", {
@@ -781,12 +781,12 @@ describe("running from an offset", () => {
     expect(Parser.parsePeek(w.parser, buffer, { offset: 3 })).toEqual(Result.succeed([" = 10;", "x"]))
     expect(Parser.parseSync(w.parser, "let x", { offset: 3 })).toBe("x")
     expect(w.interpreted).toBe(0)
-    expect(Registry.compiled(w.parser, 0, false)!.backend).toBe(backend === "auto" ? "jit" : "closure")
-    expect(Registry.compiled(w.parser, 0, true)!.backend).toBe(backend === "auto" ? "jit" : "closure")
+    expect(Registry.compiled(w.parser, 0, false)!.backend).toBe(backend)
+    expect(Registry.compiled(w.parser, 0, true)!.backend).toBe(backend)
   })
 
   it("reports offsets, lines and columns in the whole input", () => {
-    const p = Parser.compile(Parser.terminated(Ascii.decInt, Token.literal(";")))
+    const p = Compiler.jit(Parser.terminated(Ascii.decInt, Token.literal(";")))
     const r = Parser.parse(p, "1;\n2;\n3?", { offset: 6 })
     expect(Result.isFailure(r) && r.failure.offset).toBe(7)
     expect(Result.isFailure(r) && r.failure.position).toMatchObject({ line: 3, column: 2 })
@@ -809,13 +809,13 @@ describe("the JIT", () => {
     } as unknown as FunctionConstructor
     globalThis.Function = blocked
     try {
-      const p = Parser.compile(Parser.repeat(a))
+      const p = Compiler.jit(Parser.repeat(a))
       expect(Parser.parse(p, "aa")).toEqual(Result.succeed(["a", "a"]))
       expect(Registry.compiled(p, 0)!.backend).toBe("closure")
     } finally {
       globalThis.Function = original
     }
-    const q = Parser.compile(Parser.repeat(a))
+    const q = Compiler.jit(Parser.repeat(a))
     Parser.parse(q, "a")
     expect(Registry.compiled(q, 0)!.backend).toBe("jit")
   })

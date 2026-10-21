@@ -246,7 +246,7 @@ and columns) are positions in the whole input. A lexer can read one token at
 a time from a buffer, compiled parsers included:
 
 ```ts
-const lexeme = Parser.compile(Parser.preceded(Ascii.multispace0, Ascii.alpha1))
+const lexeme = Compiler.jit(Parser.preceded(Ascii.multispace0, Ascii.alpha1))
 
 const buffer = "let x = 1"
 Parser.parsePartial(lexeme, buffer, { offset: 3 })
@@ -274,12 +274,14 @@ conversion.
 
 ## Compiled parsers
 
-Combinators are flexible but run as a tree of closures. `Parser.compile`
-turns a grammar into fused, specialized code, without changing how it is
-written or what it returns:
+Combinators are flexible but run as a tree of closures. The `Compiler`
+module turns a grammar into fused, specialized code, without changing how it
+is written or what it returns:
 
 ```ts
-export const json = Parser.compile(Parser.preceded(ws, value))
+import { Compiler } from "@thomasfosterau/effect-parse"
+
+export const json = Compiler.jit(Parser.preceded(ws, value))
 
 Parser.parse(json, text) // same Result as before, about 5 times faster
 ```
@@ -289,13 +291,25 @@ interpreter, for strings, UTF-8 and UTF-16 alike, and at 1–4 times the
 time of `JSON.parse` depending on the document (see
 [the design notes](docs/DESIGN.md#results)).
 
-`compile` returns the same parser. The code is built on the first run, for
+There are two compilers, one function each:
+
+- `Compiler.jit` generates JavaScript where `new Function` is allowed, and
+  falls back to the closure compiler where it isn't.
+- `Compiler.closure` never generates code. It is meant for pages with a
+  Content Security Policy.
+
+A bundle contains only the compilers it calls. A program that compiles
+nothing bundles neither, and one that uses only `Compiler.closure` contains
+no `new Function`. esbuild keeps every member of a namespace imported from
+the root entry, so with esbuild import from the subpaths instead
+(`import * as Compiler from "@thomasfosterau/effect-parse/Compiler"`).
+Rolldown and Rollup drop unused members either way.
+
+Both return the same parser. The code is built on the first run, for
 each kind of input, and cached. `parse`, `parseSync`, `parsePeek`,
 `parsePartial`, `parseEffect` and `ParserStream.parseAll` use it, from any
 `offset`; `ParserStream.parseMany`, `parseRecoverable` and tracing stay
-interpreted. With `{ backend: "auto" }` (the default) it generates
-JavaScript where `new Function` is allowed; `{ backend: "closure" }` never
-generates code, for pages with a Content Security Policy.
+interpreted.
 
 Compiled code records no diagnostics. When it fails, the parser runs again
 interpreted, so errors are exactly the same, byte for byte. Callbacks should
@@ -417,9 +431,9 @@ bytes, without decoding it first or waiting for the download:
 
 ```ts
 import { Effect } from "effect"
-import { Parser, ParserStream, Text } from "@thomasfosterau/effect-parse"
+import { Compiler, ParserStream, Text } from "@thomasfosterau/effect-parse"
 
-const json = Parser.compile(makeJson(Text.utf8)) // see examples/json-text.ts
+const json = Compiler.jit(makeJson(Text.utf8)) // see examples/json-text.ts
 
 const value = await Effect.runPromise(ParserStream.parseResponse(await fetch(url), json))
 ```
@@ -608,6 +622,7 @@ top-level array; the tree is not rebalanced as Tree-sitter's is.
 | `Binary` | `u8`, `beU16` … `leI128`, floats, `lengthTake`, `lengthRepeat`, `lengthAndThen` | `binary` / `number`, `multi::length_*` |
 | `Bits` | `bits`, `bytes`, `take`, `takeBig`, `pattern`, `bool` | `binary::bits` / `bits` |
 | `Expression` | Pratt parser with prefix, postfix and infix operators | `combinator::expression` / `nom-language::precedence` |
+| `Compiler` | `jit`, `closure`: [compiled parsers](#compiled-parsers) | — |
 | `ParseError` | the error type, `lineColumn`, `formatExpected` | `error` |
 | `ParserStream` | `parseMany`, `parseAll` over Effect `Stream`s | `Partial` / `streaming` |
 | `ParserSchema` | `make`: a `Schema` from a parser | — |

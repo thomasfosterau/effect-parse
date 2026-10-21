@@ -12,7 +12,7 @@
  *
  * Run with `pnpm build && pnpm bench`.
  */
-import { Encoding, Parser, Text } from "@thomasfosterau/effect-parse"
+import { Compiler, Encoding, Parser, Text } from "@thomasfosterau/effect-parse"
 import { json } from "../examples/json.ts"
 import { makeJson as makeFastJson } from "../examples/json-fast.ts"
 import { makeJson } from "../examples/json-text.ts"
@@ -35,13 +35,13 @@ const utf8 = new TextEncoder().encode(doc)
 const utf16 = Encoding.utf16le.encode(doc)
 const decoder = new TextDecoder()
 
-const backends = ["interpreted", "closure", "auto"] as const
+const backends = ["interpreted", "closure", "jit"] as const
 type Backend = typeof backends[number]
 
 /** A separate parser object per backend, since compilation is per parser. */
 const variant = <P extends Parser.Parser.Any>(p: P, backend: Backend): P => {
   const copy = Parser.named(p, p.name ?? "json") as P
-  return backend === "interpreted" ? copy : Parser.compile(copy, { backend })
+  return backend === "interpreted" ? copy : Compiler[backend](copy)
 }
 
 interface Case {
@@ -62,10 +62,10 @@ const grammars = [
 for (const [group, grammar, input] of grammars) {
   for (const backend of backends) {
     const p = variant(grammar as Parser.Parser<unknown, never, never, any>, backend)
-    cases.push({ group, name: backend === "auto" ? "jit (auto)" : backend, run: () => Parser.parseSync(p, input) })
+    cases.push({ group, name: backend, run: () => Parser.parseSync(p, input) })
   }
 }
-const jsonString = variant(makeJson(Text.string), "auto")
+const jsonString = variant(makeJson(Text.string), "jit")
 cases.push({ group: "references", name: "TextDecoder + Text.string (jit)", run: () => Parser.parseSync(jsonString, decoder.decode(utf8)) })
 cases.push({ group: "references", name: "hand-fused, string", run: () => parseFused(doc) })
 cases.push({ group: "references", name: "JSON.parse", run: () => JSON.parse(doc) })
