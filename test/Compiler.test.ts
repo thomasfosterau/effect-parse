@@ -734,12 +734,14 @@ describe("running from an offset", () => {
     for (const input of jsonInputs) sameAtOffset(p, prefix, Encoding.utf8.encode(input))
   })
 
+  // Every grammar on every short string, in every runner and backend: about
+  // 5 s, which is vitest's default timeout
   it("combinators", () => {
     for (const [name, g] of grammars) {
       const positions = name === "taken and spans" || name === "eof, location, rest"
       for (const input of allStrings(alphabet, 2)) sameAtOffset(g, "ab\n", input, { positions, leafRoot: true })
     }
-  })
+  }, 30_000)
 
   it.each(backends)("takes the compiled path with the %s backend, in complete and partial mode", (backend) => {
     const token = Parser.preceded(Ascii.multispace0, Parser.alt(Ascii.alpha1, Ascii.digit1, Token.literal("=")))
