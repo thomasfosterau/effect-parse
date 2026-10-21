@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-parse",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Parser combinators for Effect, ported from Rust's nom and winnow: text, bytes, bits and token streams, streaming input, compiled parsers and Schema integration",
   "keywords": [
     "effect",
