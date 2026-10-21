@@ -638,6 +638,17 @@ describe.each(backends)("Parser.compile with the %s backend", (backend) => {
     state.end = 2
     expect(Registry.stepFor(p, state)!(state)).toEqual(["a", "a"])
   })
+
+  it("takeUntil does not match past a state's end (#30)", () => {
+    const p = Parser.compile(Token.takeUntil("-->"), { backend })
+    Parser.parse(p, "-->")
+    const state = new State("abcdefg-->h")
+    state.end = 3
+    expect(typeof Registry.stepFor(p, state)!(state)).toBe("symbol")
+    const fits = new State("abc-->h")
+    fits.end = 6
+    expect(Registry.stepFor(p, fits)!(fits)).toBe("abc")
+  })
 })
 
 // -----------------------------------------------------------------------------
@@ -734,12 +745,14 @@ describe("running from an offset", () => {
     for (const input of jsonInputs) sameAtOffset(p, prefix, Encoding.utf8.encode(input))
   })
 
+  // Every grammar on every short string, in every runner and backend: about
+  // 5 s, which is vitest's default timeout
   it("combinators", () => {
     for (const [name, g] of grammars) {
       const positions = name === "taken and spans" || name === "eof, location, rest"
       for (const input of allStrings(alphabet, 2)) sameAtOffset(g, "ab\n", input, { positions, leafRoot: true })
     }
-  })
+  }, 30_000)
 
   it.each(backends)("takes the compiled path with the %s backend, in complete and partial mode", (backend) => {
     const token = Parser.preceded(Ascii.multispace0, Parser.alt(Ascii.alpha1, Ascii.digit1, Token.literal("=")))
