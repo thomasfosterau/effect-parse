@@ -164,6 +164,12 @@ const tree: Parser.Parser<Tree> = Parser.delimited(
 )
 ```
 
+Each level of nesting uses some of the JavaScript call stack, so input
+nested a few thousand levels deep exhausts it. The runners catch the
+overflow and fail with a `ParseError` of kind `"TooDeep"` at the offset
+reached, so untrusted input can't make them throw. Grammars that must
+accept deeper nesting need a non-recursive formulation.
+
 Low-level parsers can be written directly against the cursor with
 `Parser.make`, in the same way that any function can be a parser in winnow:
 

@@ -65,7 +65,7 @@ for (const [group, grammar, input] of grammars) {
     cases.push({ group, name: backend, run: () => Parser.parseSync(p, input) })
   }
 }
-const jsonString = variant(makeJson(Text.string), "auto")
+const jsonString = variant(makeJson(Text.string), "jit")
 cases.push({ group: "references", name: "TextDecoder + Text.string (jit)", run: () => Parser.parseSync(jsonString, decoder.decode(utf8)) })
 cases.push({ group: "references", name: "hand-fused, string", run: () => parseFused(doc) })
 cases.push({ group: "references", name: "JSON.parse", run: () => JSON.parse(doc) })

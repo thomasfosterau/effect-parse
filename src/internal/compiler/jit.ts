@@ -678,12 +678,15 @@ class Emitter {
     const n = this.v(fn)
     const st = this.v(fn)
     const isFold = node._tag === "Fold"
+    const cond = isFold ? (node as NodeOf<"Fold">).while : undefined
     const keep = out !== null && used && collect === undefined
-    const x = keep ? this.v(fn) : null
+    // `while` needs the accumulator even when the output is unused
+    const tracked = keep || cond !== undefined
+    const x = tracked ? this.v(fn) : null
     const acc = keep ? out! : this.v(fn)
     let init = collect?.init ?? ""
     let add = ""
-    if (keep) {
+    if (tracked) {
       if (isFold) {
         init = `${acc}=${this.const((node as NodeOf<"Fold">).init)}();`
         add = `${acc}=${this.const((node as NodeOf<"Fold">).f)}(${acc},${x});`
@@ -700,9 +703,10 @@ class Emitter {
       : `if($S.mode==="Incomplete"&&$S.resume!==void 0)R.save($S,${r.key},${r.entry},{acc:${acc},count:${n},pos:${st}});`
     // With `collect` (never in resumable builds), the element adds itself once the loop check passed
     const element = collect === undefined
-      ? `${this.gen(node.self, keep, x, `break ${bad};`, fn, d)}${check}${add}`
+      ? `${this.gen(node.self, tracked, x, `break ${bad};`, fn, d)}${check}${add}`
       : collect.element(`break ${bad};`, check)
-    const body = `${loop}:for(;${bound};${n}++){${st}=p;` +
+    const stop = cond === undefined ? "" : `if(${min > 0 ? `${n}>=${min}&&` : ""}!${this.const(cond)}(${acc}))break ${loop};`
+    const body = `${loop}:for(;${bound};${n}++){${stop}${st}=p;` +
       `${bad}:{${element}continue ${loop};}` +
       `${save}if($S.mode!=="Backtrack"${min > 0 ? `||${n}<${min}` : ""}){${fail}}p=${st};break ${loop};}`
     if (r === undefined) return `${init}${n}=0;${body}${collect?.finish ?? ""}`

@@ -132,6 +132,7 @@ describe("streaming parses", () => {
     const grammars: ReadonlyArray<Parser.Parser<any, any, never, string>> = [
       Parser.repeat(Parser.alt(Token.literal("ab"), a)),
       Parser.fold(Parser.alt(a, b), { init: () => "", f: (acc, x) => acc + x }),
+      Parser.fold(Parser.alt(a, b), { init: () => "", f: (acc, x) => acc + x, while: (acc) => acc.length < 4 }),
       Parser.separated(Parser.repeat(a, { min: 1 }), b, { min: 2, max: 5 }),
       Parser.separatedFoldl1(Ascii.digit1, Token.literal("+"), (l, _, r) => `(${l}+${r})`),
       Parser.terminated(Ascii.escaped(Token.takeTill("\\\""), "\\", Token.oneOf("\\\"n")), Token.literal("\"")),

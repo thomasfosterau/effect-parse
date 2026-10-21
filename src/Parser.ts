@@ -45,6 +45,7 @@ import * as ParseError from "./ParseError.js"
 import * as Registry from "./internal/compiler/registry.js"
 import * as Entries from "./internal/entries.js"
 import * as Resume from "./internal/resume.js"
+import * as Stack from "./internal/stack.js"
 import type { Node } from "./internal/node.js"
 import { bounds, NodeId } from "./internal/node.js"
 
@@ -410,6 +411,11 @@ export const todo: Parser<never, never, never, Input> = /*#__PURE__*/ described<
  * Lazily constructs a parser, which is needed to define recursive grammars.
  * The thunk is evaluated once, on first use.
  *
+ * Each level of recursion uses some of the call stack, interpreted or
+ * compiled, so input nested a few thousand levels deep exhausts it. The
+ * runners catch the overflow and fail with an unrecoverable `ParseError` of
+ * kind `"TooDeep"` at the offset reached, instead of throwing.
+ *
  * @example
  * ```ts
  * import { Parser, Token } from "@thomasfosterau/effect-parse"
@@ -690,6 +696,7 @@ export const tryMapUnknown: {
     try {
       return Result.succeed(f(a))
     } catch (e) {
+      if (Stack.isStackOverflow(e)) throw e
       return Result.fail(e)
     }
   }))
@@ -1799,7 +1806,8 @@ const foldImpl = <A, B, E, R, I extends Input>(
   init: () => B,
   f: (acc: B, a: A) => B,
   name: string,
-  node?: Node
+  node?: Node,
+  cond?: (acc: B) => boolean
 ): Parser<B, E, R, I> => {
   const [min, max] = normalizeRange(range)
   const step = self.step
@@ -1822,6 +1830,7 @@ const foldImpl = <A, B, E, R, I extends Input>(
       acc = init()
     }
     for (; count < max; count++) {
+      if (cond !== undefined && count >= min && !cond(acc)) break
       const start = state.pos
       const a = step(state)
       if (a === Fail) {
@@ -1836,7 +1845,7 @@ const foldImpl = <A, B, E, R, I extends Input>(
       acc = f(acc, a)
     }
     return Resume.done(state, key, entry, resumed !== undefined, acc)
-  }, name, node ?? { _tag: "Fold", self, init, f, name, ...bounds(range) })
+  }, name, node ?? { _tag: "Fold", self, init, f, while: cond, name, ...bounds(range) })
 }
 
 /**
@@ -1881,6 +1890,24 @@ export const repeat: {
  * (winnow's `repeat(..).fold(..)`, nom's `fold_many0`/`fold_many1`/
  * `fold_many_m_n`).
  *
+ * With `while`, the repetition also stops, successfully and without
+ * consuming more input, as soon as the predicate is false of the
+ * accumulator. It is checked before each element once `range.min` elements
+ * have been folded, so `min` still holds.
+ *
+ * @example
+ * ```ts
+ * import { Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * // Keeps the first two digits, leaving the rest unparsed
+ * const two = Parser.fold(Token.oneOf("0123456789"), {
+ *   init: () => "",
+ *   f: (acc, d) => acc + d,
+ *   while: (acc) => acc.length < 2
+ * })
+ * Parser.parsePeek(two, "1234") // Result.succeed(["34", "12"])
+ * ```
+ *
  * @since 0.1.0
  * @category repetition
  */
@@ -1889,17 +1916,20 @@ export const fold: {
     readonly init: () => B
     readonly f: (acc: B, a: A) => B
     readonly range?: Range | undefined
+    readonly while?: ((acc: B) => boolean) | undefined
   }): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<B, E, R, I>
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, options: {
     readonly init: () => B
     readonly f: (acc: B, a: A) => B
     readonly range?: Range | undefined
+    readonly while?: ((acc: B) => boolean) | undefined
   }): Parser<B, E, R, I>
 } = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, options: {
   readonly init: () => B
   readonly f: (acc: B, a: A) => B
   readonly range?: Range | undefined
-}): Parser<B, E, R, I> => foldImpl(self, options.range, options.init, options.f, "fold"))
+  readonly while?: ((acc: B) => boolean) | undefined
+}): Parser<B, E, R, I> => foldImpl(self, options.range, options.init, options.f, "fold", undefined, options.while))
 
 /**
  * Applies `self` repeatedly until `end` succeeds, returning the collected
@@ -2436,7 +2466,7 @@ const runCompiled = <I extends Input>(
   if (state.tracer !== undefined || state.recovered !== undefined) return NotCompiled
   const step = Registry.stepFor(self, state, resumable)
   if (step === undefined) return NotCompiled
-  const a = step(state)
+  const a = Stack.run(step, state)
   if (a === Fail || (whole && state.pos < state.end)) return Fail
   return a
 }
@@ -2518,7 +2548,7 @@ const runComplete = <A, E, R, I extends Input>(
   self: Parser<A, E, R, I>,
   state: State<I>
 ): Result.Result<A, ParseError.ParseError<E>> => {
-  const a = self.step(state)
+  const a = Stack.run(self.step, state)
   if (a === Fail) return Result.fail(toError(state))
   if (state.pos < state.end) {
     state.backtrack("Eof", expectedEof)
@@ -2613,7 +2643,7 @@ export const parsePeek: {
     return Result.succeed([state.slice(state.pos, state.end), compiled as A])
   }
   if (compiled === Fail) state = makeState(input, options, false)
-  const a = self.step(state)
+  const a = Stack.run(self.step, state)
   if (a === Fail) return Result.fail(toError(state))
   return Result.succeed([state.slice(state.pos, state.end), a])
 }
@@ -2683,7 +2713,7 @@ export const parsePartial: {
   }
   // Re-run interpreted for `needed` and the diagnostics
   if (compiled === Fail) state = makeState(input, options, true)
-  const a = self.step(state)
+  const a = Stack.run(self.step, state)
   if (a !== Fail) return Result.succeed({ _tag: "Done", value: a, offset: state.pos })
   if (state.mode === "Incomplete") {
     const needed = state.failure.needed

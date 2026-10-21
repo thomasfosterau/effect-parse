@@ -29,6 +29,9 @@ import * as text from "./internal/text.js"
  * The kind of parser that produced an error, in the spirit of nom's
  * `ErrorKind`.
  *
+ * `"TooDeep"` is not produced by a parser: the runners report it when
+ * deeply nested input exhausts the call stack (see `Parser.suspend`).
+ *
  * @since 0.1.0
  * @category models
  */
@@ -64,6 +67,7 @@ export type ErrorKind =
   | "TakeUntil"
   | "TakeWhile"
   | "Token"
+  | "TooDeep"
   | "Verify"
 
 /**

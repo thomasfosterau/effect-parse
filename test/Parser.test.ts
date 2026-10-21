@@ -278,6 +278,31 @@ describe("Parser", () => {
       expectFailure(p, "")
     })
 
+    it("fold with while", () => {
+      const digit = Token.oneOf("0123456789")
+      const kept = Parser.fold(Parser.alt(digit, Token.literal("-")), {
+        init: () => [] as Array<string>,
+        f: (acc, x) => {
+          if (x !== "-") acc.push(x)
+          return acc
+        },
+        while: (acc) => acc.length < 2
+      })
+      // Stops after the second kept item, without consuming more
+      expect(peek(kept, "1-2-34")).toEqual(Result.succeed(["-34", ["1", "2"]]))
+      expect(peek(kept, "--1")).toEqual(Result.succeed(["", ["1"]]))
+      // Checked before the first element too
+      const none = Parser.fold(digit, { init: () => 0, f: (n) => n + 1, while: () => false })
+      expect(peek(none, "12")).toEqual(Result.succeed(["12", 0]))
+      // `min` elements are always folded
+      const atLeast = Parser.fold(digit, { init: () => 0, f: (n) => n + 1, range: { min: 2 }, while: () => false })
+      expect(peek(atLeast, "123")).toEqual(Result.succeed(["3", 2]))
+      expectFailure(atLeast, "1")
+      // `max` still bounds the repetition
+      const capped = Parser.fold(digit, { init: () => 0, f: (n) => n + 1, range: { max: 2 }, while: (n) => n < 5 })
+      expect(peek(capped, "1234")).toEqual(Result.succeed(["34", 2]))
+    })
+
     it("repeatTill", () => {
       const p = Parser.repeatTill(ab, Token.literal("ef"))
       expect(peek(p, "ababefg")).toEqual(Result.succeed(["g", [["ab", "ab"], "ef"]]))
