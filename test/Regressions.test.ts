@@ -1,7 +1,7 @@
 import { Effect, Option, Result, Stream } from "effect"
 import type { ParseError } from "../src/index.js"
 import { describe, expect, it } from "vitest"
-import { Ascii, Compiler, Expression, Parser, ParserStream, Syntax, Token } from "../src/index.js"
+import { Ascii, Compiler, Expression, Parser, ParserStream, Syntax, Text, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 
 describe("regressions", () => {
@@ -56,6 +56,43 @@ describe("regressions", () => {
   it("byte digits of any length", () => {
     const digits = new TextEncoder().encode("1".repeat(200_000))
     expect(Parser.parseSync(Ascii.bytes.decBigUint, digits) > 0n).toBe(true)
+  })
+})
+
+describe("takeUntil stops at State.end (#30)", () => {
+  // Runs `p` over the next `n` units only
+  const within = <A>(n: number, p: Parser.Parser<A, never, never, any>) =>
+    Parser.make((state) => {
+      const saved = state.end
+      state.end = state.pos + n
+      const a = p.step(state)
+      const out = { result: typeof a === "symbol" ? "Fail" : a, pos: state.pos }
+      state.end = saved
+      return out
+    })
+
+  const expectWithin = <A>(p: Parser.Parser<A, never, never, any>, input: any, expected: unknown) =>
+    expect(Result.map(peek(p, input), ([, a]) => a)).toEqual(Result.succeed(expected))
+
+  it("does not match a literal past the end of a narrowed region", () => {
+    const fail = { result: "Fail", pos: 0 }
+    expectWithin(within(3, Token.takeUntil("-->")), "abcdefg-->h", fail)
+    expectWithin(within(3, Text.string.takeUntil("-->")), "abcdefg-->h", fail)
+    expectWithin(within(3, Text.utf8.takeUntil("-->")), new TextEncoder().encode("abcdefg-->h"), fail)
+    expectWithin(within(3, Token.takeUntil(Uint8Array.of(9))), Uint8Array.of(1, 2, 3, 9), fail)
+    expectWithin(within(3, Token.takeUntil([9])), [1, 2, 3, 9], fail)
+  })
+
+  it("does not match a literal straddling the end", () => {
+    expectWithin(within(4, Token.takeUntil("-->")), "abc-->", { result: "Fail", pos: 0 })
+    expectWithin(within(4, Token.takeUntil(Uint8Array.of(8, 9))), Uint8Array.of(1, 2, 3, 8, 9), { result: "Fail", pos: 0 })
+    expectWithin(within(4, Token.takeUntil([8, 9])), [1, 2, 3, 8, 9], { result: "Fail", pos: 0 })
+  })
+
+  it("matches a literal ending exactly at the end", () => {
+    expectWithin(within(6, Token.takeUntil("-->")), "abc-->h", { result: "abc", pos: 3 })
+    expectWithin(within(6, Text.string.takeUntil("-->")), "abc-->h", { result: "abc", pos: 3 })
+    expectWithin(within(5, Token.takeUntil([8, 9])), [1, 2, 3, 8, 9, 0], { result: [1, 2, 3], pos: 3 })
   })
 })
 
