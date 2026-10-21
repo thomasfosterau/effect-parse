@@ -1,6 +1,7 @@
 import { Effect, Option, Result, Stream } from "effect"
+import type { ParseError } from "../src/index.js"
 import { describe, expect, it } from "vitest"
-import { Ascii, Expression, Parser, ParserStream, Text, Token } from "../src/index.js"
+import { Ascii, Expression, Parser, ParserStream, Syntax, Text, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 
 describe("regressions", () => {
@@ -168,5 +169,74 @@ describe("furthest failure and commits (#21)", () => {
     const g = errorOf(Parser.terminated(Parser.peek(item), Token.literal(";")), "1?")
     expect(g.offset).toBe(1)
     expect(g.expected).toEqual(["digit", "\"!\""])
+  })
+})
+
+describe("deeply nested input reports TooDeep instead of throwing (#14)", () => {
+  const braced = () => {
+    const text = Token.takeTill("{}", { min: 1 })
+    const p: Parser.Parser<unknown> = Parser.seq(
+      Token.literal("{"),
+      Parser.repeat(Parser.alt(text, Parser.suspend(() => p))),
+      Token.literal("}")
+    )
+    return p
+  }
+  const deep = "{".repeat(100_000)
+  const expectTooDeep = (result: Result.Result<unknown, ParseError.ParseError<unknown>>) => {
+    if (Result.isSuccess(result)) throw new Error("expected failure")
+    expect(result.failure.kind).toBe("TooDeep")
+    expect(result.failure.mode).toBe("Cut")
+    expect(result.failure.offset).toBeGreaterThan(0)
+    expect(result.failure.offset).toBeLessThanOrEqual(deep.length)
+    expect(result.failure.message).toContain("nested too deeply")
+  }
+
+  it("interpreted", () => {
+    const p = braced()
+    expect(Result.isSuccess(Parser.parse(p, "{".repeat(500) + "}".repeat(500)))).toBe(true)
+    expectTooDeep(Parser.parse(p, deep))
+    expectTooDeep(Parser.parse(p, deep + "}".repeat(100_000)))
+    expectTooDeep(Parser.parsePeek(p, deep))
+    expectTooDeep(Parser.parsePartial(p, deep))
+    expect(() => Parser.parseSync(p, deep)).toThrow(/nested too deeply/)
+    expectTooDeep(Effect.runSync(Effect.result(Parser.parseEffect(p, deep))))
+    const recoverable = Parser.parseRecoverable(p, deep)
+    expect(Option.isNone(recoverable.value)).toBe(true)
+    expect(recoverable.errors.at(-1)!.kind).toBe("TooDeep")
+  })
+
+  for (const backend of ["closure", "auto"] as const) {
+    it(`compiled (${backend})`, () => {
+      const p = Parser.compile(braced(), { backend })
+      expect(Result.isSuccess(Parser.parse(p, "{".repeat(500) + "}".repeat(500)))).toBe(true)
+      expectTooDeep(Parser.parse(p, deep))
+      expectTooDeep(Parser.parsePeek(p, deep))
+      expectTooDeep(Parser.parsePartial(p, deep))
+    })
+  }
+
+  it("streaming", () => {
+    const p = Parser.compile(braced())
+    const chunks = Array.from({ length: 10 }, () => "{".repeat(10_000))
+    expectTooDeep(Effect.runSync(Effect.result(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(p)))))
+    expectTooDeep(
+      Effect.runSync(Effect.result(Stream.runCollect(Stream.make(deep).pipe(ParserStream.parseMany(braced())))))
+    )
+  })
+
+  it("syntax trees", () => {
+    const tree = Syntax.parse(Syntax.node(braced(), "braced"), deep)
+    expect(Option.isNone(tree.value)).toBe(true)
+    expect(tree.errors.at(-1)!.kind).toBe("TooDeep")
+  })
+
+  it("tryMapUnknown does not swallow the overflow", () => {
+    const p: Parser.Parser<unknown, unknown> = Parser.delimited(
+      Token.literal("("),
+      Parser.opt(Parser.suspend(() => p)).pipe(Parser.tryMapUnknown((x) => x)),
+      Token.literal(")")
+    )
+    expectTooDeep(Parser.parse(p, "(".repeat(100_000)))
   })
 })

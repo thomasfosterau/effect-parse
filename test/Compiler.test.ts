@@ -260,6 +260,14 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
   ["fold of nothing", Parser.fold(Parser.opt(a), { init: () => 0, f: (n) => n + 1 })],
   ["repeat until", Parser.repeatTill(Parser.alt(a, b), Token.literal("bb"), { min: 1, max: 3 })],
   ["fold", Parser.fold(Parser.alt(a, b), { init: () => "", f: (acc, x) => acc + x.toUpperCase(), range: { min: 1 } })],
+  ["fold while", Parser.seq(
+    Parser.fold(Parser.alt(a, b), { init: () => "", f: (acc, x) => acc + x, while: (acc) => !acc.endsWith("b") }),
+    Parser.fold(Parser.alt(a, b), { init: () => 0, f: (n) => n + 1, range: { min: 1, max: 3 }, while: (n) => n < 2 })
+  )],
+  ["fold while, unused", Parser.taken(Parser.seq(
+    Parser.fold(Parser.alt(a, b), { init: () => 0, f: (n, x) => x === "a" ? n + 1 : n, while: (n) => n < 2 }),
+    Parser.opt(b)
+  ))],
   ["separated", Parser.separated(Parser.alt(ab, a), b)],
   ["separated ranges", Parser.terminated(Parser.separated(a, b, { min: 2, max: 3 }), Parser.opt(b))],
   ["separated of nothing", Parser.separated(Parser.opt(a), Parser.opt(b))],

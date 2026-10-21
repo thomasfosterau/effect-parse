@@ -33,6 +33,7 @@ import { Fail, Failure, fromSource, State } from "./Input.js"
 import * as ParseError from "./ParseError.js"
 import * as Compiler from "./internal/compiler/registry.js"
 import type * as Resume from "./internal/resume.js"
+import * as Stack from "./internal/stack.js"
 import type { Parser } from "./Parser.js"
 
 /**
@@ -116,7 +117,7 @@ export const parseMany: {
       let offset = 0
       while (offset < input.length) {
         const state = new State(input, { partial, context, offset })
-        const a = step(state)
+        const a = Stack.run(step, state)
         if (a === Fail) {
           if (partial && state.mode === "Incomplete") break
           return Effect.fail(ParseError.fromFailure<E>(input, state.reportedFailure(), state.mode, state.encoding))
@@ -225,7 +226,7 @@ class Incremental<A, E, I extends Chunkable> {
 
   /** The step attempts run: the parser's resumable compiled code if it was compiled, else the interpreter. */
   private step(state: State<I>): unknown {
-    return (Compiler.stepFor(this.parser, state, true) ?? this.parser.step)(state)
+    return Stack.run(Compiler.stepFor(this.parser, state, true) ?? this.parser.step, state)
   }
 
   private attempt(): void {
@@ -257,7 +258,7 @@ class Incremental<A, E, I extends Chunkable> {
     // same as if the input had been parsed in one go
     const all = this.input()
     const state = new State(all, { context: this.context })
-    const a = this.parser.step(state)
+    const a = Stack.run(this.parser.step, state)
     if (a !== Fail && state.pos === state.end) return Effect.succeed(a)
     if (a !== Fail) state.backtrack("Eof", ["end of input"])
     return Effect.fail(ParseError.fromFailure<E>(all, state.reportedFailure(), state.mode, state.encoding))

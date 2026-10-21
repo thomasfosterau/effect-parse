@@ -592,12 +592,14 @@ class Compiler {
     const { max, min } = node
     const checkLoop = max === Infinity
     const isFold = node._tag === "Fold"
+    const cond = isFold ? (node as NodeOf<"Fold">).while : undefined
     const c = this.compile(node.self, used)
     const resumable = this.resumable
     const key = {}
-    // The accumulator: an array, the fold's value, or nothing when unused
-    const init: () => unknown = !used ? () => undefined : isFold ? (node as NodeOf<"Fold">).init : () => []
-    const add: (acc: any, a: unknown) => unknown = !used
+    // The accumulator: an array, the fold's value, or nothing when unused (and unneeded by `while`)
+    const tracked = used || cond !== undefined
+    const init: () => unknown = !tracked ? () => undefined : isFold ? (node as NodeOf<"Fold">).init : () => []
+    const add: (acc: any, a: unknown) => unknown = !tracked
       ? (acc) => acc
       : isFold
       ? (node as NodeOf<"Fold">).f
@@ -625,6 +627,7 @@ class Compiler {
       }
       if (!resumed) acc = init()
       for (; count < max; count++) {
+        if (cond !== undefined && count >= min && !cond(acc)) break
         const start = s.pos
         const a = c(s)
         if (a === Fail) {
