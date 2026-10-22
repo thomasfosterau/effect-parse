@@ -37,7 +37,7 @@ export interface Fallback {
 }
 
 /** The maximum number of distinct parsers compiled for one root. */
-export const maxNodes = 2048
+const maxNodes = 2048
 
 const BT: ErrMode = "Backtrack"
 const CUT: ErrMode = "Cut"
@@ -1593,7 +1593,7 @@ export const createClosureCompiler = (kind: 0 | 1 | 2, resumable = false): Closu
 }
 
 /** Compiles a root parser for one input kind. */
-export const compileClosure = (
+const compileClosure = (
   root: ParserLike,
   kind: 0 | 1 | 2,
   resumable = false

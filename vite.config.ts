@@ -286,7 +286,9 @@ export default defineConfig({
       // `fallow audit` (the Claude Code PreToolUse fallow gate runs the audit
       // on `git commit` / `git push` but never refreshes this map).
       "test:coverage": {
-        command: "vp test run --coverage",
+        // Istanbul instrumentation slows the differential suites several-fold,
+        // past vitest's 5 s default; the unit run keeps the default.
+        command: "vp test run --coverage --testTimeout 30000",
         cache: { env: ["VITEST_MAX_WORKERS", "NODE_OPTIONS"], input: cacheInputs, output: ["coverage/**"] }
       },
       // Benchmarks: run by hand around a change to a hot path, never in CI
@@ -335,7 +337,8 @@ export default defineConfig({
       reporter: ["text-summary", "json-summary", "json"],
       reportsDirectory: "./coverage",
       include: ["src/**/*.ts"],
-      exclude: ["**/*.d.ts"]
+      exclude: ["**/*.d.ts"],
+      thresholds: { statements: 90, branches: 85, functions: 90, lines: 90 }
     }
   }
 })

@@ -27,7 +27,7 @@ const isRange = (u: unknown): u is { readonly from: string | number; readonly to
 const toCode = (u: string | number): number => (Predicate.isNumber(u) ? u : firstCodePoint(u))
 
 /** The code point ranges of a token set, or `undefined` if it has an unknown predicate. */
-export const rangesOf = (set: unknown): Array<[number, number]> | undefined => {
+const rangesOf = (set: unknown): Array<[number, number]> | undefined => {
   const out: Array<[number, number]> = []
   const add = (u: unknown): boolean => {
     if (Predicate.isString(u)) {

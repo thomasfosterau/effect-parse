@@ -7,7 +7,8 @@ import type { Input } from "../Input.js"
 import { Fail } from "../Input.js"
 import { latin1 } from "./text.js"
 
-const toText = (s: Input): string =>
+/** The text of an input slice: as is for a string, Latin-1 for bytes, joined for tokens. */
+export const toText = (s: Input): string =>
   Predicate.isString(s) ? s : s instanceof Uint8Array ? latin1.text(s, 0, s.length) : s.join("")
 
 /** The value of the text matched by `Ascii.float` and `Text.float`. */

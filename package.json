@@ -116,7 +116,6 @@
     "@typescript/native": "catalog:",
     "@vitest/coverage-istanbul": "catalog:",
     "effect": "catalog:",
-    "effect-solutions": "catalog:",
     "fallow": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",

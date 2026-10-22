@@ -1,0 +1,184 @@
+{
+  "kind": "health",
+  "finding_counts": {
+    "bench/json-fused.ts": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "bench/native.bench.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "examples/sexpr.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "scripts/check-dist.mjs": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "src/Ascii.ts": {
+      "complexity_high": {
+        "count": 2
+      },
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/Bits.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "src/Expression.ts": {
+      "complexity_critical": {
+        "count": 1
+      }
+    },
+    "src/ParseError.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "src/Parser.ts": {
+      "complexity_high": {
+        "count": 2
+      },
+      "complexity_moderate": {
+        "count": 3
+      }
+    },
+    "src/internal/compiler/closure.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "complexity_high": {
+        "count": 5
+      },
+      "complexity_moderate": {
+        "count": 5
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "src/internal/compiler/first.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "src/internal/compiler/jit.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "complexity_high": {
+        "count": 2
+      },
+      "complexity_moderate": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "src/internal/node.ts": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "src/internal/numbers.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "src/internal/syntax.ts": {
+      "complexity_high": {
+        "count": 1
+      },
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "src/internal/text.ts": {
+      "complexity_critical": {
+        "count": 2
+      }
+    },
+    "src/internal/tokens.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "complexity_high": {
+        "count": 2
+      }
+    },
+    "test/Compiler.test.ts": {
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    }
+  },
+  "runtime_coverage_findings": [],
+  "target_keys": [
+    "src/internal/tokens.ts:high impact",
+    "src/internal/text.ts:high impact",
+    "src/ParseError.ts:hidden coupling",
+    "src/internal/compiler/closure.ts:complexity",
+    "src/internal/numbers.ts:high impact",
+    "test/Streaming.test.ts:hidden coupling",
+    "src/internal/compiler/jit.ts:complexity",
+    "src/Parser.ts:complexity",
+    "src/internal/compiler/first.ts:complexity",
+    "examples/sexpr.ts:complexity",
+    "src/internal/node.ts:hidden coupling",
+    "test/Compiler.test.ts:hidden coupling",
+    "src/ParserStream.ts:hidden coupling",
+    "bench/json.bench.ts:hidden coupling",
+    "test/examples.test.ts:hidden coupling",
+    "bench/native.bench.ts:hidden coupling",
+    "bench/json-fused.ts:complexity",
+    "src/Text.ts:hidden coupling",
+    "src/Ascii.ts:hidden coupling",
+    "src/internal/syntax.ts:complexity",
+    "test/Regressions.test.ts:hidden coupling",
+    "src/Expression.ts:complexity",
+    "test/readme.test.ts:hidden coupling"
+  ]
+}

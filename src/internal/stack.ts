@@ -10,7 +10,7 @@
 import type { Fail, State } from "../Input.js"
 
 /** The message of a `TooDeep` failure. */
-export const tooDeepMessage = "input is nested too deeply: parsing exhausted the call stack"
+const tooDeepMessage = "input is nested too deeply: parsing exhausted the call stack"
 
 /**
  * Whether `e` is the engine's call-stack overflow: a `RangeError` in V8

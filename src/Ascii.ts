@@ -31,7 +31,6 @@ import type { Parser } from "./Parser.js"
 import * as P from "./Parser.js"
 import * as numbers from "./internal/numbers.js"
 import * as Resume from "./internal/resume.js"
-import { latin1 } from "./internal/text.js"
 import { codePointPredicate } from "./internal/tokens.js"
 import { literalImpl, range, takeWhileImpl } from "./Token.js"
 import * as Token from "./Token.js"
@@ -386,9 +385,6 @@ export const tillLineEnding: Parser<string> = /*#__PURE__*/ P.described<string>(
 // Numbers
 // -----------------------------------------------------------------------------
 
-const toText = (s: Input): string =>
-  Predicate.isString(s) ? s : s instanceof Uint8Array ? latin1.text(s, 0, s.length) : s.join("")
-
 /** @internal */
 export const overflow = (value: number): Result.Result<number, string> =>
   Number.isSafeInteger(value) ? Result.succeed(value) : Result.fail("integer overflow")
@@ -401,7 +397,7 @@ export const overflow = (value: number): Result.Result<number, string> =>
  * @category numbers
  */
 export const decUint: Parser<number, string> = /*#__PURE__*/ digit1.pipe(
-  /*#__PURE__*/ P.tryMap((s) => overflow(Number(toText(s)))),
+  /*#__PURE__*/ P.tryMap((s) => overflow(Number(numbers.toText(s)))),
   /*#__PURE__*/ P.named("decUint")
 )
 
@@ -416,7 +412,7 @@ export const decUint: Parser<number, string> = /*#__PURE__*/ digit1.pipe(
 export const decInt: Parser<number, string> = /*#__PURE__*/ P.taken(
   /*#__PURE__*/ P.seq(/*#__PURE__*/ P.opt(/*#__PURE__*/ Token.oneOf("+-")), digit1)
 ).pipe(
-  /*#__PURE__*/ P.tryMap((s) => overflow(Number(toText(s)))),
+  /*#__PURE__*/ P.tryMap((s) => overflow(Number(numbers.toText(s)))),
   /*#__PURE__*/ P.named("decInt")
 )
 
@@ -426,7 +422,9 @@ export const decInt: Parser<number, string> = /*#__PURE__*/ P.taken(
  * @since 0.1.0
  * @category numbers
  */
-export const decBigUint: Parser<bigint> = /*#__PURE__*/ digit1.pipe(/*#__PURE__*/ P.map((s) => BigInt(toText(s))))
+export const decBigUint: Parser<bigint> = /*#__PURE__*/ digit1.pipe(
+  /*#__PURE__*/ P.map((s) => BigInt(numbers.toText(s)))
+)
 
 /**
  * A signed decimal integer as a `bigint`, of any size.
@@ -438,7 +436,7 @@ export const decBigInt: Parser<bigint> = /*#__PURE__*/ P.taken(
   /*#__PURE__*/ P.seq(/*#__PURE__*/ P.opt(/*#__PURE__*/ Token.oneOf("+-")), digit1)
 ).pipe(
   /*#__PURE__*/ P.map((s) => {
-    const t = toText(s)
+    const t = numbers.toText(s)
     return BigInt(t.startsWith("+") ? t.slice(1) : t)
   })
 )
@@ -451,7 +449,7 @@ export const decBigInt: Parser<bigint> = /*#__PURE__*/ P.taken(
  * @category numbers
  */
 export const hexUint: Parser<number, string> = /*#__PURE__*/ hexDigit1.pipe(
-  /*#__PURE__*/ P.tryMap((s) => overflow(parseInt(toText(s), 16))),
+  /*#__PURE__*/ P.tryMap((s) => overflow(parseInt(numbers.toText(s), 16))),
   /*#__PURE__*/ P.named("hexUint")
 )
 

@@ -24,8 +24,8 @@ import type { CharSet } from "./sets.js"
 import { kindOfEncoding, reachesAbove, TableSize, textSet, tokenSet } from "./sets.js"
 
 export const Strict = 0
-export const Optional = 1
-export const Unknown = 2
+const Optional = 1
+const Unknown = 2
 
 export interface First {
   readonly mode: 0 | 1 | 2

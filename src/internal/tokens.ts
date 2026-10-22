@@ -1,3 +1,5 @@
+// fallow-ignore-file duplicate-export -- `End` and `scan` here are the token-set versions of the text
+// helpers in ./text.ts; both are internal modules, imported by path, never re-exported from one barrel.
 import * as Predicate from "effect/Predicate"
 import type { Input, State } from "../Input.js"
 import { charOf, firstCodePoint } from "./text.js"
@@ -40,7 +42,7 @@ const describeSet = (u: unknown): string => {
 }
 
 /** Renders bytes as a Rust-style byte string literal: b"GET\r\n". */
-export const describeBytes = (bytes: Uint8Array): string => {
+const describeBytes = (bytes: Uint8Array): string => {
   let out = 'b"'
   for (const b of bytes) {
     if (b === 0x22) out += '\\"'
@@ -108,7 +110,7 @@ const compileToken = (u: unknown): ((token: unknown) => boolean) => {
  * number), so string inputs can call it without allocating a string per
  * character.
  */
-export const CodePointPredicate: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/CodePointPredicate")
+const CodePointPredicate: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/CodePointPredicate")
 
 /**
  * The code points accepted by a predicate, as sorted, disjoint, inclusive
@@ -230,7 +232,7 @@ export const splitSurrogate = (state: State<Input>, i: number): boolean => {
 }
 
 /** Reads the code point at `i` of a string. */
-export const codePointAt = (s: string, i: number): number => {
+const codePointAt = (s: string, i: number): number => {
   const c = s.charCodeAt(i)
   if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
     const d = s.charCodeAt(i + 1)

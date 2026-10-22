@@ -1,3 +1,5 @@
+// fallow-ignore-file duplicate-export -- every compiler module exports its `backend` under the same name,
+// which the Compiler module imports by path; no barrel re-exports both.
 /**
  * The JIT: emits JavaScript source for a parser's description and builds
  * it with `new Function`.
@@ -71,7 +73,7 @@ let supported = false
  * Whether `new Function` works here (it doesn't under a Content Security
  * Policy). Checked once, and again if `globalThis.Function` is replaced.
  */
-export const jitSupported = (): boolean => {
+const jitSupported = (): boolean => {
   if (checked !== globalThis.Function) {
     checked = globalThis.Function
     try {
@@ -1161,7 +1163,7 @@ const acceptTable = (set: CharSet, negate: boolean): Uint8Array => {
 }
 
 /** Generates the source of a compiled parser, without building it. */
-export const generate = (
+const generate = (
   root: ParserLike,
   kind: 0 | 1 | 2,
   resumable = false
@@ -1180,7 +1182,7 @@ export const generate = (
 }
 
 /** Compiles a root parser for one input kind with `new Function`. */
-export const compileJit = (
+const compileJit = (
   root: ParserLike,
   kind: 0 | 1 | 2,
   resumable = false

@@ -41,8 +41,6 @@ export const register = (p: ParserLike, backend: Backend): void => {
   if (entry === undefined || entry.backend !== backend) registry.set(p, { backend, byKind: [] })
 }
 
-export const isRegistered = (p: ParserLike): boolean => registry.has(p)
-
 /**
  * The compiled form of a registered parser for an input kind, compiling it
  * if needed. `resumable` selects the build used by streaming parses, which

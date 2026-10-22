@@ -100,7 +100,7 @@ export const absolute = (f: Failure, start: number): Failure => rebase(f, -start
  * Builds a green node over `[start, end)` from the children waiting on the
  * stack.
  */
-export const build = (
+const build = (
   kind: string,
   named: boolean,
   key: object | undefined,
