@@ -116,7 +116,7 @@ export default defineConfig({
       // `?: T | undefined` under `exactOptionalPropertyTypes`, `Input.State`
       // fields) and the step protocol's per-step results. Changing the public
       // spelling breaks every consumer; boxing a step result in `Option`
-      // allocates on every parse step. 192 sites.
+      // allocates on every parse step. 209 sites.
       "effect/prefer-option-over-null": "warn",
       // `unknown` is the honest type at the interpreter's erased boundary: a
       // step returns the value of whatever parser it runs, and the compilers

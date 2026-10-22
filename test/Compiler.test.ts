@@ -7,6 +7,7 @@ import * as Context from "effect/Context"
 import * as Option from "effect/Option"
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { assert, describe, expect, it } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
@@ -17,7 +18,18 @@ import * as JsonFast from "../examples/json-fast.js"
 import { jsonGrammar } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
 import type { Input } from "../src/index.js"
-import { Ascii, Binary, Compiler, Encoding, Expression, Parser, ParserStream, Text, Token } from "../src/index.js"
+import {
+  Ascii,
+  Binary,
+  Compiler,
+  Encoding,
+  Expression,
+  Parser,
+  ParserSchema,
+  ParserStream,
+  Text,
+  Token
+} from "../src/index.js"
 import { State } from "../src/Input.js"
 import { Fail } from "../src/Input.js"
 import * as Registry from "../src/internal/compiler/registry.js"
@@ -210,6 +222,22 @@ describe("compiled examples", () => {
     }
     const latin = jsonGrammar(Text.latin1)
     for (let b = 0; b < 256; b++) same(latin, new Uint8Array([0x22, b, 0x22]))
+  })
+
+  it("a parser derived from a schema", () => {
+    const { annotate } = ParserSchema
+    const Entry = Schema.Struct({
+      name: Schema.String,
+      tags: Schema.Array(Schema.Literals(["a", "ab"])).pipe(annotate({ prefix: "[", separator: ",", suffix: "]" })),
+      size: Schema.optionalKey(Schema.Int.check(Schema.isLessThan(100)))
+    }).pipe(annotate({ separator: ";", whitespace: true }))
+    const Doc = Schema.Union([
+      Schema.Array(Entry).pipe(annotate({ separator: "|" })),
+      Schema.Record(Schema.String, Schema.Int).pipe(annotate({ prefix: "{", separator: ",", keySeparator: "=" }))
+    ])
+    const p = ParserSchema.toParser(Doc)
+    const docs = ["x;[a,ab];3| y ; [ ] ", "{a=1,b=2,a=3}"]
+    docs.flatMap((doc) => [doc, ...mutations(doc, "xy;[],ab3 |{}=1", 200, 3)]).forEach((input) => same(p, input))
   })
 
   it("arithmetic", () => {

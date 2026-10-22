@@ -54,6 +54,7 @@ The package was developed as `effect-nom`. Releases and the changelog are manage
 - [Errors](#errors)
 - [Streaming and partial input](#streaming-and-partial-input)
 - [Services](#services)
+- [Parsers from schemas](#parsers-from-schemas)
 - [Unicode text and encodings](#unicode-text-and-encodings)
 - [Syntax trees and incremental parsing](#syntax-trees-and-incremental-parsing)
 - [Modules](#modules)
@@ -212,6 +213,7 @@ Repetition ranges follow winnow: `Parser.repeat(p)` matches zero or more times, 
 | `Parser.parseRecoverable(p, input)` | `{ value: Option<A>, errors }` with error recovery enabled |
 | `ParserStream.parseMany(p)` | `Stream<I> => Stream<A>` (see [Streaming](#streaming-and-partial-input)) |
 | `ParserSchema.make(p)` | a `Schema` decoding strings with the parser |
+| `ParserSchema.fromSchema(s)` | a `Schema` decoding strings with the parser derived from `s` (see [Parsers from schemas](#parsers-from-schemas)) |
 | `Syntax.parse(p, input)` | a `Syntax.Tree`: a syntax tree, the value and the errors (see [Syntax trees](#syntax-trees-and-incremental-parsing)) |
 
 Every `Parser` runner takes an `offset` option, to start parsing part-way into the input. The result is that of parsing `input.slice(offset)`, without the copy, and offsets (`Done`'s `offset`, spans, `ParseError` offsets, lines and columns) are positions in the whole input. A lexer can read one token at a time from a buffer, compiled parsers included:
@@ -378,6 +380,39 @@ Parser.parse(Parser.provideService(number, Radix, 16), "ff") // 255
 Parser.parseEffect(number, "777").pipe(Effect.provideService(Radix, 8)) // Effect<511>
 ```
 
+## Parsers from schemas
+
+`ParserSchema.toParser` derives a parser from an Effect `Schema`, so a text format can be declared once, as the schema of the values it holds. `parser` annotations, set with `ParserSchema.annotate`, say how each part is written: a `prefix` and `suffix`, the `separator` between fields, elements or entries, the `keySeparator` of `key=value` entries, whether `whitespace` may surround that text, or a `parser` that replaces the derived one.
+
+```ts
+import { Schema } from "effect"
+
+const Point = Schema.Struct({ x: Schema.Int, y: Schema.Int }).pipe(
+  ParserSchema.annotate({ prefix: "(", separator: ",", suffix: ")", whitespace: true })
+)
+
+const Config = Schema.Struct({
+  name: Schema.String,
+  origin: Point,
+  color: Schema.optionalKey(Schema.Int.pipe(ParserSchema.annotate({ parser: Ascii.hexUint, prefix: "#" })))
+}).pipe(ParserSchema.annotate({ separator: ";", keySeparator: "=" }))
+
+const config = ParserSchema.toParser(Config)
+Parser.parse(config, "origin=( 1, -2 );name=main;color=#ff")
+// Result.succeed({ name: "main", origin: { x: 1, y: -2 }, color: 255 })
+
+Parser.parse(config, "name=main;origin=(1,x)")
+// Result.fail(ParseError):
+//   Parse error at line 1, column 21:
+//   1 | name=main;origin=(1,x)
+//     |                     ^
+//   expected one of "+-" or digit, found "x"
+```
+
+Without annotations, a struct or tuple is its fields in order, an array its elements, a union its first member that parses, and a `suspend`ed schema recursion. A string runs to the next separator or suffix; a number is decimal, and an integer when the schema checks `isInt`. A record, or a struct with a `keySeparator`, is `key=value` entries in any order. A schema's checks and transformations (a `Class`, `NumberFromString`, a brand) run as `Schema.decode` runs them, and their failures are parse errors whose `cause` is the `SchemaError`. The doc comment of `toParser` lists every rule.
+
+A derived parser is an ordinary parser: it composes with the combinators, and the [compilers](#compiled-parsers) compile it. `ParserSchema.fromSchema(schema, { encode })` wraps it as a `Schema` from `string`.
+
 ## Unicode text and encodings
 
 `Token` reads strings by code point, but the `Ascii` character classes and numbers only cover ASCII, and they treat bytes as ASCII. The `Text` module adds Unicode parsers that work with any encoding. `Text.make(encoding)` builds a set of parsers (`Text.TextParsers<I>`), and sets are provided for the common encodings:
@@ -480,7 +515,7 @@ On a 0.58 M-character JSON document (`vp run bench:syntax`), building the tree t
 | `Compiler` | `jit`, `closure`: [compiled parsers](#compiled-parsers) | — |
 | `ParseError` | the error type, `lineColumn`, `formatExpected` | `error` |
 | `ParserStream` | `parseMany`, `parseAll` over Effect `Stream`s | `Partial` / `streaming` |
-| `ParserSchema` | `make`: a `Schema` from a parser | — |
+| `ParserSchema` | `make`: a `Schema` from a parser; `toParser`, `fromSchema`, `annotate`: a parser from an annotated `Schema` | — |
 | `Syntax` | syntax trees: `node`, `token`, `field`, `parse`, incremental `reparse` and `replace`, `Tree`, `SyntaxNode`, `TreeCursor` | — (Tree-sitter) |
 | `Nom` | nom names and argument orders (`tag`, `many0`, `separatedList1`, `mapRes`, …) | nom |
 | `Input` | input types and the `State` cursor for `Parser.make` | `stream` |

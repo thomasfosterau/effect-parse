@@ -139,7 +139,7 @@ expected value
 | `Expression` | Pratt / precedence-climbing expression parser (from `nom-language::precedence`) |
 | `Compiler` | Compile a parser with the JIT (`jit`) or the closure compiler (`closure`) (section 6) |
 | `ParserStream` | Run a parser repeatedly over an Effect `Stream` of chunks (partial parsing) |
-| `ParserSchema` | Build an Effect `Schema` that decodes a string with a parser |
+| `ParserSchema` | Build an Effect `Schema` that decodes a string with a parser, and derive a parser from an annotated `Schema` (section 9) |
 | `Syntax` | Concrete syntax trees and incremental reparsing, after Tree-sitter (section 8) |
 | `Nom` | nom-named aliases: `tag`, `tagNoCase`, `char`, `many0`, `many1`, `manyMN`, `manyTill`, `count`, `separatedList0/1`, `foldMany0/1`, `mapRes`, `mapOpt`, `recognize`, `consumed`, `value`, `pair`, `tuple`, `isA`, `isNot`, `takeWhile1`, `takeWhileMN`, `takeTill1`, ... |
 
@@ -347,3 +347,37 @@ An earlier version used a fixed margin instead: the grammar's longest literal, f
 **Equal to a fresh parse.** A reparse returns the tree, values and errors that `Syntax.parse` of the new input returns. Values are shared, not recomputed. For errors to match too, each node stores what its parse left for error reporting (its furthest failure and its last hint, see "Error model"), and a reused node replays it. Otherwise a fatal error after a reused node could be reported at a different offset, or with fewer expected alternatives. The differential tests check that equality on random edits of random JSON documents, of expression grammars (including `Expression.make`), and of a grammar built on lookahead (keyword boundaries, comments, literals sharing a prefix); a targeted test covers each parser that reports a read, and fails if its report is removed.
 
 **Cost.** A reparse runs the parsers on the path from the root to the edit, and every repetition on that path steps over each reused child (a lookup and a stack push, about 1 µs). On a 0.58 M-character JSON document whose top-level array has 2000 records, building the tree takes about twice as long as an interpreted parse of the value (80 ms against 40 ms), and a one-character edit reparses in about 2 ms. Tree-sitter goes further by storing repetitions as balanced trees, so it can reuse runs of siblings in one step. The same could be done here by having `repeat` and `separated` look up a run of consecutive old children, which is left for later.
+
+## 9. Parsers from schemas
+
+`ParserSchema.toParser(schema)` derives a parser from an Effect `Schema`, the way `Schema.toEquivalence` and `Schema.toFormatter` derive their instances: a walk over the schema's AST that checks a node's annotation first, then falls back on the node's tag. A format whose values already have a schema can then be declared once, in the schema, rather than twice.
+
+### Annotations
+
+A `parser` annotation holds a parser for the node, or a `Grammar`: `prefix`, `suffix`, `separator`, `keySeparator` and `whitespace`. The key is typed by augmenting `Schema.Annotations.Annotations`, which is Effect's documented extension point, so `schema.annotate({ parser })` type-checks; `ParserSchema.annotate` also checks the parser's output type against the schema's type. As with Effect's own annotations, an annotation on a schema with checks lives on its last check (`Schema.Int.annotate(...)` annotates the `isInt` filter), so the lookup searches from the last check back to the node, and a later `.check(...)` doesn't hide an earlier annotation.
+
+A grammar describes only the text the node itself writes. Everything the derivation needs from its surroundings travels down in a context instead: the characters that end an unannotated string (the separators and suffixes around it, and the next literal in a template literal) and whether whitespace is allowed. So a field of type `Schema.String` needs no annotation in `a=1;b=x`.
+
+### Type side, decoded
+
+The derived parser returns the schema's _type_, with its checks and transformations applied, rather than its encoded form decoded afterwards. Decoding afterwards would be simpler, but annotations are written on the type side (`Schema.Int.annotate(...)`, a `Class`), and `SchemaAST.toEncoded` drops them on every node with a transformation. So:
+
+- A node without a transformation is parsed structurally, then its checks run (as `Schema.Unknown.check(...checks)`, so only the node's own filters run, not its children's again).
+- A node with a transformation parses its encoded side (the last link's `to`) into that side's type, then decodes with a copy of the node whose last link starts from that type (rebuilt with `SchemaAST.decodeTo`, which is public; `replaceEncoding` is internal). Each transformation therefore runs once, on its own node. A grammar's `separator` and `keySeparator` on a transformation apply to its encoded side, since that is where a `Class`'s fields are.
+- A parser from an annotation replaces the derivation, and its output is decoded with the node's type schema, so a hand-written parser can't produce a value of the wrong type.
+
+Schema failures become parse failures whose `cause` is the `SchemaError`, so `E` is `SchemaError` for every derived parser; the causes of annotated parsers are converted to one, keeping their message.
+
+### Text rules
+
+Sequences (structs, tuples, arrays) put the separator between the items _present_: an optional field that is missing takes its separator with it. That is built as one parser per position and "separator needed" flag (`2n` parsers, memoised), where an optional item is `alt(present, skipped)`, which is ordered choice: an optional field is tried before it is skipped. Unions are ordered choice too, except that a union of plain literals is tried longest first, as an `Enum`'s values are, because `Literals(["<", "<="])` should not be order-sensitive in a way its type isn't.
+
+A record, or a struct with a `keySeparator`, is entries in any order. A required field that is missing fails as a _syntax_ error where another entry could have been (`expected "port="`), not as a schema issue at the start: a failure with a cause is never outranked by the furthest-failure rule, so a schema issue would hide the real error when a malformed entry ended the repetition early (`port=x` would be reported as "missing key port"). Committing (`cut`) once a known key is read would also report the malformed entry, but would stop a union of keyed structs trying its next member.
+
+Integers: `Ascii.float` would read `1.2` whole in a `major.minor` struct, so a number schema whose checks restrict it to integers (any filter whose arbitrary constraint is `number: "integer"`, as `isInt` and those built on it have) reads a decimal integer instead.
+
+A check's `expected` annotation (`"an integer"`) describes the check, not the text, so only a node's `identifier` and its own `expected` label it in errors.
+
+### Compiled
+
+The derivation builds parsers only from public combinators, whose descriptions the compilers read, so derived parsers compile. The differential suite (`test/Compiler.test.ts`) runs one over mutated inputs. Recursion goes through `Parser.suspend`; deriving a recursive schema again in the same context returns the same `suspend` parser, which ends the derivation.
