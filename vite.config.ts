@@ -92,8 +92,8 @@ export default defineConfig({
       // The parser predates the Effect oxlint preset. These rules sit at
       // `warn` with the count they had when the preset was adopted, so the
       // code stays committable while every site stays reported; a new site is
-      // a defect, not headroom. The remaining sites are listed in the
-      // follow-up issue linked from AGENTS.md. Flip a rule back to the
+      // a defect, not headroom. The remaining sites are listed in
+      // effect-parse#35. Flip a rule back to the
       // preset's `error` and delete its line when its count reaches zero.
       "effect/require-safety-comment-for-type-assertion": "warn", // 306
       "effect/imperative-loops": "warn", // 75, all in test/ (src/ is off below, measured)

@@ -28,7 +28,7 @@ This repo publishes one package, `@thomasfosterau/effect-parse`: parser combinat
 - **Tests import from `vite-plus/test`**, never `vitest`. `test/<Module>.test.ts` covers a module; `test/*.types.ts` holds compile-time assertions (an expect-error directive above a statement that must fail), type-checked by `vp run check`, never executed.
 - **Every export has a doc comment** whose first sentence says what it is for, with `@since` (and `@category` on public modules) and an `@example` for functions. Doc-comment changes reach the emitted `.d.ts`.
 - **A new public module** is added to `src/index.ts`, to `exports` in `package.json` and to `entry` in `.fallowrc.json`; `vp pack` picks it up from `src/**`.
-- **Lint allowances shrink, never grow.** Rules at `warn` in `vite.config.ts` carry their remaining count; a new site is a defect. A rule is turned `off` only with a comment giving the reason (a measurement, or the published API it would break).
+- **Lint allowances shrink, never grow.** Rules at `warn` in `vite.config.ts` carry their remaining count (the sites are listed in [#35](https://github.com/thomasfosterau/effect-parse/issues/35)); a new site is a defect. A rule is turned `off` only with a comment giving the reason (a measurement, or the published API it would break).
 
 ## Commands
 
