@@ -1149,6 +1149,33 @@ describe("Parser.run", () => {
     expect(w.interpreted).toBe(1)
   })
 
+  it.each(backends)("skips the interpreted re-run with diagnostics off (%s)", (backend) => {
+    const w = watched(Parser.delimited(Token.literal("("), Ascii.digit1, Token.literal(")")), backend)
+    const state = new State("(12) (x)")
+    expect(Parser.run(w.parser, state, { diagnostics: false })).toBe("12")
+    const before = state.failure
+    // Fails after reading "(": the mode is set, the cursor is back where the run started
+    expect(Parser.run(w.parser, state.reset(5), { diagnostics: false })).toBe(Fail)
+    expect(state.mode).toBe("Backtrack")
+    expect(state.pos).toBe(5)
+    expect(state.failure).toBe(before)
+    expect(w.interpreted).toBe(0)
+    // `Incomplete` on a partial input, and `Cut` from a committed failure
+    expect(Parser.run(w.parser, new State("(1", { partial: true }), { diagnostics: false })).toBe(Fail)
+    const partial = new State("(1", { partial: true })
+    Parser.run(w.parser, partial, { diagnostics: false })
+    expect(partial.mode).toBe("Incomplete")
+    const committed = Compiler[backend](Parser.preceded(Token.literal("("), Parser.cut(Ascii.digit1)))
+    const cut = new State("(x")
+    expect(Parser.run(committed, cut, { diagnostics: false })).toBe(Fail)
+    expect(cut.mode).toBe("Cut")
+    expect(w.interpreted).toBe(0)
+    // With diagnostics (the default), the failure is the interpreter's
+    expect(Parser.run(w.parser, state.reset(5))).toBe(Fail)
+    expect(w.interpreted).toBe(1)
+    expect(state.failure.offset).toBe(6)
+  })
+
   it("runs interpreted under a tracer or with recovery on", () => {
     const w = watched(Ascii.alpha1, "jit")
     const traced = new State("abc")

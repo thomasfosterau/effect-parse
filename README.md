@@ -278,7 +278,7 @@ Some ways of writing a grammar compile to faster code than others:
 - Give `Parser.dispatch` a record of cases, not a function. With a record, compiled code switches on the key and runs the chosen case compiled, and on `Token.any` or `Parser.peek(Token.any)` it switches on the next unit without building the key. The parser a function returns runs interpreted, and if the function builds it (`(c) => Parser.cut(p)`), it is built again on every run.
 - Build parsers once, outside callbacks and `Parser.gen` bodies. A parser built while parsing costs an allocation per combinator, every time, and is never compiled.
 - On token arrays (the output of a lexer), match tokens with `Token.oneOf`, `Token.noneOf`, `Token.takeWhile` and `Token.anyToken`, with a predicate or a list of tokens: the JIT calls the predicate inline. A `Parser.make` that reads `state.input[state.pos]` runs interpreted, and records a failure, with its expected list, every time it doesn't match.
-- Drive a lexer with `Parser.run` on one `Input.State` that you `reset` before each token: no run allocates a state, a `Result` or a slice, and the token parser runs compiled.
+- Drive a lexer with `Parser.run` on one `Input.State` that you `reset` before each token: no run allocates a state, a `Result` or a slice, and the token parser runs compiled. When a failure only means "try something else", pass `{ diagnostics: false }`, so a failed compiled run isn't repeated interpreted to build an error you won't read.
 - `Ascii.float` and `Text.float` convert numbers as they match them.
 
 [`json-fast.ts`](examples/json-fast.ts) is the JSON example written this way; it runs records-heavy documents about 1.5 times as fast as [`json-text.ts`](examples/json-text.ts).

@@ -86,6 +86,35 @@ report(`lexer, ${source.length / 1000} K characters, one token per run`, {
 })
 
 // -----------------------------------------------------------------------------
+// A scanner: most runs fail, and why doesn't matter
+// -----------------------------------------------------------------------------
+
+const link = Compiler.jit(
+  Parser.delimited(Token.literal("[["), Token.takeTill("]|\n", { min: 1 }), Token.literal("]]"))
+)
+const prose = "plain text with [[a link]] and [single] brackets, [[broken link\n more words ".repeat(5000)
+const proseState = new Input.State(prose)
+
+/** Tries `link` at every `[`, skipping a character when it fails. */
+const links = (diagnostics: boolean) => (): number => {
+  let found = 0
+  let pos = prose.indexOf("[")
+  while (pos >= 0) {
+    if (Parser.run(link, proseState.reset(pos), { diagnostics }) === Input.Fail) pos = prose.indexOf("[", pos + 1)
+    else {
+      found++
+      pos = prose.indexOf("[", proseState.pos)
+    }
+  }
+  return found
+}
+
+report(`scanner, ${prose.length / 1000} K characters, a run at every "["`, {
+  "Parser.run": links(true),
+  "Parser.run, diagnostics: false": links(false)
+})
+
+// -----------------------------------------------------------------------------
 // ParserStream.parseMany: one row per run
 // -----------------------------------------------------------------------------
 

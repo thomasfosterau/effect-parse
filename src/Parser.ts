@@ -3010,6 +3010,10 @@ export const parseEffect = <A, E, R, I extends Input>(
  * `Incomplete` is reported as the step would report it. Under a tracer,
  * with recovery on or inside a `Syntax` parse, the step runs interpreted.
  *
+ * A driver that only needs to know *that* a parser failed (it tries
+ * another, or skips a character) can pass `{ diagnostics: false }` to skip
+ * the interpreted re-run; see {@link RunOptions}.
+ *
  * Compiled code records no hints or furthest failure when it succeeds, so
  * a later failure on the same state can list fewer expectations than one
  * after interpreted runs would: reset the state between runs (as above) and
@@ -3040,8 +3044,31 @@ export const parseEffect = <A, E, R, I extends Input>(
  * @since 0.2.0
  * @category running
  */
-export const run = <A, E, R, I extends Input>(self: Parser<A, E, R, I>, state: State<I>): A | Fail =>
-  Run.runOn(self, self.step, state)
+export const run = <A, E, R, I extends Input>(
+  self: Parser<A, E, R, I>,
+  state: State<I>,
+  options?: RunOptions
+): A | Fail => Run.runOn(self, self.step, state, options?.diagnostics !== false)
+
+/**
+ * Options for {@link run}.
+ *
+ * @since 0.2.0
+ * @category running
+ */
+export interface RunOptions {
+  /**
+   * Whether a failure records the interpreter's diagnostics (default
+   * `true`). With `false`, a compiled run that fails is not run again
+   * interpreted: the state's `mode` (`Backtrack`, `Cut` or `Incomplete`)
+   * is set and the cursor is back where the run started, but `failure`,
+   * hints and the furthest failure are left as they were. For drivers that
+   * try a parser and move on when it fails, without reporting why, this
+   * halves the cost of each failure. Parsers that run interpreted record
+   * their diagnostics either way.
+   */
+  readonly diagnostics?: boolean | undefined
+}
 
 /**
  * The outcome of {@link parseRecoverable}.

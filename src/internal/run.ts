@@ -13,10 +13,17 @@ import * as Stack from "./stack.js"
  * Runs `p` on `state` from `state.pos`: its compiled form when it has one
  * and the state allows it, else its step. A compiled run that fails is
  * thrown away and the step runs again from the same position, so a
- * failure leaves the state exactly as the interpreter would. Partial states
- * (and states with streaming checkpoints) use the resumable build.
+ * failure leaves the state exactly as the interpreter would; with
+ * `diagnostics` false it is not, and the state keeps the compiled run's
+ * `mode`, with the cursor back at the start. Partial states (and states
+ * with streaming checkpoints) use the resumable build.
  */
-export const runOn = <A>(p: ParserLike, step: (state: State<any>) => A | Fail, state: State<any>): A | Fail => {
+export const runOn = <A>(
+  p: ParserLike,
+  step: (state: State<any>) => A | Fail,
+  state: State<any>,
+  diagnostics: boolean = true
+): A | Fail => {
   if (state.tracer === undefined && state.recovered === undefined && state.syntax === undefined) {
     const compiled = Registry.stepFor(p, state, state.partial || state.resume !== undefined)
     if (compiled !== undefined) {
@@ -27,6 +34,7 @@ export const runOn = <A>(p: ParserLike, step: (state: State<any>) => A | Fail, s
         return a as A
       }
       state.pos = start
+      if (!diagnostics) return Fail
     }
   }
   return Stack.run(step, state)
