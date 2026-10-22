@@ -15,7 +15,7 @@ set -euo pipefail
 name="$(node -p "require('./package.json').name")"
 version="$(node -p "require('./package.json').version")"
 
-if [ -n "$(pnpm view "$name@$version" version 2>/dev/null)" ]; then
+if pnpm view "$name@$version" version >/dev/null 2>&1; then
   echo "skip: $name@$version is already published"
 else
   out="$PWD/.release"
