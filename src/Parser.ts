@@ -46,6 +46,7 @@ import * as ParseError from "./ParseError.js"
 import * as Registry from "./internal/compiler/registry.js"
 import * as Entries from "./internal/entries.js"
 import * as Resume from "./internal/resume.js"
+import * as Run from "./internal/run.js"
 import * as Stack from "./internal/stack.js"
 import type { Node } from "./internal/node.js"
 import { bounds, NodeId } from "./internal/node.js"
@@ -1812,6 +1813,11 @@ export const alt = <const Ps extends ReadonlyArray<Parser.Any>>(
  * an optional `otherwise` parser for unlisted keys, like winnow's `_ =>`
  * arm), or as a function returning a parser (or `undefined` for no match).
  *
+ * Prefer a record where the keys are known. Compiled code (see the
+ * `Compiler` module) switches on the key and runs every case compiled; the
+ * parser a function returns always runs interpreted, and one the function
+ * builds (`(c) => Parser.cut(p)`) is rebuilt on every run.
+ *
  * @example
  * ```ts
  * import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
@@ -2986,6 +2992,83 @@ export const parseEffect = <A, E, R, I extends Input>(
   Effect.flatMap(Effect.context<R>(), (context) =>
     Effect.fromResult(parseComplete(self, input, { ...options, context }))
   )
+
+/**
+ * Runs a parser on a state you own, from `state.pos`, and returns its output
+ * or {@link Fail}: like calling `self.step(state)`, but using the parser's
+ * compiled form when it has one (see the `Compiler` module). This is the
+ * runner for drivers that make many small runs over one buffer, such as a
+ * lexer reading one token at a time: keep one `Input.State` and
+ * `reset` it (`Input.State.reset`) before each run, and no run allocates a
+ * state, a `Result` or a slice.
+ *
+ * On success the cursor is where the parser stopped. On failure the state
+ * holds the interpreter's failure (`mode`, `failure`, and what
+ * `reportedFailure()` returns): a compiled run that fails is thrown away and
+ * the parser's step runs again from the same position. A partial state
+ * (`partial: true`) runs the compiled build that handles partial input, so
+ * `Incomplete` is reported as the step would report it. Under a tracer,
+ * with recovery on or inside a `Syntax` parse, the step runs interpreted.
+ *
+ * A driver that only needs to know *that* a parser failed (it tries
+ * another, or skips a character) can pass `{ diagnostics: false }` to skip
+ * the interpreted re-run; see {@link RunOptions}.
+ *
+ * Compiled code records no hints or furthest failure when it succeeds, so
+ * a later failure on the same state can list fewer expectations than one
+ * after interpreted runs would: reset the state between runs (as above) and
+ * its errors are the ones {@link parse} reports. Deep nesting fails with an
+ * unrecoverable `TooDeep` failure instead of throwing, as in the other
+ * runners.
+ *
+ * @example
+ * ```ts
+ * import { Ascii, Compiler, Input, Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * const token = Compiler.jit(Parser.preceded(Ascii.space0, Parser.alt(Ascii.alpha1, Token.oneOf("+-"))))
+ *
+ * const tokens = (text: string): Array<string> => {
+ *   const state = new Input.State(text)
+ *   const out: Array<string> = []
+ *   while (state.pos < state.end) {
+ *     const t = Parser.run(token, state.reset(state.pos))
+ *     if (t === Input.Fail) break
+ *     out.push(t)
+ *   }
+ *   return out
+ * }
+ *
+ * tokens("a + b") // ["a", "+", "b"]
+ * ```
+ *
+ * @since 0.2.0
+ * @category running
+ */
+export const run = <A, E, R, I extends Input>(
+  self: Parser<A, E, R, I>,
+  state: State<I>,
+  options?: RunOptions
+): A | Fail => Run.runOn(self, self.step, state, options?.diagnostics !== false)
+
+/**
+ * Options for {@link run}.
+ *
+ * @since 0.2.0
+ * @category running
+ */
+export interface RunOptions {
+  /**
+   * Whether a failure records the interpreter's diagnostics (default
+   * `true`). With `false`, a compiled run that fails is not run again
+   * interpreted: the state's `mode` (`Backtrack`, `Cut` or `Incomplete`)
+   * is set and the cursor is back where the run started, but `failure`,
+   * hints and the furthest failure are left as they were. For drivers that
+   * try a parser and move on when it fails, without reporting why, this
+   * halves the cost of each failure. Parsers that run interpreted record
+   * their diagnostics either way.
+   */
+  readonly diagnostics?: boolean | undefined
+}
 
 /**
  * The outcome of {@link parseRecoverable}.

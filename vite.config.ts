@@ -98,7 +98,7 @@ export default defineConfig({
       "effect/require-safety-comment-for-type-assertion": "warn", // 306
       "effect/imperative-loops": "warn", // 75, all in test/ (src/ is off below, measured)
       "effect/avoid-any": "warn", // 62
-      "effect/avoid-direct-tag-checks": "warn", // 60
+      "effect/avoid-direct-tag-checks": "warn", // 59
       "effect/avoid-direct-json": "warn", // 35 outside bench/
       "effect/avoid-native-object-helpers": "warn", // 43 outside bench/
       "effect/no-known-value-widening": "warn", // 33
@@ -116,11 +116,11 @@ export default defineConfig({
       // `?: T | undefined` under `exactOptionalPropertyTypes`, `Input.State`
       // fields) and the step protocol's per-step results. Changing the public
       // spelling breaks every consumer; boxing a step result in `Option`
-      // allocates on every parse step. 185 sites.
+      // allocates on every parse step. 192 sites.
       "effect/prefer-option-over-null": "warn",
       // `unknown` is the honest type at the interpreter's erased boundary: a
       // step returns the value of whatever parser it runs, and the compilers
-      // walk parser nodes whose values they never inspect. 43 + 43 sites.
+      // walk parser nodes whose values they never inspect. 43 + 45 sites.
       // `object` keys are identity keys (the parser or node a checkpoint or a
       // syntax node belongs to), compared by reference in `Map`s. 15 sites.
       "effect/no-unknown-parameters": "warn",
@@ -297,7 +297,8 @@ export default defineConfig({
       "bench:native": bench("native"),
       "bench:stream": bench("stream"),
       "bench:gen": bench("gen"),
-      "bench:syntax": bench("syntax")
+      "bench:syntax": bench("syntax"),
+      "bench:drivers": bench("drivers")
     }
   },
   pack: {

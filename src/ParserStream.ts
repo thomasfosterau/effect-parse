@@ -34,6 +34,7 @@ import { Fail, Failure, fromSource, State } from "./Input.js"
 import * as ParseError from "./ParseError.js"
 import * as Registry from "./internal/compiler/registry.js"
 import type * as Resume from "./internal/resume.js"
+import * as Run from "./internal/run.js"
 import * as Stack from "./internal/stack.js"
 import type { Parser } from "./Parser.js"
 
@@ -86,6 +87,11 @@ export interface ParseManyOptions<I> {
  * Error offsets are relative to the internal buffer of unconsumed input,
  * which is also the `input` of the reported `ParseError`.
  *
+ * A parser compiled with the `Compiler` module runs compiled, with the
+ * build that handles partial input (see `Parser.run`); a value that fails
+ * or needs more input is parsed again interpreted, so errors and
+ * `Incomplete` are the interpreter's.
+ *
  * @since 0.1.0
  * @category combinators
  */
@@ -114,10 +120,12 @@ export const parseMany: {
         const out: Array<A> = []
         if (buffer === undefined) return Effect.succeed(out)
         const input = buffer
+        // One state for the whole buffer, reset before each value
+        const state = new State(input)
         let offset = 0
         while (offset < input.length) {
-          const state = new State(input, { partial, context, offset })
-          const a = Stack.run(step, state)
+          state.reset(offset, { partial, context })
+          const a = Run.runOn(parser, step, state)
           if (a === Fail) {
             if (partial && state.mode === "Incomplete") break
             return Effect.fail(ParseError.fromFailure<E>(input, state.reportedFailure(), state.mode, state.encoding))
