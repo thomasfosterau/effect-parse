@@ -354,7 +354,7 @@ const json = Compiler.jit(jsonGrammar(Text.utf8)) // see examples/json-text.ts
 const value = await Effect.runPromise(ParserStream.parseResponse(await fetch(url), json))
 ```
 
-The result, and any error, is the same as parsing the whole body at once. Compiled parsers stream compiled. With the JSON example on a 2 MB document, `parseResponse` returns about 1 ms after the last byte at 10 MB/s, and keeps pace with `Response.json()` at 25 MB/s; on faster connections the native parser is quicker (`pnpm bench:stream`).
+The result, and any error, is the same as parsing the whole body at once. Compiled parsers stream compiled. With the JSON example on a 2 MB document, `parseResponse` returns about 1 ms after the last byte at 10 MB/s, and keeps pace with `Response.json()` at 25 MB/s; on faster connections the native parser is quicker (`vp run bench:stream`).
 
 ## Services
 
@@ -413,7 +413,7 @@ Parser.parse(assignment(Text.utf16le), Encoding.utf16le.encode("größe ≔ 42")
 - **Binary data.** The byte parsers accept `ArrayBuffer`s, `DataView`s and typed arrays too (see [Running parsers](#running-parsers)).
 - **Custom encodings.** `Text.make` accepts any `Encoding.Encoding`: a `decode` function plus a few properties.
 
-JavaScript strings are parsed natively, and the `Text` parsers only decode byte input. Converting strings to bytes up front would be slower: a `TextDecoder` call to produce each slice costs several times more than `String.prototype.slice`. `pnpm bench` compares the paths with a JSON grammar written once for every encoding ([`json-text.ts`](examples/json-text.ts)). In our runs `Text.string` was roughly 5–15% slower than the `Token`/`Ascii` parsers, and parsing UTF-8 directly was within about 10% of decoding it first.
+JavaScript strings are parsed natively, and the `Text` parsers only decode byte input. Converting strings to bytes up front would be slower: a `TextDecoder` call to produce each slice costs several times more than `String.prototype.slice`. `vp run bench` compares the paths with a JSON grammar written once for every encoding ([`json-text.ts`](examples/json-text.ts)). In our runs `Text.string` was roughly 5–15% slower than the `Token`/`Ascii` parsers, and parsing UTF-8 directly was within about 10% of decoding it first.
 
 ## Syntax trees and incremental parsing
 
@@ -459,7 +459,7 @@ edited.reused // 2: "width", and the second pair as a whole
 
 The edits are Tree-sitter's `{ start, oldEnd, newEnd }`, applied in order; without them the edit is found by comparing the two inputs. A node is reused when it was built by the same `Syntax.node` and the input its parse _looked at_ is unchanged. That includes lookahead: a node is parsed again when an edit lands just after it, if its parse read that far (to see that a number ended, say). Built-in parsers record how far they read; custom ones may need the `lookahead` option. Values are reused as they are, so a node's value should depend only on its input: not on services, closure state or absolute offsets (`Parser.span`, `Parser.location`); use the node's `start` and `end` instead.
 
-On a 0.58 M-character JSON document (`pnpm bench:syntax`), building the tree takes about twice as long as parsing the value interpreted, and reparsing after a one-character edit takes about 2 ms, against 80 ms for the full parse. Most of that is stepping over the 2000 reused elements of the top-level array; the tree is not rebalanced as Tree-sitter's is.
+On a 0.58 M-character JSON document (`vp run bench:syntax`), building the tree takes about twice as long as parsing the value interpreted, and reparsing after a one-character edit takes about 2 ms, against 80 ms for the full parse. Most of that is stepping over the 2000 reused elements of the top-level array; the tree is not rebalanced as Tree-sitter's is.
 
 ## Modules
 
@@ -539,7 +539,7 @@ The `Nom` module provides the nom names directly, with nom's argument orders, fo
 - [`sexpr.ts`](examples/sexpr.ts): s-expressions with typed evaluation errors
 - [`json-syntax.ts`](examples/json-syntax.ts): JSON as a syntax tree for editors, with fields, `ERROR` nodes for malformed elements, and incremental reparsing (tested in [`test/Syntax.test.ts`](test/Syntax.test.ts))
 
-`pnpm build && pnpm bench` compares the JSON examples, on each encoding, with `JSON.parse`.
+`vp run bench` (from a clone) compares the JSON examples, on each encoding, with `JSON.parse`.
 
 ## Design
 
@@ -549,15 +549,15 @@ The `Nom` module provides the nom names directly, with nom's argument orders, fo
 
 ```sh
 pnpm install
-pnpm check   # type-check sources, tests and examples
-pnpm test    # run the test suite
-pnpm build   # emit dist/
-pnpm bench          # JSON example: interpreted vs compiled, per encoding (after a build)
-pnpm bench:native   # compiled JSON parser vs JSON.parse on several document shapes
-pnpm bench:stream   # parsing a fetch body as it downloads vs Response.json()
-pnpm bench:gen      # parsers built inside a Parser.gen body vs hoisted out of it
-pnpm bench:syntax   # building a syntax tree, and reparsing it after small edits
+vp check             # format + lint
+vp run check         # type-check sources, tests, examples and benchmarks
+vp run test:unit     # run the test suite
+vp run build         # emit dist/
+vp run check:dist    # check dist/ as a consumer imports it
+vp run bench         # JSON example: interpreted vs compiled, per encoding
 ```
+
+The other benchmarks (`bench:native`, `bench:stream`, `bench:gen`, `bench:syntax`) and single checks are listed in [CONTRIBUTING.md](CONTRIBUTING.md). Repository conventions are in [AGENTS.md](AGENTS.md), the release pipeline in [PUBLISHING.md](PUBLISHING.md) and the vulnerability-reporting policy in [SECURITY.md](SECURITY.md).
 
 ## License
 

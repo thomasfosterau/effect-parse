@@ -259,7 +259,7 @@ A differential suite runs every example grammar, compiled with each backend and 
 
 ### Results
 
-JSON benchmark (`pnpm build && pnpm bench`, 0.58 M-character document, best of 40 interleaved runs; timings on this machine vary by 5–10% between runs):
+JSON benchmark (`vp run bench`, 0.58 M-character document, best of 40 interleaved runs; timings on this machine vary by 5–10% between runs):
 
 | Grammar and input                  | interpreted | closure        | JIT           |
 | ---------------------------------- | ----------- | -------------- | ------------- |
@@ -272,7 +272,7 @@ JSON benchmark (`pnpm build && pnpm bench`, 0.58 M-character document, best of 4
 | hand-fused (`bench/json-fused.ts`) |             |                | 4.6 ms        |
 | `JSON.parse`                       |             |                | 1.9 ms        |
 
-Against `JSON.parse` on documents of different shapes (`pnpm bench:native`; bytes are compared with `TextDecoder` then `JSON.parse`), the compiled parsers take:
+Against `JSON.parse` on documents of different shapes (`vp run bench:native`; bytes are compared with `TextDecoder` then `JSON.parse`), the compiled parsers take:
 
 | Document | `json.ts`, string | `Text.string` | `Text.utf8`, bytes | `json-fast.ts`, string | `json-fast.ts`, bytes |
 | --- | --- | --- | --- | --- | --- |

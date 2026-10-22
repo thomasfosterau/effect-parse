@@ -2171,6 +2171,12 @@ export const repeatTill: {
   }
 )
 
+/** How far `separated` got: the elements so far, and where the next separator starts. */
+interface SeparatedCheckpoint<A> {
+  readonly acc: Array<A>
+  readonly pos: number
+}
+
 /**
  * Applies `self` repeatedly, separated by `separator`, collecting the
  * outputs of `self` (winnow's `separated`, nom's `separated_list0` and
@@ -2187,12 +2193,6 @@ export const repeatTill: {
  * @since 0.1.0
  * @category repetition
  */
-/** How far `separated` got: the elements so far, and where the next separator starts. */
-interface SeparatedCheckpoint<A> {
-  readonly acc: Array<A>
-  readonly pos: number
-}
-
 export const separated: {
   <S, E2, R2, I2 extends Input, const Rg extends Range = { readonly min: 0 }>(
     separator: Parser<S, E2, R2, I2>,
