@@ -1,26 +1,60 @@
 name: CI
 
-on:
-  push:
-    branches: [main]
-  pull_request:
+# ONE required job, ONE required check: the pipeline's task graph lives in
+# vite.config.ts (`check`, `test:unit`, `build`, `check:dist`), not in GitHub
+# Actions `needs:`. Shaped like the effect-web library's. Nothing here needs a
+# database, a stage or a credential, so every PR runs the whole gate. The
+# benchmarks (`vp run bench*`) are machine-dependent and stay out of CI.
 
-permissions:
-  contents: read
+on:
+  pull_request:
+    branches: [trunk]
+    types: [opened, reopened, synchronize, ready_for_review]
+  push:
+    branches: [trunk]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
+
+# No permissions by default; the single job grants only read access.
+permissions: {}
 
 jobs:
-  check:
+  ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      # A modest ceiling for every Node process in the pipeline. NODE_OPTIONS
+      # is inherited by every child, including each vitest fork.
+      NODE_OPTIONS: --max-old-space-size=2048
+      VITEST_MAX_WORKERS: 2
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check
-      - run: pnpm test
-      - run: pnpm build
-      # Imports every `exports` entry from the built dist/, as a consumer does.
-      - run: pnpm check:dist
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Restore the Vite+ task cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.vite/task-cache
+          key: vp-task-v1-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            vp-task-v1-${{ runner.os }}-
+      - name: Format and lint
+        run: vp check
+      - name: Type gate (src, tests, examples, benchmarks)
+        run: vp run check
+      - name: Unit tests
+        run: vp run test:unit
+      - name: Build
+        run: vp run build
+      # Imports every `exports` entry from dist/ as a consumer does, requires
+      # every top-level call to be /*#__PURE__*/, and checks that only the
+      # Compiler module reaches the compilers.
+      - name: Dist guard
+        run: vp run check:dist
+      - name: Audit
+        run: pnpm audit --audit-level high
