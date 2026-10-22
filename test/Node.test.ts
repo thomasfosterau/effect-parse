@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
 import * as Json from "../examples/json.js"
 import { makeJson } from "../examples/json-text.js"

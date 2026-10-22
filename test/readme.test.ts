@@ -1,5 +1,5 @@
 import { Context, Data, Effect, Option, Result, Stream } from "effect"
-import { expect, it } from "vitest"
+import { expect, it } from "vite-plus/test"
 import { Ascii, Compiler, Encoding, Input, Parser, ParseError, ParserStream, Syntax, Text, Token } from "../src/index.js"
 
 it("README examples behave as documented", () => {

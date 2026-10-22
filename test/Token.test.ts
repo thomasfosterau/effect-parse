@@ -1,5 +1,5 @@
 import { Option, Result } from "effect"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test"
 import { Parser, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 

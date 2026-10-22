@@ -41,7 +41,7 @@ type Backend = typeof backends[number]
 /** A separate parser object per backend, since compilation is per parser. */
 const variant = <P extends Parser.Parser.Any>(p: P, backend: Backend): P => {
   const copy = Parser.named(p, p.name ?? "json") as P
-  return backend === "interpreted" ? copy : Compiler[backend](copy)
+  return backend === "interpreted" ? copy : (Compiler[backend](copy) as P)
 }
 
 interface Case {

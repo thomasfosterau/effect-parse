@@ -1,6 +1,6 @@
 import { Effect, Option, Result, Stream } from "effect"
 import type { ParseError } from "../src/index.js"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test"
 import { Ascii, Compiler, Expression, Parser, ParserStream, Syntax, Text, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 

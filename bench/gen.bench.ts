@@ -47,7 +47,7 @@ const hoistedSets = Parser.gen(function*() {
   return s === undefined ? d : s + d
 })
 
-const cases: Array<[string, Parser.Parser<any>, string]> = [
+const cases: Array<[string, Parser.Parser<any, any>, string]> = [
   ["literals, inline", inline, "(12,-34)"],
   ["literals, hoisted", hoisted, "(12,-34)"],
   ["sets, inline", inlineSets, "-1234 "],

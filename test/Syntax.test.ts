@@ -1,5 +1,5 @@
 import { Option, Result } from "effect"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test"
 import * as Json from "../examples/json-syntax.js"
 import type { Input } from "../src/index.js"
 import { Ascii, Compiler, Expression, Parser, Syntax, Text, Token } from "../src/index.js"

@@ -1,0 +1,94 @@
+# pnpm workspace settings for the single published package
+# `@thomasfosterau/effect-parse` (no `packages:` list: the root is the only
+# project). Shaped like the owner's other Effect libraries (effect-web,
+# effect-schema-ext).
+#
+# EVERY external dependency version lives here — package.json references only
+# `catalog:` / `catalog:peers`. `catalogMode: strict` makes `pnpm add` enforce
+# this at add time and `pnpm install` reject non-catalog specifiers. After
+# editing this catalog, ALWAYS run `pnpm install` and commit the regenerated
+# pnpm-lock.yaml — a stale lockfile fails CI at once with
+# ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
+catalogMode: strict
+
+catalog:
+  "@changesets/changelog-github": ^1.0.1
+  "@changesets/cli": ^3.0.3
+  "@effect/language-service": ^0.87.5
+  # Effect Language Service as a native (TypeScript-Go) binary — the TS7 side
+  # of the 6/7 split. `effect-tsgo patch` overwrites the native `tsc` binary
+  # with an Effect-patched build matched by gitHead, so this pins in lockstep
+  # with `@typescript/native` below (0.55.0 ships against typescript 7.0.2)
+  # and with the `oxlint` and `oxlint-tsgolint` that `vite-plus` pulls in
+  # (0.55.0 supports oxlint 1.87.0 – 1.89.0 and tsgolint 7.0.2003 / 7.0.2004;
+  # vite-plus 1.3.0 carries oxlint 1.88.0 and tsgolint 7.0.2004).
+  # Each @effect/tsgo release hard-errors (UnsupportedTargetPackageVersionError)
+  # on any other component version, failing `pnpm install` itself. Read the
+  # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
+  # before bumping any of the three.
+  "@effect/tsgo": 0.55.0
+  # 0.6.0 depends on `effect` 4.0.0 (exact) and runs on the singleton the
+  # `effect` override below forces, so it needs no scoped `effect` override of
+  # its own (0.5.0, built on beta.100, did). Its `vite.config.ts` load calls
+  # Effect APIs, so an `effect` bump re-runs `vp check` against the plugin too.
+  "@mpsuesser/oxlint-plugin-effect": ^0.6.0
+  "@types/node": ^26.6.5
+  # Must equal the vitest that vite-plus bundles (see `vitest` below); vite-plus
+  # refuses to run coverage on a mismatch.
+  "@vitest/coverage-istanbul": 5.0.5
+  effect: 4.0.5
+  effect-solutions: ^0.5.3
+  fallow: 3.34.1
+  # `scripts/check-dist.mjs` parses the built `dist/` with `rolldown/parseAst`.
+  rolldown: ^1.2.14
+  # TypeScript 6/7 side-by-side: TS7 (the native Go compiler) ships no JS API
+  # until 7.1, so JS-API consumers (@effect/language-service, tsdown's
+  # declaration bundler behind `vp pack`) stay on TS6 while native `tsc`
+  # type-checks. The alias keeps the package importable as `typescript`
+  # name-stable at the TS6 JS compiler (bin `tsc6`); `@typescript/native` is
+  # TS7 (bin `tsc`). Pinned exact: @typescript/native's gitHead must match
+  # @effect/tsgo's bundled binary.
+  typescript: "npm:@typescript/typescript6@6.0.2"
+  "@typescript/native": "npm:typescript@7.0.2"
+  # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions, so this
+  # entry decides the oxlint `effect-tsgo patch --oxlint` has to support (see
+  # the @effect/tsgo note above): 1.3.0 carries oxlint 1.88.0 on vitest 5.0.5.
+  # `vite` is the same release under its aliased core package, and `vitest`
+  # must match vite-plus's exact pin because the `vitest: "catalog:"` override
+  # forces every resolution to the catalog singleton.
+  vite-plus: 1.3.0
+  vite: npm:@voidzero-dev/vite-plus-core@1.3.0
+  vitest: 5.0.5
+
+# Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
+# strict catalog mode still governs them while they stay ranges. `pnpm pack`
+# (scripts/release.sh) replaces `catalog:peers` with these ranges in the
+# published manifest. Raising the `effect` floor is a breaking change.
+catalogs:
+  peers:
+    effect: ^4.0.0
+
+overrides:
+  vite: "catalog:"
+  vitest: "catalog:"
+  # `effect` MUST be a singleton: two copies break Context / Schema identity at
+  # runtime. Force every resolution to the catalog version.
+  effect: "catalog:"
+nodeLinker: hoisted
+allowBuilds:
+  esbuild: true
+  fallow: true
+peerDependencyRules:
+  allowAny:
+    - vite
+    - vitest
+  allowedVersions:
+    vite: "*"
+    vitest: "*"
+
+# Supply-chain delay (owner's policy, gardeneria #1149): hold newly published
+# versions for 1 day (unit: MINUTES) before pnpm will install them.
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  # @thomasfosterau/* is first-party — exempt so our own releases install immediately.
+  - "@thomasfosterau/*"

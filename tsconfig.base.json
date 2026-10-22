@@ -1,21 +1,60 @@
 {
+  "$schema": "./node_modules/@effect/tsgo/schema.json",
   "compilerOptions": {
+    // Shaped like the owner's other Effect libraries (effect-web,
+    // effect-schema-ext), minus `erasableSyntaxOnly`: consumers import the
+    // built `dist/` (`src` ships only for the source maps), and the parser's
+    // hot classes (`Input.State`, the syntax builder, the compilers) declare
+    // their fields as constructor parameter properties, whose assignment
+    // order fixes the object shape the benchmarks were tuned against.
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    // The published output's language level and the ambient library it may
+    // assume; `vp pack` emits the same target (vite.config.ts).
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
     "lib": ["ES2022", "DOM"],
+    // Source imports are written `./x.js` (resolved to `./x.ts` by the
+    // bundler resolution); examples, tests and benchmarks import siblings as
+    // `./x.ts`, which this flag permits.
+    "rewriteRelativeImportExtensions": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
     "strict": true,
+    // Optional members are spelled `?: T | undefined` because of this flag: a
+    // consumer forwarding an optional of its own must still compile.
     "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "skipLibCheck": true,
-    "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "types": ["node"]
+    "isolatedModules": true,
+    "types": ["node"],
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        // The severities below keep every Effect rule visible in the editor,
+        // but a "warning" still fails the patched tsc by default — this flag
+        // is what actually makes warnings non-blocking in the `check` task.
+        "ignoreEffectWarningsInTscExitCode": true,
+        "diagnosticSeverity": {
+          "globalConsole": "warning",
+          "globalConsoleInEffect": "warning",
+          "globalDate": "warning",
+          "globalDateInEffect": "warning",
+          "globalFetch": "warning",
+          "globalFetchInEffect": "warning",
+          "globalTimers": "warning",
+          "globalTimersInEffect": "warning",
+          "newPromise": "warning",
+          "nodeBuiltinImport": "warning",
+          "preferSchemaOverJson": "warning",
+          "unsafeEffectTypeAssertion": "warning"
+        }
+      }
+    ]
   }
 }

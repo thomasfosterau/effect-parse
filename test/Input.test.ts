@@ -1,5 +1,5 @@
 import { Context, Effect, Result, Stream } from "effect"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test"
 import { Ascii, Binary, Input, Parser, ParseError, ParserStream, Text, Token } from "../src/index.js"
 
 const encode = (s: string) => new TextEncoder().encode(s)

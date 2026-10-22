@@ -148,3 +148,11 @@ vite.config.ts.timestamp-*
 # Turbo Repo
 .turbo
 .release/
+
+# Vite+ / fallow / Claude Code local state
+.vite-hooks/_/
+.fallow
+fallow.sarif
+.claude/settings.local.json
+.claude/worktrees/
+.claude/scheduled_tasks.lock

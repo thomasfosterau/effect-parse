@@ -1,31 +1,33 @@
 {
+  "$schema": "https://www.schemastore.org/package",
   "name": "@thomasfosterau/effect-parse",
   "version": "0.1.0",
   "description": "Parser combinators for Effect, ported from Rust's nom and winnow: text, bytes, bits and token streams, streaming input, compiled parsers and Schema integration",
   "keywords": [
     "effect",
+    "nom",
     "parser",
     "parser-combinators",
-    "nom",
-    "winnow",
-    "typescript"
+    "typescript",
+    "winnow"
   ],
   "homepage": "https://github.com/thomasfosterau/effect-parse#readme",
   "bugs": {
     "url": "https://github.com/thomasfosterau/effect-parse/issues"
   },
+  "license": "MIT",
+  "author": "Thomas Foster <me@thomasfoster.au>",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/thomasfosterau/effect-parse.git"
   },
-  "license": "MIT",
-  "author": "Thomas Foster <me@thomasfoster.au>",
+  "files": [
+    "dist",
+    "src",
+    "!dist/**/*.tsbuildinfo"
+  ],
   "type": "module",
   "sideEffects": false,
-  "packageManager": "pnpm@10.28.0",
-  "engines": {
-    "node": ">=22"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -93,38 +95,41 @@
     },
     "./package.json": "./package.json"
   },
-  "files": [
-    "dist",
-    "src",
-    "!dist/**/*.tsbuildinfo"
-  ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "check": "tsc -p tsconfig.json",
-    "test": "vitest run",
-    "build": "tsc -p tsconfig.build.json",
-    "bench": "node --experimental-strip-types bench/json.bench.ts",
-    "bench:native": "node --experimental-strip-types bench/native.bench.ts",
-    "bench:stream": "node --experimental-strip-types bench/stream.bench.ts",
-    "bench:gen": "node --experimental-strip-types bench/gen.bench.ts",
-    "bench:syntax": "node --experimental-strip-types bench/syntax.bench.ts",
-    "check:dist": "node scripts/check-dist.mjs",
     "changeset": "changeset",
-    "version": "changeset version && pnpm install --lockfile-only",
-    "release": "bash scripts/release.sh"
-  },
-  "peerDependencies": {
-    "effect": "^4.0.0"
+    "version": "changeset version && vp fmt && pnpm install --lockfile-only",
+    "release": "bash scripts/release.sh",
+    "fallow": "fallow --summary",
+    "fallow:audit": "fallow audit",
+    "prepare": "vp config && effect-tsgo patch --typescript --oxlint"
   },
   "devDependencies": {
-    "@changesets/changelog-github": "^1.0.1",
-    "@changesets/cli": "^3.0.3",
-    "@types/node": "^26.6.5",
-    "effect": "4.0.5",
-    "rolldown": "^1.2.14",
-    "typescript": "^7.0.2",
-    "vitest": "^5.0.4"
-  }
+    "@changesets/changelog-github": "catalog:",
+    "@changesets/cli": "catalog:",
+    "@effect/language-service": "catalog:",
+    "@effect/tsgo": "catalog:",
+    "@mpsuesser/oxlint-plugin-effect": "catalog:",
+    "@types/node": "catalog:",
+    "@typescript/native": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
+    "effect": "catalog:",
+    "effect-solutions": "catalog:",
+    "fallow": "catalog:",
+    "rolldown": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "effect": "catalog:peers"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=11"
+  },
+  "packageManager": "pnpm@11.28.6"
 }

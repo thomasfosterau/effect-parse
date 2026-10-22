@@ -1,5 +1,5 @@
 import { Effect, Option, Result, Stream } from "effect"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test"
 import { Encoding, Parser, ParserStream, Text, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 

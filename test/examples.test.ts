@@ -1,5 +1,5 @@
 import { Effect, Option, Result, Stream } from "effect"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
 import * as Http from "../examples/http.js"
 import * as Ini from "../examples/ini.js"

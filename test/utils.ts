@@ -1,5 +1,5 @@
 import { Result } from "effect"
-import { expect } from "vitest"
+import { expect } from "vite-plus/test"
 import type { Input, Parser, ParseError } from "../src/index.js"
 import { Parser as P } from "../src/index.js"
 
