@@ -1,5 +1,21 @@
 # @thomasfosterau/effect-parse
 
+## 0.3.0
+
+### Minor Changes
+
+- [#39](https://github.com/thomasfosterau/effect-parse/pull/39) [`bb8efed`](https://github.com/thomasfosterau/effect-parse/commit/bb8efed7a31c4ca413cb43ba2f51dc66f3cc10fd) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - Add `Parser.run(parser, state)`, which runs a parser on an `Input.State` you own and returns its output or `Fail`, like `parser.step(state)` but using the parser's compiled form when it has one. A lexer that keeps one state and `reset`s it before each token now runs its token parser compiled without allocating a state, a `Result` or a slice per token: about 1.9 times as fast as calling `step` on a reused state, and 15% faster than `parsePartial` with an `offset`. On failure the parser runs again interpreted from the same position, so the state holds the interpreter's failure; partial states run the build that handles partial input. A driver that only needs to know that a parser failed (it tries another, or skips a character) can pass `{ diagnostics: false }` to skip that re-run, keeping just the failure's `mode`: about 2.3 times as fast on a scan where most runs fail.
+  
+  `ParserStream.parseMany` now runs a compiled parser compiled, with one state per buffer, instead of always interpreting it: about 2.8 times as fast on a stream of CSV-like rows.
+
+### Patch Changes
+
+- [#39](https://github.com/thomasfosterau/effect-parse/pull/39) [`bb8efed`](https://github.com/thomasfosterau/effect-parse/commit/bb8efed7a31c4ca413cb43ba2f51dc66f3cc10fd) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - The JIT compiles two more shapes of grammar inline. A `Parser.dispatch` with a record of cases and a selector other than `Token.any` or `Parser.peek(Token.any)` now runs the chosen case inline, through a switch on its index, instead of calling its closure-compiled step. On token arrays, `Token.anyToken`, `Token.oneOf`, `Token.noneOf`, `Token.takeWhile` and `Token.takeTill` call their predicate (or membership test) inline instead of running their interpreted steps, which also recorded a failure on every miss: a grammar over 200 K tokens matched with `Token.oneOf(predicate)` runs about 3 times as fast. Results and errors are unchanged. The `Parser.dispatch` docs and the README now say which ways of writing a grammar compile best.
+
+- [#36](https://github.com/thomasfosterau/effect-parse/pull/36) [`b54e94e`](https://github.com/thomasfosterau/effect-parse/commit/b54e94e71198be09202ed4e12dea16a5ab780e19) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - `Parser.separated` has its doc comment again: it sat above an internal declaration, so the emitted `.d.ts` and editor hovers showed none.
+
+- [#36](https://github.com/thomasfosterau/effect-parse/pull/36) [`b54e94e`](https://github.com/thomasfosterau/effect-parse/commit/b54e94e71198be09202ed4e12dea16a5ab780e19) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - The package is now built with `vp pack` (tsdown) instead of `tsc`. `dist/` keeps the same layout, entry points and runtime exports, and every top-level call stays marked `/*#__PURE__*/`; the declaration files spell some types out where they used to write `typeof Token.take` and the like, and `Parser.Do` is typed `Parser<Record<never, never>, …>` (the same type as `Parser<{}, …>`). The root entry's `index.js` no longer ships a source map.
+
 ## 0.2.0
 
 ### Minor Changes
