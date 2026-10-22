@@ -51,7 +51,7 @@ const cases: ReadonlyArray<readonly [string, () => unknown]> = [
     `reparse: ${keystrokes.length} keystrokes, each`,
     () => {
       let t = tree
-      for (let i = 0; i < keystrokes.length; i++) t = Syntax.replace(t, middle + i, middle + i, keystrokes[i]!)
+      for (let i = 0; i < keystrokes.length; i++) t = Syntax.replace(t, middle + i, middle + i, keystrokes[i])
       return t
     }
   ]

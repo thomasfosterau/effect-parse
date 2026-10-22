@@ -60,9 +60,7 @@ for (let round = 0; round < 15; round++) {
   cases.forEach(([, p, input], i) => {
     const t = performance.now()
     for (let j = 0; j < n; j++) Parser.parse(p, input)
-    best[i] = Math.min(best[i]!, performance.now() - t)
+    best[i] = Math.min(best[i], performance.now() - t)
   })
 }
-cases.forEach(([name], i) =>
-  console.log(`${name.padEnd(18)} ${((best[i]! * 1e6) / n).toFixed(0).padStart(6)} ns/parse`)
-)
+cases.forEach(([name], i) => console.log(`${name.padEnd(18)} ${((best[i] * 1e6) / n).toFixed(0).padStart(6)} ns/parse`))

@@ -1,5 +1,5 @@
 import type { Input, State } from "../Input.js"
-import { charOf } from "./text.js"
+import { charOf, firstCodePoint } from "./text.js"
 
 /** A compiled token set. */
 export interface Matcher {
@@ -21,7 +21,7 @@ export interface TokenRangeLike {
 const isRange = (u: unknown): u is TokenRangeLike =>
   typeof u === "object" && u !== null && (u as any)._tag === "TokenRange"
 
-const toCode = (u: string | number): number => (typeof u === "number" ? u : u.codePointAt(0)!)
+const toCode = (u: string | number): number => (typeof u === "number" ? u : firstCodePoint(u))
 
 /** @internal */
 export const describeChar = (s: string): string => JSON.stringify(s)
@@ -56,9 +56,9 @@ export const describeBytes = (bytes: Uint8Array): string => {
 
 const compileCode = (u: unknown): ((code: number) => boolean) => {
   if (typeof u === "string") {
-    const codes = Array.from(u, (c) => c.codePointAt(0)!)
+    const codes = Array.from(u, firstCodePoint)
     if (codes.length === 1) {
-      const c = codes[0]!
+      const c = codes[0]
       return (x) => x === c
     }
     return bitmap(codes)
@@ -73,9 +73,9 @@ const compileCode = (u: unknown): ((code: number) => boolean) => {
   }
   if (Array.isArray(u)) {
     const tests = u.map(compileCode)
-    if (tests.length === 1) return tests[0]!
+    if (tests.length === 1) return tests[0]
     return (x) => {
-      for (let i = 0; i < tests.length; i++) if (tests[i]!(x)) return true
+      for (let i = 0; i < tests.length; i++) if (tests[i](x)) return true
       return false
     }
   }
@@ -154,7 +154,7 @@ const compileCodeSafe = (set: unknown, kind: "string" | "code"): ((code: number)
     // Predicates nested in arrays also take strings
     const tests = set.map((s) => compile(s, kind).code)
     return (x) => {
-      for (let i = 0; i < tests.length; i++) if (tests[i]!(x)) return true
+      for (let i = 0; i < tests.length; i++) if (tests[i](x)) return true
       return false
     }
   }
@@ -260,7 +260,7 @@ export const nextIf = (state: State<Input>, m: AnyMatcher, negate: boolean): unk
       return len === 1 ? s[pos] : s.slice(pos, pos + 2)
     }
     case 1: {
-      const b = (state.input as Uint8Array)[pos]!
+      const b = (state.input as Uint8Array)[pos]
       if (m.forCode.code(b) === negate) return NoMatch
       state.pos = pos + 1
       return b
@@ -313,7 +313,7 @@ export const scan = (
       const test = m.forCode.code
       while (count < max) {
         if (i >= end) return { offset: i, count, hitEnd: true }
-        if (test(bytes[i]!) === negate) break
+        if (test(bytes[i]) === negate) break
         i++
         count++
       }
@@ -378,7 +378,7 @@ export const indexOf = (state: State<Input>, needle: Input, from: number): numbe
       const hay = state.input as Uint8Array
       const n = needle as Uint8Array
       if (n.length === 0) return from
-      const first = n[0]!
+      const first = n[0]
       let i = hay.indexOf(first, from)
       while (i !== -1 && i <= last) {
         let j = 1
@@ -434,8 +434,8 @@ const match = (state: State<Input>, lit: Input, caseless: boolean): number => {
       const b = state.input as Uint8Array
       const l = lit as Uint8Array
       for (let i = 0; i < n; i++) {
-        const x = b[pos + i]!
-        const y = l[i]!
+        const x = b[pos + i]
+        const y = l[i]
         if (caseless ? lowerAscii(x) !== lowerAscii(y) : x !== y) return -1
       }
       return n === len ? len : -2

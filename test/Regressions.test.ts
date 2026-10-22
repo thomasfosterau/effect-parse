@@ -226,7 +226,7 @@ describe("deeply nested input reports TooDeep instead of throwing (#14)", () => 
     expectTooDeep(Effect.runSync(Effect.result(Parser.parseEffect(p, deep))))
     const recoverable = Parser.parseRecoverable(p, deep)
     expect(Option.isNone(recoverable.value)).toBe(true)
-    expect(recoverable.errors.at(-1)!.kind).toBe("TooDeep")
+    expect(recoverable.errors.at(-1)?.kind).toBe("TooDeep")
   })
 
   for (const backend of ["closure", "jit"] as const) {
@@ -251,7 +251,7 @@ describe("deeply nested input reports TooDeep instead of throwing (#14)", () => 
   it("syntax trees", () => {
     const tree = Syntax.parse(Syntax.node(braced(), "braced"), deep)
     expect(Option.isNone(tree.value)).toBe(true)
-    expect(tree.errors.at(-1)!.kind).toBe("TooDeep")
+    expect(tree.errors.at(-1)?.kind).toBe("TooDeep")
   })
 
   it("tryMapUnknown does not swallow the overflow", () => {

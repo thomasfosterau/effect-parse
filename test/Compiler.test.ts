@@ -17,6 +17,7 @@ import { State } from "../src/Input.js"
 import { Fail } from "../src/Input.js"
 import * as Registry from "../src/internal/compiler/registry.js"
 import { allStrings, mutations, randomJson, rng } from "./generators.js"
+import { defined } from "./utils.js"
 
 const backends = ["closure", "jit"] as const
 type Backend = (typeof backends)[number]
@@ -58,9 +59,9 @@ const twin = <P extends Parser.Parser.Any>(p: P, backend: Backend): P => {
 /** Runs the compiled step alone, to catch compiled failures that the fallback would hide. */
 const fast = (p: Parser.Parser.Any, input: Input.Input, context?: Context.Context<any>) => {
   const state = new State(input, { context })
-  const step = Registry.stepFor(p, state)!
+  const step = defined(Registry.stepFor(p, state))
   const kind = state.inputKind
-  const compiled = Registry.compiled(p, kind)!
+  const compiled = defined(Registry.compiled(p, kind))
   if (compiled.error !== undefined) throw compiled.error
   if (compiled.jitError !== undefined) throw compiled.jitError
   if (backendOf.get(p) === "jit") expect(compiled.backend).toBe("jit")
@@ -87,10 +88,10 @@ const stepOutcome = (
 /** The resumable build of a registered parser (as used by streaming parses). */
 const resumableStep = (p: Parser.Parser.Any, input: Input.Input) => {
   const kind = new State(input).inputKind
-  const compiled = Registry.compiled(p, kind, true)!
+  const compiled = defined(Registry.compiled(p, kind, true))
   if (compiled.error !== undefined) throw compiled.error
   if (compiled.jitError !== undefined) throw compiled.jitError
-  const step = compiled.step!
+  const step = defined(compiled.step)
   return (state: State<any>) => {
     state.resume = new Map()
     return step(state)
@@ -196,7 +197,7 @@ describe("compiled examples", () => {
     for (let i = 0; i < 300; i++) {
       const bytes = base.slice()
       const at = Math.floor(random() * bytes.length)
-      bytes[at] = [0x80, 0xc0, 0xe0, 0xed, 0xf0, 0xf5, 0xff, 0x22, 0x5c][i % 9]!
+      bytes[at] = [0x80, 0xc0, 0xe0, 0xed, 0xf0, 0xf5, 0xff, 0x22, 0x5c][i % 9]
       same(p, bytes.subarray(0, i % 3 === 0 ? bytes.length : at + 1))
     }
     const latin = makeJson(Text.latin1)
@@ -608,7 +609,7 @@ describe("compiled combinators", () => {
             p,
             Uint8Array.from(
               { length: Math.floor(random() * 6) },
-              () => [0x61, 0x30, 0xc3, 0xa9, 0xf0, 0x9f, 0x98, 0x80, 0xff, 0x00, 0x5c][Math.floor(random() * 11)]!
+              () => [0x61, 0x30, 0xc3, 0xa9, 0xf0, 0x9f, 0x98, 0x80, 0xff, 0x00, 0x5c][Math.floor(random() * 11)]
             )
           )
         }
@@ -632,7 +633,7 @@ describe("compiled combinators", () => {
         p as any,
         Uint8Array.from(
           { length: Math.floor(random() * 7) },
-          () => [1, 2, 0x30, 0x39, 0x41, 0x61, 0x62, 0xff][Math.floor(random() * 8)]!
+          () => [1, 2, 0x30, 0x39, 0x41, 0x61, 0x62, 0xff][Math.floor(random() * 8)]
         )
       )
     }
@@ -722,7 +723,7 @@ describe("compiled combinators", () => {
     const random = rng(5)
     const digits = (n: number) => Array.from({ length: n }, () => Math.floor(random() * 10)).join("")
     const generated = Array.from({ length: 3000 }, (_, i) => {
-      const sign = ["", "-", "+"][i % 3]!
+      const sign = ["", "-", "+"][i % 3]
       const int = digits(Math.floor(random() * 12))
       const frac = random() < 0.6 ? `.${digits(Math.floor(random() * 12))}` : ""
       const exp =
@@ -901,7 +902,7 @@ describe.each(backends)("Compiler.%s", (backend) => {
     const q = Parser.repeat(b)
     expect(q.pipe(compile)).toBe(q)
     expect(Parser.parse(q, "bb")).toEqual(Result.succeed(["b", "b"]))
-    expect(Registry.compiled(q, 0)!.backend).toBe(backend)
+    expect(Registry.compiled(q, 0)?.backend).toBe(backend)
   })
 
   it("re-runs the interpreter for errors, so callbacks may run twice", () => {
@@ -938,7 +939,7 @@ describe.each(backends)("Compiler.%s", (backend) => {
   it("reports what runs interpreted in the JSON grammar", () => {
     const p = twin(Json.json, backend)
     Parser.parse(p, "1")
-    const fallbacks = Registry.compiled(p, 0)!.fallbacks
+    const fallbacks = defined(Registry.compiled(p, 0)).fallbacks
     expect(fallbacks.map((f) => f.tag)).toEqual(["FlatMap"])
   })
 
@@ -947,7 +948,7 @@ describe.each(backends)("Compiler.%s", (backend) => {
     Parser.parse(p, "")
     const state = new State("aaa")
     state.end = 2
-    expect(Registry.stepFor(p, state)!(state)).toEqual(["a", "a"])
+    expect(defined(Registry.stepFor(p, state))(state)).toEqual(["a", "a"])
   })
 
   it("takeUntil does not match past a state's end (#30)", () => {
@@ -955,10 +956,10 @@ describe.each(backends)("Compiler.%s", (backend) => {
     Parser.parse(p, "-->")
     const state = new State("abcdefg-->h")
     state.end = 3
-    expect(typeof Registry.stepFor(p, state)!(state)).toBe("symbol")
+    expect(typeof defined(Registry.stepFor(p, state))(state)).toBe("symbol")
     const fits = new State("abc-->h")
     fits.end = 6
-    expect(Registry.stepFor(p, fits)!(fits)).toBe("abc")
+    expect(defined(Registry.stepFor(p, fits))(fits)).toBe("abc")
   })
 })
 
@@ -1040,7 +1041,7 @@ const sameAtOffset = (
       expect(outcome(run(w.parser, whole, { offset })), `${runner}, ${backend} on ${label}`).toEqual(expected)
       // Unless the root itself runs interpreted (`permutation`, say)
       const kind = new State(whole).inputKind
-      const rootFallback = Registry.compiled(w.parser, kind, runner === "partial")!.fallbacks.some(
+      const rootFallback = defined(Registry.compiled(w.parser, kind, runner === "partial")).fallbacks.some(
         (f) => f.name === "watched"
       )
       if (rootFallback || (runner === "partial" && options?.leafRoot)) continue
@@ -1098,8 +1099,8 @@ describe("running from an offset", () => {
     expect(Parser.parsePeek(w.parser, buffer, { offset: 3 })).toEqual(Result.succeed([" = 10;", "x"]))
     expect(Parser.parseSync(w.parser, "let x", { offset: 3 })).toBe("x")
     expect(w.interpreted).toBe(0)
-    expect(Registry.compiled(w.parser, 0, false)!.backend).toBe(backend)
-    expect(Registry.compiled(w.parser, 0, true)!.backend).toBe(backend)
+    expect(Registry.compiled(w.parser, 0, false)?.backend).toBe(backend)
+    expect(Registry.compiled(w.parser, 0, true)?.backend).toBe(backend)
   })
 
   it("reports offsets, lines and columns in the whole input", () => {
@@ -1130,12 +1131,12 @@ describe("the JIT", () => {
     try {
       const p = Compiler.jit(Parser.repeat(a))
       expect(Parser.parse(p, "aa")).toEqual(Result.succeed(["a", "a"]))
-      expect(Registry.compiled(p, 0)!.backend).toBe("closure")
+      expect(Registry.compiled(p, 0)?.backend).toBe("closure")
     } finally {
       globalThis.Function = original
     }
     const q = Compiler.jit(Parser.repeat(a))
     Parser.parse(q, "a")
-    expect(Registry.compiled(q, 0)!.backend).toBe("jit")
+    expect(Registry.compiled(q, 0)?.backend).toBe("jit")
   })
 })

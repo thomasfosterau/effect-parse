@@ -5,10 +5,15 @@
 import type { Node, NodeOf, ParserLike } from "../node.js"
 import { nodeOf } from "../node.js"
 
+/** A sequence that yields an entry: its parsers, and which of them produce the key and the value. */
+export interface EntryPair {
+  readonly parsers: ReadonlyArray<ParserLike>
+  readonly key: number
+  readonly value: number
+}
+
 /** A repeated pair for `Object.fromEntries`: the sequence and the indices of its key and value. */
-export const pairOf = (
-  p: ParserLike
-): { readonly parsers: ReadonlyArray<ParserLike>; readonly key: number; readonly value: number } | undefined => {
+export const pairOf = (p: ParserLike): EntryPair | undefined => {
   let node = nodeOf(p)
   while (isDiagnostic(node)) node = nodeOf(node.self)
   if (node._tag !== "Seq") return undefined
@@ -38,6 +43,6 @@ const isDiagnostic = (
 export const entriesShape = (p: ParserLike): boolean => {
   const node = nodeOf(p)
   if (isDiagnostic(node) || node._tag === "Mode") return entriesShape(node.self)
-  if (node._tag === "Seq") return typeof node.output === "number" && entriesShape(node.parsers[node.output]!)
+  if (node._tag === "Seq") return typeof node.output === "number" && entriesShape(node.parsers[node.output])
   return (node._tag === "Repeat" || node._tag === "Separated") && pairOf(node.self) !== undefined
 }

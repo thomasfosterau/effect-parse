@@ -110,7 +110,7 @@ describe("streaming parses", () => {
     const base = Encoding.utf8.encode('["aé😀", {"k": "v\\n"}, 12, [true]]')
     for (let i = 0; i < 100; i++) {
       const bytes = base.slice()
-      bytes[Math.floor(random() * bytes.length)] = [0x80, 0xc3, 0xf0, 0xff, 0x22, 0x5c][i % 6]!
+      bytes[Math.floor(random() * bytes.length)] = [0x80, 0xc3, 0xf0, 0xff, 0x22, 0x5c][i % 6]
       same(p, bytes, i)
     }
   })
@@ -180,7 +180,7 @@ describe("incremental parsing", () => {
       expect(chunks.length).toBeGreaterThan(500)
       expect(parsed).toBeLessThan(2000 * 1.5)
       if (backend !== "interpreted") {
-        expect(Registry.compiled(list, 0, true)!.backend).toBe(backend)
+        expect(Registry.compiled(list, 0, true)?.backend).toBe(backend)
       }
     }
   )

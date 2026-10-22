@@ -54,7 +54,7 @@ const runtime = {
     const input = s.input
     let i = start
     if (s.inputKind === 0) while (i < end && (input as string).charCodeAt(i) < fast) i++
-    else while (i < end && (input as Uint8Array)[i]! < fast) i++
+    else while (i < end && (input as Uint8Array)[i] < fast) i++
     if (i < end && validate(enc, s, i, end) < 0) {
       s.mode = "Backtrack"
       return Fail
@@ -232,8 +232,7 @@ class Emitter {
   private countRefs(root: ParserLike): void {
     const seen = new Set<ParserLike>()
     const stack = [root]
-    while (stack.length > 0) {
-      const p = stack.pop()!
+    for (let p = stack.pop(); p !== undefined; p = stack.pop()) {
       if (seen.has(p)) continue
       seen.add(p)
       for (const c of new Set(children(nodeOf(p)))) {
@@ -296,7 +295,7 @@ class Emitter {
 
   /** The function implementing a rule, generating it on first use. */
   rule(p: ParserLike, used: boolean): string {
-    const rules = this.rules[used ? 1 : 0]!
+    const rules = this.rules[used ? 1 : 0]
     let name = rules.get(p)
     if (name !== undefined) return name
     name = `f${this.next++}`
@@ -513,7 +512,7 @@ class Emitter {
         const ok = this.label()
         const bad = this.label()
         const t = out === null ? null : this.v(fn)
-        const some = node._tag === "Opt" ? `R.some(${t})` : t!
+        const some = node._tag === "Opt" ? `R.some(${t})` : `${t}`
         const orElse = node._tag === "Opt" ? "R.none()" : `${this.const(node.value)}()`
         return (
           `${st}=p;${ok}:{${bad}:{${this.gen(node.self, used, t, `break ${bad};`, fn, d)}${set(some)}break ${ok};}` +
@@ -538,7 +537,7 @@ class Emitter {
       case "Struct": {
         if (out === null) return node.parsers.map((q) => this.gen(q, false, null, fail, fn, d)).join("")
         const vars = node.parsers.map(() => this.v(fn))
-        const code = node.parsers.map((q, i) => this.gen(q, true, vars[i]!, fail, fn, d)).join("")
+        const code = node.parsers.map((q, i) => this.gen(q, true, vars[i], fail, fn, d)).join("")
         if (node.keys.includes("__proto__")) {
           return code + `${out}={};` + node.keys.map((k, i) => `${out}[${JSON.stringify(k)}]=${vars[i]};`).join("")
         }
@@ -603,7 +602,7 @@ class Emitter {
     }
     const keep = (i: number) => output === "tuple" || output.includes(i)
     const vars = node.parsers.map((_, i) => (keep(i) ? this.v(fn) : null))
-    const code = node.parsers.map((q, i) => this.gen(q, keep(i), vars[i]!, fail, fn, d)).join("")
+    const code = node.parsers.map((q, i) => this.gen(q, keep(i), vars[i], fail, fn, d)).join("")
     return code + `${out}=[${vars.filter((v) => v !== null).join(",")}];`
   }
 
@@ -619,7 +618,7 @@ class Emitter {
   alt(node: NodeOf<"Alt">, used: boolean, out: string | null, fail: string, fn: Fn, d: number): string {
     const parsers = node.parsers
     if (parsers.length === 0) return `${BT}${fail}`
-    if (parsers.length === 1) return this.gen(parsers[0]!, used, out, fail, fn, d)
+    if (parsers.length === 1) return this.gen(parsers[0], used, out, fail, fn, d)
     const firsts = this.kind === 2 ? undefined : parsers.map((q) => this.closure.firsts.of(q))
     const prune = firsts !== undefined && planAlt(firsts) !== undefined
     const st = this.v(fn)
@@ -635,8 +634,8 @@ class Emitter {
         `if($S.mode!=="Backtrack"){${fail}}p=${st};`
       const f = firsts?.[i]
       code +=
-        prune && f!.mode === Strict
-          ? `if(${this.resumable ? `${u}===-2||` : ""}${this.startTest(f!, u)}){${branch}}`
+        prune && f !== undefined && f.mode === Strict
+          ? `if(${this.resumable ? `${u}===-2||` : ""}${this.startTest(f, u)}){${branch}}`
           : branch
     })
     return code + `${BT}${fail}}`
@@ -660,7 +659,7 @@ class Emitter {
       return s
     }
     if (node.cases !== undefined) {
-      for (const key of Reflect.ownKeys(node.cases)) caseStep(node.cases[key as any]!)
+      for (const key of Reflect.ownKeys(node.cases)) caseStep(node.cases[key as any])
       if (node.otherwise !== undefined) caseStep(node.otherwise)
     }
     const table = this.const(cases)
@@ -733,7 +732,7 @@ class Emitter {
     // `while` needs the accumulator even when the output is unused
     const tracked = keep || cond !== undefined
     const x = tracked ? this.v(fn) : null
-    const acc = keep ? out! : this.v(fn)
+    const acc = out !== null && keep ? out : this.v(fn)
     let init = collect?.init ?? ""
     let add = ""
     if (tracked) {
@@ -802,7 +801,7 @@ class Emitter {
     const keep = out !== null && used && collect === undefined
     if (max === 0) return collect !== undefined ? collect.init + collect.finish : keep ? `${out}=[];` : ""
     const x = keep ? this.v(fn) : null
-    const acc = keep ? out! : this.v(fn)
+    const acc = out !== null && keep ? out : this.v(fn)
     const n = this.v(fn)
     const st = this.v(fn)
     const done = this.label()
@@ -866,7 +865,12 @@ class Emitter {
       }
       case "Repeat":
       case "Separated": {
-        const pair = pairOf(node.self)!
+        const pair = pairOf(node.self)
+        if (pair === undefined) {
+          // Not reached (`entriesShape` found the pair): build the pairs, then the object
+          const t = this.v(fn)
+          return this.gen(p, true, t, fail, fn, d) + `${out}=${this.const(fromEntries)}(${t});`
+        }
         const deferred = this.v(fn)
         const key = this.v(fn)
         const value = this.v(fn)

@@ -15,11 +15,12 @@ import type { Node, NodeOf, ParserLike } from "../node.js"
 import { addEntry, flushEntries, fromEntries, isPlainKey } from "../entries.js"
 import { nodeOf } from "../node.js"
 import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from "../numbers.js"
-import { charOf, fastLimit, fold, validate } from "../text.js"
+import { charOf, fastLimit, firstCodePoint, fold, validate } from "../text.js"
 import { countTokens, indexOf } from "../tokens.js"
 import type { AltPlan } from "./first.js"
 import * as Resume from "../resume.js"
 import type { Backend } from "./registry.js"
+import type { EntryPair } from "./entries.js"
 import { entriesShape, pairOf } from "./entries.js"
 import { FirstSets, planAlt } from "./first.js"
 import type { CharSet } from "./sets.js"
@@ -104,7 +105,8 @@ class Compiler {
     const slot = memo.get(p)
     if (slot !== undefined) {
       if (slot.fn !== undefined) return slot.fn
-      return (s) => slot.fn!(s) // a cycle through `suspend`
+      // A cycle through `suspend`: the slot is filled once the cycle is compiled, before any parse runs
+      return (s) => (slot.fn ?? p.step)(s)
     }
     const fresh: Slot = { fn: undefined }
     memo.set(p, fresh)
@@ -367,9 +369,9 @@ class Compiler {
         return (s) => {
           const out: Record<string, unknown> = {}
           for (let i = 0; i < n; i++) {
-            const a = steps[i]!(s)
+            const a = steps[i](s)
             if (a === Fail) return Fail
-            out[keys[i]!] = a
+            out[keys[i]] = a
           }
           return out
         }
@@ -409,13 +411,13 @@ class Compiler {
   chain(steps: ReadonlyArray<Step>): Step {
     const n = steps.length
     if (n === 0) return () => undefined
-    if (n === 1) return steps[0]!
+    if (n === 1) return steps[0]
     if (n === 2) {
       const [a, b] = steps as [Step, Step]
       return (s) => (a(s) === Fail ? Fail : b(s))
     }
     return (s) => {
-      for (let i = 0; i < n; i++) if (steps[i]!(s) === Fail) return Fail
+      for (let i = 0; i < n; i++) if (steps[i](s) === Fail) return Fail
       return undefined
     }
   }
@@ -431,7 +433,7 @@ class Compiler {
       return (s) => {
         const out = new Array(n)
         for (let i = 0; i < n; i++) {
-          const a = steps[i]!(s)
+          const a = steps[i](s)
           if (a === Fail) return Fail
           out[i] = a
         }
@@ -452,7 +454,7 @@ class Compiler {
       return (s) => {
         let out: unknown
         for (let i = 0; i < n; i++) {
-          const a = steps[i]!(s)
+          const a = steps[i](s)
           if (a === Fail) return Fail
           if (i === output) out = a
         }
@@ -464,7 +466,7 @@ class Compiler {
       let x: unknown
       let y: unknown
       for (let i = 0; i < n; i++) {
-        const a = steps[i]!(s)
+        const a = steps[i](s)
         if (a === Fail) return Fail
         if (i === i0) x = a
         else if (i === i1) y = a
@@ -477,7 +479,7 @@ class Compiler {
   private unitReader(): (s: State<any>) => number {
     return this.kind === 0
       ? (s) => (s.pos < s.end ? (s.input as string).charCodeAt(s.pos) : -1)
-      : (s) => (s.pos < s.end ? (s.input as Uint8Array)[s.pos]! : -1)
+      : (s) => (s.pos < s.end ? (s.input as Uint8Array)[s.pos] : -1)
   }
 
   alt(node: NodeOf<"Alt">, used: boolean): Step {
@@ -489,13 +491,13 @@ class Compiler {
         return Fail
       }
     }
-    if (n === 1) return steps[0]!
+    if (n === 1) return steps[0]
     const plan: AltPlan | undefined = this.kind === 2 ? undefined : planAlt(node.parsers.map((q) => this.firsts.of(q)))
     if (plan === undefined) {
       return (s) => {
         const start = s.pos
         for (let i = 0; i < n; i++) {
-          const a = steps[i]!(s)
+          const a = steps[i](s)
           if (a !== Fail) return a
           if (s.mode !== BT) return Fail
           s.pos = start
@@ -504,17 +506,17 @@ class Compiler {
         return Fail
       }
     }
-    const lists = plan.lists.map((l) => l.map((i) => steps[i]!))
+    const lists = plan.lists.map((l) => l.map((i) => steps[i]))
     const { byUnit, end, high } = plan
     const unit = this.unitReader()
     const resumable = this.resumable
     return (s) => {
       // Near the end of a partial input, branches may be incomplete rather than fail
       const u = resumable && s.partial && s.pos + Margin > s.end ? -2 : unit(s)
-      const candidates = u === -2 ? steps : lists[u < 0 ? end : u < TableSize ? byUnit[u]! : high]!
+      const candidates = u === -2 ? steps : lists[u < 0 ? end : u < TableSize ? byUnit[u] : high]
       const start = s.pos
       for (let i = 0; i < candidates.length; i++) {
-        const a = candidates[i]!(s)
+        const a = candidates[i](s)
         if (a !== Fail) return a
         if (s.mode !== BT) return Fail
         s.pos = start
@@ -530,7 +532,7 @@ class Compiler {
     const compiled = new Map<ParserLike, Step>()
     if (node.cases !== undefined) {
       for (const key of Reflect.ownKeys(node.cases)) {
-        const q = node.cases[key as any]!
+        const q = node.cases[key as any]
         if (!compiled.has(q)) compiled.set(q, this.compile(q, used))
       }
     }
@@ -580,7 +582,7 @@ class Compiler {
         return Fail
       }
       if (u >= size) return general(s)
-      const q = table[u]!
+      const q = table[u]
       if (q === null) {
         s.mode = BT
         return Fail
@@ -671,7 +673,7 @@ class Compiler {
         return (s) => {
           let out: unknown
           for (let j = 0; j < steps.length; j++) {
-            const a = steps[j]!(s)
+            const a = steps[j](s)
             if (a === Fail) return Fail
             if (j === i) out = a
           }
@@ -679,15 +681,22 @@ class Compiler {
         }
       }
       case "Repeat":
-      case "Separated":
-        return this.entriesLoop(node)
+      case "Separated": {
+        const pair = pairOf(node.self)
+        if (pair !== undefined) return this.entriesLoop(node, pair)
+        // Not reached (`entriesShape` found the pair): build the pairs, then the object
+        const c = this.compile(p, true)
+        return (s) => {
+          const a = c(s)
+          return a === Fail ? Fail : fromEntries(a as Iterable<readonly [PropertyKey, unknown]>)
+        }
+      }
       default:
         return this.entries((node as { readonly self: ParserLike }).self)
     }
   }
 
-  private entriesLoop(node: NodeOf<"Repeat"> | NodeOf<"Separated">): Step {
-    const pair = pairOf(node.self)!
+  private entriesLoop(node: NodeOf<"Repeat"> | NodeOf<"Separated">, pair: EntryPair): Step {
     const parts = pair.parsers.map((q, j) => this.compile(q, j === pair.key || j === pair.value))
     const { key: ki, value: vi } = pair
     // Parses an entry and adds it to `acc`
@@ -695,7 +704,7 @@ class Compiler {
       let key: unknown
       let value: unknown
       for (let j = 0; j < parts.length; j++) {
-        const a = parts[j]!(s)
+        const a = parts[j](s)
         if (a === Fail) return false
         if (j === ki) key = a
         else if (j === vi) value = a
@@ -714,7 +723,7 @@ class Compiler {
           let value: unknown
           let ok = true
           for (let j = 0; j < parts.length; j++) {
-            const a = parts[j]!(s)
+            const a = parts[j](s)
             if (a === Fail) {
               ok = false
               break
@@ -985,7 +994,7 @@ class Compiler {
           return (s) => {
             const pos = s.pos
             if (pos >= s.end) return fail(s)
-            const b = (s.input as Uint8Array)[pos]!
+            const b = (s.input as Uint8Array)[pos]
             if (accept[b] === 0) return fail(s)
             s.pos = pos + 1
             return b
@@ -1097,7 +1106,7 @@ class Compiler {
       if (s.end - pos < len) return fail(s)
       const input = s.input as Uint8Array
       for (let i = 0; i < len; i++) {
-        const b = input[pos + i]!
+        const b = input[pos + i]
         if ((caseless ? lowerAscii(b) : b) !== expect[i]) return fail(s)
       }
       s.pos = pos + len
@@ -1116,7 +1125,7 @@ class Compiler {
         const start = s.pos
         const limit = max === Infinity ? s.end : Math.min(s.end, start + max)
         let i = start
-        while (i < limit && accept[bytes[i]!] === 1) i++
+        while (i < limit && accept[bytes[i]] === 1) i++
         if (i - start < min) return failAt(s, i)
         s.pos = i
         return used ? bytes.subarray(start, i) : undefined
@@ -1165,7 +1174,7 @@ class Compiler {
     const width = enc.width
     const toText = enc.text
     const unitAt: (input: any, i: number) => number =
-      kind === 0 ? (input: string, i) => input.charCodeAt(i) : (input: Uint8Array, i) => input[i]!
+      kind === 0 ? (input: string, i) => input.charCodeAt(i) : (input: Uint8Array, i) => input[i]
     switch (node._tag) {
       case "Any":
         return (s) => {
@@ -1185,7 +1194,7 @@ class Compiler {
       case "Literal": {
         const lit = node.literal as string
         if (node.caseless) {
-          const folded = Array.from(lit, (c) => fold(c.codePointAt(0)!))
+          const folded = Array.from(lit, (c) => fold(firstCodePoint(c)))
           const n = folded.length
           return (s) => {
             const start = s.pos
@@ -1215,7 +1224,7 @@ class Compiler {
         const bytes = encoded as Uint8Array
         const len = bytes.length
         if (len === 1) {
-          const b0 = bytes[0]!
+          const b0 = bytes[0]
           return (s) => {
             const pos = s.pos
             if (pos < s.end && (s.input as Uint8Array)[pos] === b0) {
@@ -1334,7 +1343,7 @@ class Compiler {
     const fast = fastLimit(enc)
     const toText = enc.text
     const unitAt: (input: any, i: number) => number =
-      this.kind === 0 ? (input: string, i) => input.charCodeAt(i) : (input: Uint8Array, i) => input[i]!
+      this.kind === 0 ? (input: string, i) => input.charCodeAt(i) : (input: Uint8Array, i) => input[i]
     return (s) => {
       const start = s.pos
       if (c(s) === Fail) return Fail

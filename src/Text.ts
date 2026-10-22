@@ -77,7 +77,7 @@ const makePredicate = (name: string, re: RegExp): CharPredicate => {
     if (x < 128) table = ascii ??= new Uint8Array(128)
     else if (x < 0x10000) table = bmp ??= new Uint8Array(0x10000)
     else return re.test(String.fromCodePoint(x))
-    let v = table[x]!
+    let v = table[x]
     if (v === 0) table[x] = v = re.test(String.fromCharCode(x)) ? 2 : 1
     return v === 2
   })
@@ -463,7 +463,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
     const node: Node = { _tag: "Literal", literal: lit, caseless: false, encoding: enc }
     if (len === 1) {
       // Single unit literals (punctuation, mostly) are compared directly
-      const unit = typeof encoded === "string" ? encoded.charCodeAt(0) : encoded[0]!
+      const unit = typeof encoded === "string" ? encoded.charCodeAt(0) : encoded[0]
       return P.described<L, never, never, I>(
         (state: State<any>) => {
           const pos = state.pos
@@ -498,7 +498,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
   }
 
   const caseless = (lit: string): Parser<string, never, never, I> => {
-    const folded = Array.from(lit, (c) => internal.fold(c.codePointAt(0)!))
+    const folded = Array.from(lit, (c) => internal.fold(internal.firstCodePoint(c)))
     const expected = [`${JSON.stringify(lit)} (case insensitive)`]
     return P.described<string, never, never, I>(
       (state: State<any>) => {
@@ -718,7 +718,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
   const floatText = markFloatText(taken(P.alt(caseless("nan"), P.seq(sign, unsignedFloat))).pipe(P.expected("number")))
 
   const matchControl = (control: string) => {
-    const ctrl = control.codePointAt(0)!
+    const ctrl = control.codePointAt(0)
     return (state: State<any>): boolean => {
       if (internal.next(enc, state) !== ctrl) return false
       state.pos += internal.width
@@ -783,11 +783,11 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
         matchControl(control),
         escapable,
         (state, start) => enc.text(state.input, start, state.pos),
-        control.codePointAt(0)!,
+        internal.firstCodePoint(control),
         enc
       ),
     escaped: (normal, control, escape) =>
-      escapedImpl(normal, matchControl(control), escape, control.codePointAt(0)!, enc)
+      escapedImpl(normal, matchControl(control), escape, internal.firstCodePoint(control), enc)
   }
 }
 

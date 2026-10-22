@@ -114,7 +114,7 @@ const readBits = (state: State<any>, count: number): number => {
   let pos = state.pos
   let value = 0
   for (let i = 0; i < count; i++) {
-    const byte = input[pos >>> 3]!
+    const byte = input[pos >>> 3]
     value = value * 2 + ((byte >>> (7 - (pos & 7))) & 1)
     pos++
   }

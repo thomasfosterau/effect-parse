@@ -202,7 +202,7 @@ export const children = (node: Node): ReadonlyArray<P> => {
     case "Dispatch": {
       const out: Array<P> = [node.selector]
       if (node.cases !== undefined) {
-        for (const key of Reflect.ownKeys(node.cases)) out.push(node.cases[key as any]!)
+        for (const key of Reflect.ownKeys(node.cases)) out.push(node.cases[key as any])
       }
       if (node.otherwise !== undefined) out.push(node.otherwise)
       return out

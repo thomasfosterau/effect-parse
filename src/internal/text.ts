@@ -28,9 +28,16 @@ export const fastLimit = (enc: Encoding<any>): number =>
 
 const asciiChars: ReadonlyArray<string> = /*#__PURE__*/ Array.from({ length: 128 }, (_, i) => String.fromCharCode(i))
 
+/**
+ * The code point that starts `s`: for a string known to hold one, such as
+ * one element of `Array.from(string)`. On an empty string it is `NaN`, which,
+ * like the `undefined` of `codePointAt(0)`, matches no code point.
+ */
+export const firstCodePoint = (s: string): number => s.codePointAt(0) ?? Number.NaN
+
 /** `String.fromCodePoint`, with the ASCII characters cached. */
 export const charOf = (cp: number): string =>
-  cp < 128 ? asciiChars[cp]! : cp < 0x10000 ? String.fromCharCode(cp) : String.fromCodePoint(cp)
+  cp < 128 ? asciiChars[cp] : cp < 0x10000 ? String.fromCharCode(cp) : String.fromCodePoint(cp)
 
 const decodeString = (s: string, i: number, end: number): number => {
   const c = s.charCodeAt(i)
@@ -59,33 +66,33 @@ export const string: Encoding<string> = {
 } as Encoding<string>
 
 const decodeUtf8 = (b: Uint8Array, i: number, end: number): number => {
-  const c = b[i]!
+  const c = b[i]
   if (c < 0x80) return c
   if (c < 0xc2) return Invalid
   if (c < 0xe0) {
     if (i + 1 >= end) return Truncated
-    const d = b[i + 1]!
+    const d = b[i + 1]
     return (d & 0xc0) === 0x80 ? ((c & 0x1f) << 6) | (d & 0x3f) : Invalid
   }
   if (c < 0xf0) {
     if (i + 1 >= end) return Truncated
-    const d = b[i + 1]!
+    const d = b[i + 1]
     // Reject overlong encodings (E0 80..9F) and surrogates (ED A0..BF)
     if (c === 0xe0 ? d < 0xa0 || d > 0xbf : c === 0xed ? d < 0x80 || d > 0x9f : (d & 0xc0) !== 0x80) return Invalid
     if (i + 2 >= end) return Truncated
-    const e = b[i + 2]!
+    const e = b[i + 2]
     return (e & 0xc0) === 0x80 ? ((c & 0x0f) << 12) | ((d & 0x3f) << 6) | (e & 0x3f) : Invalid
   }
   if (c < 0xf5) {
     if (i + 1 >= end) return Truncated
-    const d = b[i + 1]!
+    const d = b[i + 1]
     // Reject overlong encodings (F0 80..8F) and code points above U+10FFFF (F4 90..BF)
     if (c === 0xf0 ? d < 0x90 || d > 0xbf : c === 0xf4 ? d < 0x80 || d > 0x8f : (d & 0xc0) !== 0x80) return Invalid
     if (i + 2 >= end) return Truncated
-    const e = b[i + 2]!
+    const e = b[i + 2]
     if ((e & 0xc0) !== 0x80) return Invalid
     if (i + 3 >= end) return Truncated
-    const f = b[i + 3]!
+    const f = b[i + 3]
     return (f & 0xc0) === 0x80 ? ((c & 0x07) << 18) | ((d & 0x3f) << 12) | ((e & 0x3f) << 6) | (f & 0x3f) : Invalid
   }
   return Invalid
@@ -119,7 +126,7 @@ export const utf8: Encoding<Uint8Array> = {
     if (end - start > SHORT) return decodeRange(utf8Decoder, b, start, end)
     let out = ""
     for (let i = start; i < end;) {
-      const c = b[i]!
+      const c = b[i]
       if (c < 0x80) {
         out += asciiChars[c]
         i++
@@ -143,11 +150,11 @@ const makeUtf16 = (littleEndian: boolean): Encoding<Uint8Array> => {
     asciiCompatible: false,
     decode: (b, i, end) => {
       if (i + 1 >= end) return Truncated
-      const c = b[i + lo]! | (b[i + hi]! << 8)
+      const c = b[i + lo] | (b[i + hi] << 8)
       if ((c & 0xf800) !== 0xd800) return c
       if (c > 0xdbff) return Invalid
       if (i + 3 >= end) return Truncated
-      const d = b[i + 2 + lo]! | (b[i + 2 + hi]! << 8)
+      const d = b[i + 2 + lo] | (b[i + 2 + hi] << 8)
       return (d & 0xfc00) === 0xdc00 ? ((c - 0xd800) << 10) + (d - 0xdc00) + 0x10000 : Invalid
     },
     width: (cp) => (cp > 0xffff ? 4 : 2),
@@ -164,7 +171,7 @@ const makeUtf16 = (littleEndian: boolean): Encoding<Uint8Array> => {
       if (end - start <= SHORT * 2) {
         // The range is well formed, so surrogate pairs can be copied unit by unit
         let out = ""
-        for (let i = start; i < end; i += 2) out += String.fromCharCode(b[i + lo]! | (b[i + hi]! << 8))
+        for (let i = start; i < end; i += 2) out += String.fromCharCode(b[i + lo] | (b[i + hi] << 8))
         return out
       }
       decoder ??= new TextDecoder(littleEndian ? "utf-16le" : "utf-16be", { ignoreBOM: true })
@@ -184,7 +191,7 @@ export const latin1: Encoding<Uint8Array> = {
   name: "ISO-8859-1",
   unit: 1,
   asciiCompatible: true,
-  decode: (b, i) => b[i]!,
+  decode: (b, i) => b[i],
   width: () => 1,
   encode: (text) => {
     const out = new Uint8Array(text.length)
@@ -303,7 +310,7 @@ export const scan = (
         stop = End
         break
       }
-      const c = b[i]!
+      const c = b[i]
       if (c < fast) {
         if (test(c) === negate) break
         i++
@@ -348,7 +355,7 @@ export const validate = (enc: Encoding<any>, state: State<any>, start: number, e
 const foldCache = /*#__PURE__*/ new Map<number, number>()
 
 const single = (s: string): number => {
-  const cp = s.codePointAt(0)!
+  const cp = firstCodePoint(s)
   return s.length === (cp > 0xffff ? 2 : 1) ? cp : -1
 }
 

@@ -283,7 +283,7 @@ export class Tree<out A, out E = never, I extends Input = string> {
       const visit = (green: Green, start: number) => {
         if (!green.hasError) return
         if (green.error !== undefined) out.push(this.toError(green.error, start))
-        for (let i = 0; i < green.children.length; i++) visit(green.children[i]!, start + green.offsets[i]!)
+        for (let i = 0; i < green.children.length; i++) visit(green.children[i], start + green.offsets[i])
       }
       visit(this.green, 0)
       this.errorList = out
@@ -325,10 +325,10 @@ export class Tree<out A, out E = never, I extends Input = string> {
     let hi = lines.length - 1
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1
-      if (lines[mid]! <= at) lo = mid
+      if (lines[mid] <= at) lo = mid
       else hi = mid - 1
     }
-    const lineStart = lines[lo]!
+    const lineStart = lines[lo]
     return { line: lo + 1, column: ParseError.lineColumn(input.slice(lineStart, at), at - lineStart).column }
   }
 
@@ -484,7 +484,7 @@ export class SyntaxNode<I extends Input = string> {
   get nextNamedSibling(): SyntaxNode<I> | undefined {
     const siblings = this.parent?.children
     if (siblings === undefined) return undefined
-    for (let i = this.index + 1; i < siblings.length; i++) if (siblings[i]!.named) return siblings[i]
+    for (let i = this.index + 1; i < siblings.length; i++) if (siblings[i].named) return siblings[i]
     return undefined
   }
 
@@ -492,7 +492,7 @@ export class SyntaxNode<I extends Input = string> {
   get previousNamedSibling(): SyntaxNode<I> | undefined {
     const siblings = this.parent?.children
     if (siblings === undefined) return undefined
-    for (let i = this.index - 1; i >= 0; i--) if (siblings[i]!.named) return siblings[i]
+    for (let i = this.index - 1; i >= 0; i--) if (siblings[i].named) return siblings[i]
     return undefined
   }
 
@@ -509,7 +509,7 @@ export class SyntaxNode<I extends Input = string> {
     let found = -1
     while (lo <= hi) {
       const mid = (lo + hi) >> 1
-      if (offsets[mid]! <= rel) {
+      if (offsets[mid] <= rel) {
         found = mid
         lo = mid + 1
       } else {
@@ -517,8 +517,8 @@ export class SyntaxNode<I extends Input = string> {
       }
     }
     // Skip back over empty `ERROR` nodes at `offset`
-    while (found >= 0 && green.children[found]!.width === 0 && offsets[found] === rel) found--
-    return found >= 0 && rel < offsets[found]! + green.children[found]!.width ? found : -1
+    while (found >= 0 && green.children[found].width === 0 && offsets[found] === rel) found--
+    return found >= 0 && rel < offsets[found] + green.children[found].width ? found : -1
   }
 
   /** The child containing the input unit at `offset`. */
@@ -539,7 +539,7 @@ export class SyntaxNode<I extends Input = string> {
     while (true) {
       const i = node.childIndexAt(start)
       if (i < 0) return node
-      const child = node.children[i]!
+      const child = node.children[i]
       if (end > child.end) return node
       node = child
     }
@@ -548,7 +548,8 @@ export class SyntaxNode<I extends Input = string> {
   /** Like {@link descendantAt}, but only stops at named nodes. */
   namedDescendantAt(start: number, end: number = start + 1): SyntaxNode<I> {
     let node: SyntaxNode<I> = this.descendantAt(start, end)
-    while (!node.named && node !== this) node = node.parent!
+    // Every node below `this` has a parent, so the walk stops at `this` at the latest
+    while (!node.named && node !== this) node = node.parent ?? this
     return node
   }
 
@@ -585,10 +586,10 @@ export class SyntaxNode<I extends Input = string> {
         if (out.length > 0) out += " "
         if (field !== undefined) out += `${field}: `
         out += `(${green.kind}`
-        for (let i = 0; i < green.children.length; i++) visit(green.children[i]!, green.fields?.[i])
+        for (let i = 0; i < green.children.length; i++) visit(green.children[i], green.fields?.[i])
         out += ")"
       } else {
-        for (let i = 0; i < green.children.length; i++) visit(green.children[i]!, green.fields?.[i])
+        for (let i = 0; i < green.children.length; i++) visit(green.children[i], green.fields?.[i])
       }
     }
     visit(this.green, this.field)
@@ -601,7 +602,7 @@ export class SyntaxNode<I extends Input = string> {
 
   private makeChild(i: number): SyntaxNode<I> {
     const green = this.green
-    return new SyntaxNode(this.tree, green.children[i]!, this.start + green.offsets[i]!, this, i)
+    return new SyntaxNode(this.tree, green.children[i], this.start + green.offsets[i], this, i)
   }
 }
 
@@ -666,8 +667,9 @@ export class TreeCursor<I extends Input = string> {
 
   /** Moves to the parent; `false` at the node the cursor started at. */
   gotoParent(): boolean {
-    if (this.depth === 0) return false
-    this.current = this.current.parent!
+    const parent = this.current.parent
+    if (this.depth === 0 || parent === undefined) return false
+    this.current = parent
     this.depth--
     return true
   }
@@ -750,7 +752,7 @@ export const parse: {
   const n = nodeOf(grammar)
   const isRoot = n._tag === "Syntax" && n.kind !== undefined && n.named
   const config: Config = {
-    kind: isRoot ? n.kind! : (options?.kind ?? "document"),
+    kind: isRoot ? n.kind : (options?.kind ?? "document"),
     inner: isRoot ? (n.self as Parser.Any) : grammar,
     lookahead: options?.lookahead ?? 0,
     context: options?.context as Context.Context<never> | undefined

@@ -24,7 +24,7 @@ const rng = (seed: number) => () => {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296
 }
 const random = rng(2026)
-const word = () => ["alpha", "beta", "gamma", "delta", "epsilon"][Math.floor(random() * 5)]!
+const word = () => ["alpha", "beta", "gamma", "delta", "epsilon"][Math.floor(random() * 5)]
 
 const records = (n: number) =>
   Array.from({ length: n }, (_, i) => ({
@@ -119,15 +119,15 @@ for (const doc of docs) {
   const best = cases.map(() => Infinity)
   for (let round = 0; round < 30; round++) {
     cases.forEach((c, i) => {
-      best[i] = Math.min(best[i]!, time(doc, c.run))
+      best[i] = Math.min(best[i], time(doc, c.run))
     })
   }
   const mb = new TextEncoder().encode(doc.text).length / 1e6
   console.log(`${doc.name} (${mb >= 0.01 ? `${mb.toFixed(2)} MB` : `${(mb * 1000).toFixed(1)} KB`})`)
   cases.forEach((c, i) => {
-    const ms = best[i]!
+    const ms = best[i]
     // Compare each parser with the native parse of the same input kind
-    const native = best[c.name.includes("bytes") ? 3 : 0]!
+    const native = best[c.name.includes("bytes") ? 3 : 0]
     const ratio = i === 0 || i === 3 ? "" : `  ${(ms / native).toFixed(1)}x native`
     const timing = ms < 0.1 ? `${(ms * 1000).toFixed(1).padStart(7)} µs` : `${ms.toFixed(2).padStart(7)} ms`
     console.log(`  ${c.name.padEnd(32)} ${timing}  ${(mb / (ms / 1000)).toFixed(0).padStart(5)} MB/s${ratio}`)

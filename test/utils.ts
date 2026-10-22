@@ -1,5 +1,5 @@
 import { Result } from "effect"
-import { expect } from "vite-plus/test"
+import { assert, expect } from "vite-plus/test"
 import type { Input, Parser, ParseError } from "../src/index.js"
 import { Parser as P } from "../src/index.js"
 
@@ -26,6 +26,12 @@ export const expectFailure = <A, E, I extends Input.Input>(
     throw new Error(`expected failure, got: ${JSON.stringify(result.success)}`)
   }
   return result.failure
+}
+
+/** `value`, failing the test when it is `undefined`. */
+export const defined = <A>(value: A | undefined): A => {
+  if (value === undefined) return assert.fail("expected a value, got undefined")
+  return value
 }
 
 /** nom-style: returns `[remaining, output]`. */

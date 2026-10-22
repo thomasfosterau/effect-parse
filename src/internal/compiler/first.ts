@@ -42,7 +42,7 @@ const anyUnit: First = { mode: Strict, units: all, high: true }
 
 const union = (a: First, b: First, mode: 0 | 1 | 2): First => {
   const units = new Uint8Array(TableSize)
-  for (let i = 0; i < TableSize; i++) units[i] = a.units[i]! | b.units[i]!
+  for (let i = 0; i < TableSize; i++) units[i] = a.units[i] | b.units[i]
   return { mode, units, high: a.high || b.high }
 }
 
@@ -111,14 +111,14 @@ export class FirstSets {
           if (node.caseless) return lit.length === 0 ? unknown : anyUnit
           const encoded = node.encoding.encode(lit as string)
           if (encoded.length === 0) return emptyOptional
-          return ofUnits([typeof encoded === "string" ? encoded.charCodeAt(0) : encoded[0]!])
+          return ofUnits([typeof encoded === "string" ? encoded.charCodeAt(0) : encoded[0]])
         }
         if (lit.length === 0) return emptyOptional
         let first: number
         if (typeof lit === "string") {
-          first = kind === 0 ? lit.charCodeAt(0) : new TextEncoder().encode(lit)[0]!
+          first = kind === 0 ? lit.charCodeAt(0) : new TextEncoder().encode(lit)[0]
         } else if (lit instanceof Uint8Array && kind === 1) {
-          first = lit[0]!
+          first = lit[0]
         } else {
           return unknown
         }
@@ -184,7 +184,7 @@ export class FirstSets {
           if (f.mode === Optional) mode = Optional
           acc = acc === undefined ? f : union(acc, f, mode)
         }
-        return withMode(acc!, mode)
+        return acc === undefined ? failing : withMode(acc, mode)
       }
       case "Repeat":
       case "Fold":
@@ -233,7 +233,7 @@ export const planAlt = (firsts: ReadonlyArray<First>): AltPlan | undefined => {
   const index = new Map<string, number>()
   const listOf = (keep: (f: First) => boolean): number => {
     const list: Array<number> = []
-    for (let i = 0; i < n; i++) if (keep(firsts[i]!)) list.push(i)
+    for (let i = 0; i < n; i++) if (keep(firsts[i])) list.push(i)
     const key = list.join(",")
     let k = index.get(key)
     if (k === undefined) {
@@ -247,7 +247,7 @@ export const planAlt = (firsts: ReadonlyArray<First>): AltPlan | undefined => {
   for (let u = 0; u < TableSize; u++) byUnit[u] = listOf((f) => f.mode !== Strict || f.units[u] === 1)
   const high = listOf((f) => f.mode !== Strict || f.high)
   const end = listOf((f) => f.mode !== Strict)
-  if (lists.length === 1 && lists[0]!.length === n) return undefined
+  if (lists.length === 1 && lists[0].length === n) return undefined
   if (lists.length > 255) return undefined
   return { byUnit, high, end, lists }
 }

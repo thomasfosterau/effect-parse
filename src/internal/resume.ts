@@ -25,7 +25,7 @@ export type Checkpoints = Map<object, Map<number, unknown>>
 
 /** Takes (and removes) the checkpoint of `key` entered at `offset`, if any. */
 export const take = (state: State<any>, key: object, offset: number): unknown => {
-  const byKey = state.resume!.get(key)
+  const byKey = state.resume?.get(key)
   if (byKey === undefined) return undefined
   const checkpoint = byKey.get(offset)
   if (checkpoint !== undefined && !(checkpoint instanceof Done)) byKey.delete(offset)
@@ -51,7 +51,8 @@ export const done = <A>(state: State<any>, key: object, entry: number, resumed: 
 
 /** Records the checkpoint of `key` entered at `offset`. */
 export const save = (state: State<any>, key: object, offset: number, checkpoint: unknown): void => {
-  const resume = state.resume!
+  const resume = state.resume
+  if (resume === undefined) return
   let byKey = resume.get(key)
   if (byKey === undefined) resume.set(key, (byKey = new Map()))
   byKey.set(offset, checkpoint)

@@ -3,6 +3,7 @@
  * exact test for the rest, and the code point ranges when they are known.
  */
 import type { Encoding } from "../../Encoding.js"
+import { firstCodePoint } from "../text.js"
 import { compile, compileAny, PredicateRanges } from "../tokens.js"
 
 /** Size of the membership table: every byte, and the Latin-1 code points. */
@@ -20,7 +21,7 @@ export interface CharSet {
 const isRange = (u: unknown): u is { readonly from: string | number; readonly to: string | number } =>
   typeof u === "object" && u !== null && (u as any)._tag === "TokenRange"
 
-const toCode = (u: string | number): number => (typeof u === "number" ? u : u.codePointAt(0)!)
+const toCode = (u: string | number): number => (typeof u === "number" ? u : firstCodePoint(u))
 
 /** The code point ranges of a token set, or `undefined` if it has an unknown predicate. */
 export const rangesOf = (set: unknown): Array<[number, number]> | undefined => {
@@ -28,7 +29,7 @@ export const rangesOf = (set: unknown): Array<[number, number]> | undefined => {
   const add = (u: unknown): boolean => {
     if (typeof u === "string") {
       for (const c of u) {
-        const cp = c.codePointAt(0)!
+        const cp = firstCodePoint(c)
         out.push([cp, cp])
       }
       return true

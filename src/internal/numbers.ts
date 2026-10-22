@@ -87,22 +87,22 @@ const decimal = (negative: boolean, high: number, low: number, lowDigits: number
   let v: number
   if (lowDigits === 0) {
     if (e10 > 22 || e10 < -22) return undefined
-    v = e10 === 0 ? high : e10 > 0 ? high * exact[e10]! : high / exact[-e10]!
+    v = e10 === 0 ? high : e10 > 0 ? high * exact[e10] : high / exact[-e10]
   } else {
     if (e10 > 22 || e10 < -22) return undefined
     // The digits: high * 10^lowDigits + low = wh + wl, exactly
-    twoProduct(high, exact[lowDigits]!)
+    twoProduct(high, exact[lowDigits])
     const wh = productHi + low
     const wl = productLo + (low - (wh - productHi))
     let xh: number
     let xl: number
     if (e10 >= 0) {
-      const p = exact[e10]!
+      const p = exact[e10]
       twoProduct(wh, p)
       xh = productHi
       xl = productLo + wl * p
     } else {
-      const p = exact[-e10]!
+      const p = exact[-e10]
       xh = wh / p
       twoProduct(xh, p)
       xl = (wh - productHi - productLo + wl) / p
@@ -211,9 +211,9 @@ export const scanFloatString = (s: string, i: number, end: number): number | Fai
 /** {@link scanFloatString} on bytes, or the units of an ASCII compatible encoding. */
 export const scanFloatBytes = (b: Uint8Array, i: number, end: number): number | Fail | undefined => {
   const start = i
-  let c = i < end ? b[i]! : -1
+  let c = i < end ? b[i] : -1
   if (c === 45 || c === 43) {
-    c = i + 1 < end ? b[i + 1]! : -1
+    c = i + 1 < end ? b[i + 1] : -1
     if (!isDigit(c) && c !== 46) return undefined
     i++
   } else if (!isDigit(c) && c !== 46) {
@@ -235,11 +235,11 @@ export const scanFloatBytes = (b: Uint8Array, i: number, end: number): number | 
         else e10++
         digits++
       }
-      c = ++i < end ? b[i]! : -1
+      c = ++i < end ? b[i] : -1
     } while (isDigit(c))
-    if (c === 46) c = ++i < end ? b[i]! : -1
+    if (c === 46) c = ++i < end ? b[i] : -1
   } else {
-    c = ++i < end ? b[i]! : -1
+    c = ++i < end ? b[i] : -1
     if (!isDigit(c)) {
       floatScan.read = i
       return Fail
@@ -259,19 +259,19 @@ export const scanFloatBytes = (b: Uint8Array, i: number, end: number): number | 
       }
       digits++
     }
-    c = ++i < end ? b[i]! : -1
+    c = ++i < end ? b[i] : -1
   }
   let read = i
   if (c === 101 || c === 69) {
     let j = i + 1
-    c = j < end ? b[j]! : -1
+    c = j < end ? b[j] : -1
     const negative = c === 45
-    if (negative || c === 43) c = ++j < end ? b[j]! : -1
+    if (negative || c === 43) c = ++j < end ? b[j] : -1
     if (isDigit(c)) {
       let e = 0
       do {
         if (e < 1e6) e = e * 10 + (c - 48)
-        c = ++j < end ? b[j]! : -1
+        c = ++j < end ? b[j] : -1
       } while (isDigit(c))
       e10 += negative ? -e : e
       i = j

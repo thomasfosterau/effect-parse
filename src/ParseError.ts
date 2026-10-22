@@ -245,7 +245,7 @@ const codePointCount = (s: string, start: number, end: number): number => {
  */
 export const formatExpected = (expected: ReadonlyArray<string>): string => {
   if (expected.length === 0) return ""
-  if (expected.length === 1) return expected[0]!
+  if (expected.length === 1) return expected[0]
   return `${expected.slice(0, -1).join(", ")} or ${expected[expected.length - 1]}`
 }
 
@@ -263,11 +263,11 @@ const describeFound = (input: Input, offset: number, encoding: Encoding<any> | u
       : `invalid ${encoding.name} ${hexBytes(bad)}`
   }
   if (typeof input === "string") {
-    const cp = input.codePointAt(offset)!
+    const cp = input.codePointAt(offset) ?? Number.NaN
     return JSON.stringify(String.fromCodePoint(cp))
   }
   if (input instanceof Uint8Array) {
-    return `0x${input[offset]!.toString(16).padStart(2, "0")}`
+    return `0x${input[offset].toString(16).padStart(2, "0")}`
   }
   return inspectToken(input[offset])
 }
@@ -337,7 +337,7 @@ const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | u
     const start = Math.max(0, offset - 8)
     const end = Math.min(input.length, offset + 8)
     const bytes: Array<string> = []
-    for (let i = start; i < end; i++) bytes.push(input[i]!.toString(16).padStart(2, "0"))
+    for (let i = start; i < end; i++) bytes.push(input[i].toString(16).padStart(2, "0"))
     const caret = (offset - start) * 3
     return [`${start.toString(16).padStart(8, "0")} | ${bytes.join(" ")}`, `${" ".repeat(8)} | ${" ".repeat(caret)}^`]
   }

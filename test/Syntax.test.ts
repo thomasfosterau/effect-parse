@@ -4,6 +4,7 @@ import * as Json from "../examples/json-syntax.js"
 import type { Input } from "../src/index.js"
 import { Ascii, Compiler, Expression, Parser, Syntax, Text, Token } from "../src/index.js"
 import { randomJson, rng } from "./generators.js"
+import { defined } from "./utils.js"
 
 const ws = Ascii.multispace0
 const number = Syntax.node(Ascii.decInt, "number")
@@ -70,7 +71,7 @@ describe("Syntax", () => {
       )
       const tree = Syntax.parse(Parser.separated(pair, Token.literal(";")), "a=1;b=2")
       expect(String(tree)).toBe("(document (pair key: (name) value: (number)) (pair key: (name) value: (number)))")
-      const second = tree.root.child(1)!
+      const second = defined(tree.root.child(1))
       expect(second.childByField("key")?.text).toBe("b")
       expect(second.childByField("value")?.value).toBe(2)
       expect(second.childByField("other")).toBeUndefined()
@@ -123,7 +124,7 @@ describe("Syntax", () => {
       expect([...tree.root.descendants()].map((n) => n.kind)).toEqual(["list", "[", "number", ",", "number", "]"])
       expect([...tree.root.descendantsOfKind("number")].map((n) => n.value)).toEqual([1, 2])
       // A cursor started at a node stays inside it
-      const sub = tree.root.child(1)!.walk()
+      const sub = defined(tree.root.child(1)).walk()
       expect(sub.gotoNextSibling()).toBe(false)
       expect(sub.gotoParent()).toBe(false)
     })
@@ -208,11 +209,11 @@ describe("Syntax", () => {
       const tree = Syntax.parse(list, "[1,2;3]")
       expect(tree.value).toEqual(Option.none())
       expect(String(tree)).toBe("(list (number) (number) (ERROR))")
-      const error = tree.root.child(-1)!
+      const error = defined(tree.root.child(-1))
       expect([error.start, error.end]).toEqual([4, 7])
       expect(tree.errors).toHaveLength(1)
       const fresh = Parser.parse(list, "[1,2;3]")
-      expect(Result.isFailure(fresh) && fresh.failure.message).toBe(tree.errors[0]!.message)
+      expect(Result.isFailure(fresh) && fresh.failure.message).toBe(tree.errors[0].message)
     })
 
     it("covers trailing input", () => {

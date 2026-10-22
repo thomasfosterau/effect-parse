@@ -265,11 +265,11 @@ describe("Text over bytes", () => {
       asciiCompatible: false,
       decode: (b, i, end) => {
         if (i + 3 >= end) return -2
-        const cp = (b[i]! | (b[i + 1]! << 8) | (b[i + 2]! << 16) | (b[i + 3]! << 24)) >>> 0
+        const cp = (b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)) >>> 0
         return cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) ? -1 : cp
       },
       width: () => 4,
-      encode: (s) => new Uint8Array(new Uint32Array(Array.from(s, (c) => c.codePointAt(0)!)).buffer),
+      encode: (s) => new Uint8Array(new Uint32Array(Array.from(s, (c) => c.codePointAt(0) ?? 0)).buffer),
       text: (b, start, end) => String.fromCodePoint(...new Uint32Array(b.slice(start, end).buffer))
     }
     const T = Text.make(utf32)

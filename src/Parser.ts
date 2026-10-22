@@ -1374,7 +1374,7 @@ export const seq = <const Ps extends ReadonlyArray<Parser.Any>>(
     (state: State<any>) => {
       const out = new Array(n)
       for (let i = 0; i < n; i++) {
-        const a = steps[i]!(state)
+        const a = steps[i](state)
         if (a === Fail) return Fail
         out[i] = a
       }
@@ -1402,20 +1402,20 @@ export const struct = <const Fields extends Readonly<Record<string, Parser.Any>>
   Parser.InputOf<Fields[keyof Fields]>
 > => {
   const keys = Object.keys(fields)
-  const steps = keys.map((k) => fields[k]!.step)
+  const steps = keys.map((k) => fields[k].step)
   const n = keys.length
   return described(
     (state: State<any>) => {
       const out: Record<string, unknown> = {}
       for (let i = 0; i < n; i++) {
-        const a = steps[i]!(state)
+        const a = steps[i](state)
         if (a === Fail) return Fail
-        out[keys[i]!] = a
+        out[keys[i]] = a
       }
       return out as any
     },
     "struct",
-    { _tag: "Struct", keys, parsers: keys.map((k) => fields[k]!) }
+    { _tag: "Struct", keys, parsers: keys.map((k) => fields[k]) }
   )
 }
 
@@ -1779,13 +1779,13 @@ export const alt = <const Ps extends ReadonlyArray<Parser.Any>>(
   const steps = parsers.map((p) => p.step)
   const n = steps.length
   if (n === 0) return reject as any
-  if (n === 1) return parsers[0]!
+  if (n === 1) return parsers[0]
   return described(
     (state: State<any>) => {
       const start = state.pos
       let failure: Failure | undefined
       for (let i = 0; i < n; i++) {
-        const a = steps[i]!(state)
+        const a = steps[i](state)
         if (a !== Fail) {
           if (failure !== undefined && failure.offset === state.pos) state.setHint(failure.offset, failure.expected)
           return a
@@ -1794,7 +1794,8 @@ export const alt = <const Ps extends ReadonlyArray<Parser.Any>>(
         failure = failure === undefined ? state.failure : mergeFailures(failure, state.failure)
         state.pos = start
       }
-      return state.failWith("Backtrack", failure!)
+      // `failure` is set: there are at least two alternatives, and each one that fails sets it
+      return state.failWith("Backtrack", failure ?? state.failure)
     },
     "alt",
     { _tag: "Alt", parsers }
@@ -1913,7 +1914,7 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
       for (let i = 0; i < n; i++) {
         if (done[i]) continue
         const start = state.pos
-        const a = steps[i]!(state)
+        const a = steps[i](state)
         if (a !== Fail) {
           out[i] = a
           done[i] = true
@@ -1925,7 +1926,8 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
         failure = failure === undefined ? state.failure : mergeFailures(failure, state.failure)
         state.pos = start
       }
-      if (!matched) return state.failWith("Backtrack", failure!)
+      // `failure` is set: some parser is not done yet, and each one that fails sets it
+      if (!matched) return state.failWith("Backtrack", failure ?? state.failure)
     }
     return out as any
   }, "permutation")

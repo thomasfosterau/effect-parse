@@ -86,7 +86,7 @@ for (let round = 0; round < 40; round++) {
     const start = performance.now()
     c.run()
     const ms = performance.now() - start
-    if (ms < best.get(c)!) best.set(c, ms)
+    if (ms < (best.get(c) ?? Infinity)) best.set(c, ms)
   }
 }
 
@@ -99,7 +99,7 @@ for (const c of cases) {
     group = c.group
     console.log(group)
   }
-  const ms = best.get(c)!
+  const ms = best.get(c) ?? Infinity
   if (c.name === "interpreted") interpreted = ms
   const speedup = c.group !== "references" && c.name !== "interpreted" ? `  ${(interpreted / ms).toFixed(1)}x` : ""
   const mchars = doc.length / 1e6 / (ms / 1000)
