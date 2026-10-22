@@ -6,6 +6,7 @@
  * `Parser.fail` / `Parser.tryMap` and surface as the `cause` of the
  * `ParseError`, typed in the parser's `E` channel.
  */
+import * as Predicate from "effect/Predicate"
 import { Data, Result } from "effect"
 import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
 
@@ -100,7 +101,7 @@ export const evaluate = (e: Expr): Result.Result<Atom, EvalError> => {
         if (r.success._tag !== "Num" && r.success._tag !== "Bool") return fail("invalid argument")
         args.push(r.success.value)
       }
-      const nums = () => (args.every((a) => typeof a === "number") ? (args as Array<number>) : undefined)
+      const nums = () => (args.every((a) => Predicate.isNumber(a)) ? (args as Array<number>) : undefined)
       const op = head.success.op
       switch (op) {
         case "+":
@@ -127,7 +128,7 @@ export const evaluate = (e: Expr): Result.Result<Atom, EvalError> => {
         case "=":
           return Result.succeed({ _tag: "Bool", value: args.every((a) => a === args[0]) })
         case "not":
-          return args.length === 1 && typeof args[0] === "boolean"
+          return args.length === 1 && Predicate.isBoolean(args[0])
             ? Result.succeed({ _tag: "Bool", value: !args[0] })
             : fail("`not` expects one boolean")
       }

@@ -2,6 +2,7 @@
  * Differential tests: compiled parsers must give exactly the interpreter's
  * results, values and errors alike, on valid, invalid and truncated input.
  */
+import * as Predicate from "effect/Predicate"
 import { Context, Option, Result } from "effect"
 import { describe, expect, it } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
@@ -107,7 +108,7 @@ const same = (p: Parser.Parser.Any, input: Input.Input, context?: Context.Contex
   const expectedPeek = outcome(Parser.parsePeek(p, input as never, options as never))
   for (const backend of backends) {
     const c = twin(p, backend)
-    const label = `${backend} on ${JSON.stringify(typeof input === "string" ? input : Array.from(input as any))}`
+    const label = `${backend} on ${JSON.stringify(Predicate.isString(input) ? input : Array.from(input as any))}`
     expect(outcome(Parser.parse(c, input as never, options as never)), label).toEqual(expected)
     expect(outcome(Parser.parsePeek(c, input as never, options as never)), label).toEqual(expectedPeek)
     // The compiled step on its own succeeds exactly when the interpreter does
@@ -956,7 +957,7 @@ describe.each(backends)("Compiler.%s", (backend) => {
     Parser.parse(p, "-->")
     const state = new State("abcdefg-->h")
     state.end = 3
-    expect(typeof defined(Registry.stepFor(p, state))(state)).toBe("symbol")
+    expect(Predicate.isSymbol(defined(Registry.stepFor(p, state))(state))).toBe(true)
     const fits = new State("abc-->h")
     fits.end = 6
     expect(defined(Registry.stepFor(p, fits))(fits)).toBe("abc")
@@ -996,7 +997,7 @@ const shifted = (o: any, by: number) => {
 }
 
 const concatInput = (a: Input.Input, b: Input.Input): Input.Input => {
-  if (typeof a === "string") return a + (b as string)
+  if (Predicate.isString(a)) return a + (b as string)
   const out = new Uint8Array(a.length + b.length)
   out.set(a as Uint8Array)
   out.set(b as Uint8Array, a.length)
@@ -1027,7 +1028,7 @@ const sameAtOffset = (
     partial: (q: Parser.Parser.Any, i: Input.Input, o?: Parser.ParseOptions) =>
       Parser.parsePartial(q, i as never, o as never)
   }
-  const label = JSON.stringify(typeof input === "string" ? input : Array.from(input as any))
+  const label = JSON.stringify(Predicate.isString(input) ? input : Array.from(input as any))
   for (const [runner, run] of Object.entries(runners)) {
     const expected: any = outcome(run(p, whole, { offset }))
     // Values that are positions (spans, `location`) are positions in the whole input

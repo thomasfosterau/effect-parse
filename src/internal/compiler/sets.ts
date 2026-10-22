@@ -2,6 +2,7 @@
  * Token sets for compiled parsers: membership tables for small units, the
  * exact test for the rest, and the code point ranges when they are known.
  */
+import * as Predicate from "effect/Predicate"
 import type { Encoding } from "../../Encoding.js"
 import { firstCodePoint } from "../text.js"
 import { compile, compileAny, PredicateRanges } from "../tokens.js"
@@ -19,22 +20,22 @@ export interface CharSet {
 }
 
 const isRange = (u: unknown): u is { readonly from: string | number; readonly to: string | number } =>
-  typeof u === "object" && u !== null && (u as any)._tag === "TokenRange"
+  Predicate.isObjectOrArray(u) && (u as any)._tag === "TokenRange"
 
-const toCode = (u: string | number): number => (typeof u === "number" ? u : firstCodePoint(u))
+const toCode = (u: string | number): number => (Predicate.isNumber(u) ? u : firstCodePoint(u))
 
 /** The code point ranges of a token set, or `undefined` if it has an unknown predicate. */
 export const rangesOf = (set: unknown): Array<[number, number]> | undefined => {
   const out: Array<[number, number]> = []
   const add = (u: unknown): boolean => {
-    if (typeof u === "string") {
+    if (Predicate.isString(u)) {
       for (const c of u) {
         const cp = firstCodePoint(c)
         out.push([cp, cp])
       }
       return true
     }
-    if (typeof u === "number") {
+    if (Predicate.isNumber(u)) {
       out.push([u, u])
       return true
     }
@@ -46,7 +47,7 @@ export const rangesOf = (set: unknown): Array<[number, number]> | undefined => {
       out.push([toCode(u.from), toCode(u.to)])
       return true
     }
-    if (typeof u === "function") {
+    if (Predicate.isFunction(u)) {
       const r = (u as any)[PredicateRanges] as ReadonlyArray<readonly [number, number]> | undefined
       if (r === undefined) return false
       for (const [a, b] of r) out.push([a, b])
@@ -94,7 +95,7 @@ export const reachesAbove = (s: CharSet, limit: number): boolean =>
 /** The input kind a `Text` encoding reads: 0 for strings, 1 for bytes. */
 export const kindOfEncoding = (enc: Encoding<any>): 0 | 1 => {
   let k = kinds.get(enc)
-  if (k === undefined) kinds.set(enc, (k = typeof enc.encode("") === "string" ? 0 : 1))
+  if (k === undefined) kinds.set(enc, (k = Predicate.isString(enc.encode("")) ? 0 : 1))
   return k
 }
 

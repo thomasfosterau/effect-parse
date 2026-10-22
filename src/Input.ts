@@ -13,6 +13,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import * as Context from "effect/Context"
 import type { Encoding } from "./Encoding.js"
 import type { ErrorKind } from "./ParseError.js"
@@ -72,7 +73,7 @@ export const fromSource: {
   (source: BinaryInput): Uint8Array
   <I extends Input>(source: Source<I>): I
 } = (source: Input | BinaryInput): any => {
-  if (typeof source === "string" || source instanceof Uint8Array || Array.isArray(source)) return source
+  if (Predicate.isString(source) || source instanceof Uint8Array || Array.isArray(source)) return source
   if (ArrayBuffer.isView(source)) return new Uint8Array(source.buffer, source.byteOffset, source.byteLength)
   // An explicit length fixes the view's size even for a resizable buffer
   if (isArrayBufferLike(source)) return new Uint8Array(source, 0, source.byteLength)
@@ -80,7 +81,7 @@ export const fromSource: {
 }
 
 const isArrayBufferLike = (u: unknown): u is ArrayBufferLike =>
-  u instanceof ArrayBuffer || (typeof SharedArrayBuffer !== "undefined" && u instanceof SharedArrayBuffer)
+  u instanceof ArrayBuffer || (globalThis.SharedArrayBuffer !== undefined && u instanceof SharedArrayBuffer)
 
 /**
  * The type of a single token of an input.
@@ -272,7 +273,7 @@ export class State<I extends Input = Input> {
     this.pos = options?.offset ?? 0
     this.partial = options?.partial ?? false
     this.context = options?.context ?? Context.empty()
-    this.inputKind = typeof input === "string" ? 0 : input instanceof Uint8Array ? 1 : 2
+    this.inputKind = Predicate.isString(input) ? 0 : input instanceof Uint8Array ? 1 : 2
     this.failure = initialFailure
   }
 

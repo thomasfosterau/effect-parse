@@ -26,6 +26,7 @@
  * the input it looked at, plus a margin for the tokens that read a little
  * past where they stop, is unchanged.
  */
+import * as Predicate from "effect/Predicate"
 import type * as Context from "effect/Context"
 import type { Encoding } from "../Encoding.js"
 import type { ErrMode, Input, Source } from "../Input.js"
@@ -412,7 +413,7 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
  * surrogate. Of bytes in an unknown encoding, up to four.
  */
 const tokenWidth = (input: Input, offset: number): number => {
-  if (typeof input === "string") {
+  if (Predicate.isString(input)) {
     const c = input.charCodeAt(offset)
     return c >= 0xd800 && c <= 0xdbff ? 2 : 1
   }

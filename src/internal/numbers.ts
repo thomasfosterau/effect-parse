@@ -2,16 +2,17 @@
  * Number conversions shared by the `Ascii` and `Text` parsers and the
  * compilers.
  */
+import * as Predicate from "effect/Predicate"
 import type { Input } from "../Input.js"
 import { Fail } from "../Input.js"
 import { latin1 } from "./text.js"
 
 const toText = (s: Input): string =>
-  typeof s === "string" ? s : s instanceof Uint8Array ? latin1.text(s, 0, s.length) : s.join("")
+  Predicate.isString(s) ? s : s instanceof Uint8Array ? latin1.text(s, 0, s.length) : s.join("")
 
 /** The value of the text matched by `Ascii.float` and `Text.float`. */
 export const toFloat = (s: Input): number => {
-  if (typeof s === "string") {
+  if (Predicate.isString(s)) {
     // Plain decimal notation (as opposed to `inf` or `nan`) ends in a digit or "."
     const last = s.charCodeAt(s.length - 1)
     if ((last >= 48 && last <= 57) || last === 46) return Number(s)

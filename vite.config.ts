@@ -112,6 +112,15 @@ export default defineConfig({
           // Plain Node build tooling (the dist guard): native loops, `.length`
           // and `Object.fromEntries` are the idiom.
           "effect/imperative-loops": "off",
+          // The dist guard is untyped JavaScript walking rolldown's ESTree
+          // JSON: `typeof` probes, `throw` / `try` around a dynamic import and
+          // `.sort()` on plain arrays are all it has.
+          "effect/no-runtime-typeof": "off",
+          "effect/prefer-effect-is": "off",
+          "effect/avoid-untagged-errors": "off",
+          "effect/avoid-try-catch": "off",
+          "effect/avoid-direct-json": "off",
+          "effect/prefer-arr-sort": "off",
           "effect/no-length-comparison": "off",
           "effect/prefer-arr-match": "off",
           "effect/avoid-native-object-helpers": "off",

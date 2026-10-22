@@ -36,6 +36,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import type { Encoding } from "./Encoding.js"
 import * as Encodings from "./Encoding.js"
 import type { Input, State } from "./Input.js"
@@ -63,7 +64,7 @@ import type { StringTokenSet } from "./Token.js"
  */
 export type CharPredicate = (char: string | number) => boolean
 
-const toCodePoint = (c: string | number): number => (typeof c === "number" ? c : (c.codePointAt(0) ?? -1))
+const toCodePoint = (c: string | number): number => (Predicate.isNumber(c) ? c : (c.codePointAt(0) ?? -1))
 
 const makePredicate = (name: string, re: RegExp): CharPredicate => {
   // Results for the Basic Multilingual Plane are cached: a table lookup is
@@ -354,7 +355,7 @@ export interface TextParsers<I extends string | Uint8Array> {
 
 const normalize = (r: Range | undefined): [number, number] => {
   if (r === undefined) return [0, Infinity]
-  if (typeof r === "number") return [r, r]
+  if (Predicate.isNumber(r)) return [r, r]
   return [r.min ?? 0, r.max ?? Infinity]
 }
 
@@ -463,7 +464,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
     const node: Node = { _tag: "Literal", literal: lit, caseless: false, encoding: enc }
     if (len === 1) {
       // Single unit literals (punctuation, mostly) are compared directly
-      const unit = typeof encoded === "string" ? encoded.charCodeAt(0) : encoded[0]
+      const unit = Predicate.isString(encoded) ? encoded.charCodeAt(0) : encoded[0]
       return P.described<L, never, never, I>(
         (state: State<any>) => {
           const pos = state.pos

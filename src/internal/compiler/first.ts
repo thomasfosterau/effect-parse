@@ -15,6 +15,7 @@
  * Skipping a parser that is certain to fail also skips the callbacks it
  * would have run before failing, which is why callbacks must be pure.
  */
+import * as Predicate from "effect/Predicate"
 import type { Encoding } from "../../Encoding.js"
 import type { Node, ParserLike } from "../node.js"
 import { nodeOf } from "../node.js"
@@ -111,11 +112,11 @@ export class FirstSets {
           if (node.caseless) return lit.length === 0 ? unknown : anyUnit
           const encoded = node.encoding.encode(lit as string)
           if (encoded.length === 0) return emptyOptional
-          return ofUnits([typeof encoded === "string" ? encoded.charCodeAt(0) : encoded[0]])
+          return ofUnits([Predicate.isString(encoded) ? encoded.charCodeAt(0) : encoded[0]])
         }
         if (lit.length === 0) return emptyOptional
         let first: number
-        if (typeof lit === "string") {
+        if (Predicate.isString(lit)) {
           first = kind === 0 ? lit.charCodeAt(0) : new TextEncoder().encode(lit)[0]
         } else if (lit instanceof Uint8Array && kind === 1) {
           first = lit[0]

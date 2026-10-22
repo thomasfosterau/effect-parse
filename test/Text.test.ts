@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 import { Effect, Option, Result, Stream } from "effect"
 import { describe, expect, it } from "vite-plus/test"
 import { Encoding, Parser, ParserStream, Text, Token } from "../src/index.js"
@@ -158,7 +159,7 @@ describe.each(sets)("Text.%s", (_, T, enc) => {
   it("partial input split inside a character is Incomplete", () => {
     const full = enc("é😀")
     // Cut each input in the middle of the emoji
-    const cut = typeof full === "string" ? full.slice(0, 2) : full.subarray(0, full.length - 1)
+    const cut = Predicate.isString(full) ? full.slice(0, 2) : full.subarray(0, full.length - 1)
     expect(partial(T.alpha0, cut)).toMatchObject({ _tag: "Incomplete" })
     expect(partial(Parser.seq(T.any, T.any), cut)).toMatchObject({ _tag: "Incomplete" })
     expect(
@@ -169,7 +170,7 @@ describe.each(sets)("Text.%s", (_, T, enc) => {
     ).toMatchObject({ _tag: "Incomplete" })
     expect(partial(T.literal("é😀"), cut)).toMatchObject({ _tag: "Incomplete" })
     // ...but the same truncated input in complete mode is malformed
-    fails(T.any.pipe(Parser.zipRight(T.any)), typeof full === "string" ? full.slice(0, 2) : "x")
+    fails(T.any.pipe(Parser.zipRight(T.any)), Predicate.isString(full) ? full.slice(0, 2) : "x")
     expect(partial(T.alpha1, enc("abc!"))).toEqual({ _tag: "Done", value: "abc", offset: enc("abc").length })
   })
 })

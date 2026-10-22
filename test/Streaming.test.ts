@@ -3,6 +3,7 @@
  * exactly the result of parsing the whole input at once, however it is
  * split, while parsing as the chunks arrive.
  */
+import * as Predicate from "effect/Predicate"
 import { Effect, Result, Stream } from "effect"
 import { describe, expect, it } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
@@ -65,7 +66,7 @@ const variants = <P extends Parser.Parser.Any>(p: P): ReadonlyArray<P> => {
 const same = <I extends string | Uint8Array>(p: Parser.Parser<any, any, never, I>, input: I, seed: number): void => {
   const expected = outcome(Parser.parse(p, input as never))
   const random = rng(seed)
-  const empty = typeof input === "string" ? "" : new Uint8Array(0)
+  const empty = Predicate.isString(input) ? "" : new Uint8Array(0)
   for (const max of [1, 3, 17, 4096]) {
     const chunks = split(input, random, max)
     for (const [i, v] of variants(p).entries()) {

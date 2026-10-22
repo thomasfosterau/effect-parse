@@ -17,6 +17,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import type { Input, Slice, State } from "./Input.js"
 import { Fail } from "./Input.js"
 import type { Parser } from "./Parser.js"
@@ -285,7 +286,7 @@ export const f64: (endian: Endianness) => Parser<number, never, never, Uint8Arra
   leF64
 )
 
-const toCount = (n: number | bigint): number => (typeof n === "bigint" ? Number(n) : n)
+const toCount = (n: number | bigint): number => (Predicate.isBigInt(n) ? Number(n) : n)
 
 /**
  * Parses a length with `count`, then takes that many tokens (winnow's

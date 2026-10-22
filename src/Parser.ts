@@ -29,6 +29,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
@@ -253,7 +254,7 @@ class ParserImpl<A, E, R, I extends Input> implements Parser<A, E, R, I> {
  * @category guards
  */
 export const isParser = (u: unknown): u is Parser<unknown, unknown, unknown, never> =>
-  typeof u === "object" && u !== null && TypeId in u
+  Predicate.isObjectOrArray(u) && TypeId in u
 
 const isParserArg = (args: IArguments) => isParser(args[0])
 const isTwoParserArgs = (args: IArguments) => isParser(args[0]) && isParser(args[1])
@@ -1858,10 +1859,9 @@ export const dispatch: {
   cases: ((key: any) => Parser.Any | undefined) | Record<PropertyKey, Parser.Any>,
   otherwise?: Parser.Any
 ) => {
-  const choose =
-    typeof cases === "function"
-      ? cases
-      : (key: PropertyKey) => (Object.prototype.hasOwnProperty.call(cases, key) ? cases[key] : otherwise)
+  const choose = Predicate.isFunction(cases)
+    ? cases
+    : (key: PropertyKey) => (Object.prototype.hasOwnProperty.call(cases, key) ? cases[key] : otherwise)
   const step = selector.step
   return described(
     (state: State<any>) => {
@@ -1879,8 +1879,8 @@ export const dispatch: {
     {
       _tag: "Dispatch",
       selector,
-      cases: typeof cases === "function" ? undefined : cases,
-      otherwise: typeof cases === "function" ? undefined : otherwise,
+      cases: Predicate.isFunction(cases) ? undefined : cases,
+      otherwise: Predicate.isFunction(cases) ? undefined : otherwise,
       choose
     }
   )
@@ -1939,7 +1939,7 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
 
 const normalizeRange = (range: Range | undefined): [min: number, max: number] => {
   if (range === undefined) return [0, Infinity]
-  if (typeof range === "number") return [range, range]
+  if (Predicate.isNumber(range)) return [range, range]
   const min = range.min ?? 0
   const max = range.max ?? Infinity
   if (min > max) throw new RangeError(`invalid range: min (${min}) > max (${max})`)
@@ -2651,7 +2651,7 @@ export const trace: {
 
 const preview = (state: State<any>, offset: number): string => {
   const input = state.input
-  if (typeof input === "string") {
+  if (Predicate.isString(input)) {
     const s = input.slice(offset, offset + 24)
     return JSON.stringify(s) + (offset + 24 < input.length ? "…" : "∅")
   }

@@ -46,6 +46,7 @@
  *
  * @since 0.2.0
  */
+import * as Predicate from "effect/Predicate"
 import type * as Context from "effect/Context"
 import { dual } from "effect/Function"
 import * as Option from "effect/Option"
@@ -132,7 +133,7 @@ export const token: {
 
 const defaultTokenKind = (self: Parser.Any): string => {
   const n = nodeOf(self)
-  if (n._tag === "Literal" && typeof n.literal === "string" && !n.caseless) return n.literal
+  if (n._tag === "Literal" && Predicate.isString(n.literal) && !n.caseless) return n.literal
   return self.name ?? "token"
 }
 
@@ -313,7 +314,7 @@ export class Tree<out A, out E = never, I extends Input = string> {
    */
   lineColumn(offset: number): ParseError.LineColumn {
     const input = this.input
-    if (typeof input !== "string") return ParseError.lineColumn(input, offset, this.encoding)
+    if (!Predicate.isString(input)) return ParseError.lineColumn(input, offset, this.encoding)
     let lines = this.lines
     if (lines === undefined) {
       lines = [0]
@@ -847,7 +848,7 @@ export const replace = <A, E>(
 export const diff = <I extends Input>(before: I, after: I): Edit | undefined => {
   const a = before as any
   const b = after as any
-  const at = typeof a === "string" ? (s: string, i: number) => s.charCodeAt(i) : (s: any, i: number) => s[i]
+  const at = Predicate.isString(a) ? (s: string, i: number) => s.charCodeAt(i) : (s: any, i: number) => s[i]
   const max = Math.min(a.length, b.length)
   let prefix = 0
   while (prefix < max && at(a, prefix) === at(b, prefix)) prefix++

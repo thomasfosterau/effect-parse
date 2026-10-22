@@ -19,6 +19,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import * as Data from "effect/Data"
 import * as Option from "effect/Option"
 import type { Encoding } from "./Encoding.js"
@@ -143,7 +144,7 @@ export class ParseError<out E = never>
  * @since 0.1.0
  * @category guards
  */
-export const isParseError = (u: unknown): u is ParseError<unknown> => typeof u === "object" && u !== null && TypeId in u
+export const isParseError = (u: unknown): u is ParseError<unknown> => Predicate.isObjectOrArray(u) && TypeId in u
 
 /**
  * Builds a `ParseError` from the failure details recorded while parsing.
@@ -212,7 +213,7 @@ export const lineColumn = (input: Input, offset: number, encoding?: Encoding<any
     })
     return { line, column }
   }
-  if (typeof input !== "string") return { line: 1, column: offset + 1 }
+  if (!Predicate.isString(input)) return { line: 1, column: offset + 1 }
   let line = 1
   let lineStart = 0
   for (let i = 0; i < offset && i < input.length; i++) {
@@ -262,7 +263,7 @@ const describeFound = (input: Input, offset: number, encoding: Encoding<any> | u
       ? `incomplete ${encoding.name} sequence ${hexBytes(input.subarray(offset))}`
       : `invalid ${encoding.name} ${hexBytes(bad)}`
   }
-  if (typeof input === "string") {
+  if (Predicate.isString(input)) {
     const cp = input.codePointAt(offset) ?? Number.NaN
     return JSON.stringify(String.fromCodePoint(cp))
   }
@@ -274,8 +275,8 @@ const describeFound = (input: Input, offset: number, encoding: Encoding<any> | u
 
 /** @internal */
 export const inspectToken = (u: unknown): string => {
-  if (typeof u === "string") return JSON.stringify(u)
-  if (typeof u === "object" && u !== null) {
+  if (Predicate.isString(u)) return JSON.stringify(u)
+  if (Predicate.isObjectOrArray(u)) {
     try {
       return JSON.stringify(u)
     } catch {
@@ -287,9 +288,9 @@ export const inspectToken = (u: unknown): string => {
 
 const causeMessage = (cause: unknown): string | undefined => {
   if (cause === undefined) return undefined
-  if (typeof cause === "string") return cause
+  if (Predicate.isString(cause)) return cause
   if (cause instanceof Error) return cause.message
-  if (typeof cause === "object" && cause !== null && "message" in cause && typeof cause.message === "string") {
+  if (Predicate.isObjectOrArray(cause) && "message" in cause && Predicate.isString(cause.message)) {
     return cause.message
   }
   return inspectToken(cause)
@@ -321,7 +322,7 @@ const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | u
     const pad = " ".repeat(gutter.length)
     return [`${gutter} | ${line}`, `${pad} | ${" ".repeat(column - 1)}^`]
   }
-  if (typeof input === "string") {
+  if (Predicate.isString(input)) {
     const { column, line } = lineColumn(input, offset)
     let start = offset
     while (start > 0 && input.charCodeAt(start - 1) !== 10) start--
@@ -347,7 +348,7 @@ const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | u
 const render = (error: ParseError<unknown>): string => {
   const { encoding, input, offset } = error
   const lines: Array<string> = []
-  if (typeof input === "string") {
+  if (Predicate.isString(input)) {
     const { column, line } = lineColumn(input, offset)
     lines.push(`Parse error at line ${line}, column ${column}:`)
   } else if (encoding !== undefined) {

@@ -20,6 +20,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import type { Input, Slice, State, Token } from "./Input.js"
 import {
   advance,
@@ -248,7 +249,7 @@ export const literalImpl = (lit: Input, caseless: boolean): Parser<any, never, n
   const expected = [caseless ? `${description} (case insensitive)` : description]
   // A string literal may also be matched against byte input (as UTF-8)
   let asBytes: Uint8Array | undefined
-  const literalKind = typeof lit === "string" ? 0 : lit instanceof Uint8Array ? 1 : 2
+  const literalKind = Predicate.isString(lit) ? 0 : lit instanceof Uint8Array ? 1 : 2
   return described(
     (state: State<Input>) => {
       const pos = state.pos
@@ -348,7 +349,7 @@ export const take = <I extends Input = string>(count: number): Parser<Slice<NoIn
 
 const normalize = (r: Range | undefined): [number, number] => {
   if (r === undefined) return [0, Infinity]
-  if (typeof r === "number") return [r, r]
+  if (Predicate.isNumber(r)) return [r, r]
   return [r.min ?? 0, r.max ?? Infinity]
 }
 
@@ -442,7 +443,7 @@ export const takeUntil: {
         return state.backtrack("TakeUntil", expected, state.end)
       }
       // The literal was read but is not consumed (a string literal is up to three bytes per unit of UTF-8)
-      state.syntax?.read(idx + lit.length * (typeof lit === "string" && state.inputKind === 1 ? 3 : 1))
+      state.syntax?.read(idx + lit.length * (Predicate.isString(lit) && state.inputKind === 1 ? 3 : 1))
       // As in winnow, the first occurrence must lie within the range
       if (min > 0 || max !== Infinity) {
         const count = countTokens(state, start, idx)

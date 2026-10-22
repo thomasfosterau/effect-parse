@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 import { Effect, Option, Result, Stream } from "effect"
 import type { ParseError } from "../src/index.js"
 import { describe, expect, it } from "vite-plus/test"
@@ -74,7 +75,7 @@ describe("takeUntil stops at State.end (#30)", () => {
       const saved = state.end
       state.end = state.pos + n
       const a = p.step(state)
-      const out = { result: typeof a === "symbol" ? "Fail" : a, pos: state.pos }
+      const out = { result: Predicate.isSymbol(a) ? "Fail" : a, pos: state.pos }
       state.end = saved
       return out
     })

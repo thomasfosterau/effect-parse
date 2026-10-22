@@ -2,6 +2,7 @@
  * The shapes of `map(p, Object.fromEntries)` that the compilers build
  * directly (see `internal/entries.ts`).
  */
+import * as Predicate from "effect/Predicate"
 import type { Node, NodeOf, ParserLike } from "../node.js"
 import { nodeOf } from "../node.js"
 
@@ -19,7 +20,7 @@ export const pairOf = (p: ParserLike): EntryPair | undefined => {
   if (node._tag !== "Seq") return undefined
   const output = node.output
   if (output === "tuple") return node.parsers.length === 2 ? { parsers: node.parsers, key: 0, value: 1 } : undefined
-  if (typeof output === "number" || output[0] === output[1]) return undefined
+  if (Predicate.isNumber(output) || output[0] === output[1]) return undefined
   return { parsers: node.parsers, key: output[0], value: output[1] }
 }
 
@@ -43,6 +44,6 @@ const isDiagnostic = (
 export const entriesShape = (p: ParserLike): boolean => {
   const node = nodeOf(p)
   if (isDiagnostic(node) || node._tag === "Mode") return entriesShape(node.self)
-  if (node._tag === "Seq") return typeof node.output === "number" && entriesShape(node.parsers[node.output])
+  if (node._tag === "Seq") return Predicate.isNumber(node.output) && entriesShape(node.parsers[node.output])
   return (node._tag === "Repeat" || node._tag === "Separated") && pairOf(node.self) !== undefined
 }

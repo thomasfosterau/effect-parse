@@ -7,6 +7,7 @@
  * Policy. Parsers that can't be compiled run their own (interpreted) steps
  * on the same state.
  */
+import * as Predicate from "effect/Predicate"
 import type { Encoding } from "../../Encoding.js"
 import type { ErrMode, State } from "../../Input.js"
 import { Fail } from "../../Input.js"
@@ -425,7 +426,7 @@ class Compiler {
   seq(node: NodeOf<"Seq">, used: boolean): Step {
     const output = node.output
     const keep = (i: number) =>
-      used && (output === "tuple" || output === i || (typeof output === "object" && output.includes(i)))
+      used && (output === "tuple" || output === i || (Array.isArray(output) && output.includes(i)))
     const steps = node.parsers.map((q, i) => this.compile(q, keep(i)))
     const n = steps.length
     if (!used) return this.chain(steps)
@@ -440,7 +441,7 @@ class Compiler {
         return out
       }
     }
-    if (typeof output === "number") {
+    if (Predicate.isNumber(output)) {
       if (n === 2) {
         const [a, b] = steps as [Step, Step]
         return output === 0
@@ -1075,7 +1076,7 @@ class Compiler {
 
   tokenLiteral(p: ParserLike, node: NodeOf<"Literal">): Step {
     const lit = node.literal
-    const literalKind = typeof lit === "string" ? 0 : lit instanceof Uint8Array ? 1 : 2
+    const literalKind = Predicate.isString(lit) ? 0 : lit instanceof Uint8Array ? 1 : 2
     if (this.kind === 0) {
       if (literalKind !== 0) return this.fallback(p, node, "byte or array literal on string input")
       const str = lit as string
@@ -1220,7 +1221,7 @@ class Compiler {
           }
         }
         const encoded = enc.encode(lit)
-        if (typeof encoded === "string") return stringLiteral(encoded, lit)
+        if (Predicate.isString(encoded)) return stringLiteral(encoded, lit)
         const bytes = encoded as Uint8Array
         const len = bytes.length
         if (len === 1) {

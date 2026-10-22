@@ -14,6 +14,7 @@
  * the interpreter for what they can't compile) on the shared state, with
  * `state.pos` kept in sync.
  */
+import * as Predicate from "effect/Predicate"
 import * as Option from "effect/Option"
 import type { Encoding } from "../../Encoding.js"
 import type { State } from "../../Input.js"
@@ -255,9 +256,9 @@ class Emitter {
   /** A JavaScript literal for simple values, otherwise a constant. */
   lit(value: unknown): string {
     if (value === undefined) return "void 0"
-    if (value === null || typeof value === "boolean") return String(value)
-    if (typeof value === "number" && Number.isFinite(value) && !Object.is(value, -0)) return String(value)
-    if (typeof value === "string" && value.length < 64) return JSON.stringify(value)
+    if (value === null || Predicate.isBoolean(value)) return String(value)
+    if (Predicate.isNumber(value) && Number.isFinite(value) && !Object.is(value, -0)) return String(value)
+    if (Predicate.isString(value) && value.length < 64) return JSON.stringify(value)
     return this.const(value)
   }
 
@@ -597,7 +598,7 @@ class Emitter {
   seq(node: NodeOf<"Seq">, used: boolean, out: string | null, fail: string, fn: Fn, d: number): string {
     const output = node.output
     if (out === null || !used) return node.parsers.map((q) => this.gen(q, false, null, fail, fn, d)).join("")
-    if (typeof output === "number") {
+    if (Predicate.isNumber(output)) {
       return node.parsers.map((q, i) => this.gen(q, i === output, i === output ? out : null, fail, fn, d)).join("")
     }
     const keep = (i: number) => output === "tuple" || output.includes(i)
@@ -978,11 +979,11 @@ class Emitter {
           if (node.caseless) return undefined
           const encoded = enc.encode(lit as string)
           return (
-            this.literalUnits(typeof encoded === "string" ? unitsOf(encoded) : Array.from(encoded), false, fail) +
+            this.literalUnits(Predicate.isString(encoded) ? unitsOf(encoded) : Array.from(encoded), false, fail) +
             set(this.lit(lit))
           )
         }
-        const literalKind = typeof lit === "string" ? 0 : lit instanceof Uint8Array ? 1 : 2
+        const literalKind = Predicate.isString(lit) ? 0 : lit instanceof Uint8Array ? 1 : 2
         if (kind === 0 && literalKind !== 0) return undefined
         if (literalKind === 2) return undefined
         const codes =

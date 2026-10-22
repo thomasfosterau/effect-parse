@@ -6,6 +6,7 @@
  * child's own step is always at hand for fallback, and recursion through
  * `Suspend` is just a reference.
  */
+import * as Predicate from "effect/Predicate"
 import type { Encoding } from "../Encoding.js"
 import type { ErrMode, Input, State } from "../Input.js"
 
@@ -155,7 +156,7 @@ export const bounds = (
   range: number | { readonly min?: number | undefined; readonly max?: number | undefined } | undefined
 ): Bounds => {
   if (range === undefined) return { min: 0, max: Infinity }
-  if (typeof range === "number") return { min: range, max: range }
+  if (Predicate.isNumber(range)) return { min: range, max: range }
   return { min: range.min ?? 0, max: range.max ?? Infinity }
 }
 

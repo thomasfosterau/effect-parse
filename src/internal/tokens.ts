@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 import type { Input, State } from "../Input.js"
 import { charOf, firstCodePoint } from "./text.js"
 
@@ -18,21 +19,20 @@ export interface TokenRangeLike {
   readonly to: string | number
 }
 
-const isRange = (u: unknown): u is TokenRangeLike =>
-  typeof u === "object" && u !== null && (u as any)._tag === "TokenRange"
+const isRange = (u: unknown): u is TokenRangeLike => Predicate.isObjectOrArray(u) && (u as any)._tag === "TokenRange"
 
-const toCode = (u: string | number): number => (typeof u === "number" ? u : firstCodePoint(u))
+const toCode = (u: string | number): number => (Predicate.isNumber(u) ? u : firstCodePoint(u))
 
 /** @internal */
 export const describeChar = (s: string): string => JSON.stringify(s)
 
 const describeSet = (u: unknown): string => {
-  if (typeof u === "string") {
+  if (Predicate.isString(u)) {
     const chars = Array.from(u)
     return chars.length === 1 ? describeChar(u) : `one of ${JSON.stringify(u)}`
   }
-  if (typeof u === "number") return `0x${u.toString(16).padStart(2, "0")}`
-  if (typeof u === "function") return u.name ? u.name : "a matching token"
+  if (Predicate.isNumber(u)) return `0x${u.toString(16).padStart(2, "0")}`
+  if (Predicate.isFunction(u)) return u.name ? u.name : "a matching token"
   if (u instanceof Uint8Array) return `one of ${describeBytes(u)}`
   if (isRange(u)) return `${describeSet(u.from)}..=${describeSet(u.to)}`
   if (Array.isArray(u)) return u.map(describeSet).join(" or ")
@@ -55,7 +55,7 @@ export const describeBytes = (bytes: Uint8Array): string => {
 }
 
 const compileCode = (u: unknown): ((code: number) => boolean) => {
-  if (typeof u === "string") {
+  if (Predicate.isString(u)) {
     const codes = Array.from(u, firstCodePoint)
     if (codes.length === 1) {
       const c = codes[0]
@@ -63,8 +63,8 @@ const compileCode = (u: unknown): ((code: number) => boolean) => {
     }
     return bitmap(codes)
   }
-  if (typeof u === "number") return (x) => x === u
-  if (typeof u === "function") return u as (code: number) => boolean
+  if (Predicate.isNumber(u)) return (x) => x === u
+  if (Predicate.isFunction(u)) return u as (code: number) => boolean
   if (u instanceof Uint8Array) return bitmap(Array.from(u))
   if (isRange(u)) {
     const from = toCode(u.from)
@@ -95,7 +95,7 @@ const bitmap = (codes: ReadonlyArray<number>): ((code: number) => boolean) => {
 }
 
 const compileToken = (u: unknown): ((token: unknown) => boolean) => {
-  if (typeof u === "function") return u as (token: unknown) => boolean
+  if (Predicate.isFunction(u)) return u as (token: unknown) => boolean
   if (Array.isArray(u)) {
     const set = new Set(u)
     return (t) => set.has(t)
@@ -140,7 +140,7 @@ export const codePointPredicate = <F extends (c: never) => boolean>(
 export const compile = (set: unknown, kind: "string" | "code" = "code"): Matcher => {
   const description = describeSet(set)
   let code: (code: number) => boolean
-  if (typeof set === "function" && kind === "string" && !(CodePointPredicate in set)) {
+  if (Predicate.isFunction(set) && kind === "string" && !(CodePointPredicate in set)) {
     const pred = set as (c: string) => boolean
     code = (x) => pred(charOf(x))
   } else {
@@ -196,7 +196,7 @@ const literalDescriptions = /*#__PURE__*/ new Map<string, string>()
 
 /** Describes a literal for error messages: `"abc"`, `b"abc"` or `["a", 1]`. */
 export const describeLiteral = (lit: Input): string =>
-  typeof lit === "string"
+  Predicate.isString(lit)
     ? cached(literalDescriptions, lit, describeChar)
     : lit instanceof Uint8Array
       ? describeBytes(lit)
@@ -206,11 +206,11 @@ const stringMatchers = /*#__PURE__*/ new Map<string, AnyMatcher>()
 
 export const compileAny = (set: unknown): AnyMatcher =>
   // Matchers for strings are pure functions of the string, so they're shared
-  typeof set === "string" ? cached(stringMatchers, set, compileAnyImpl) : compileAnyImpl(set)
+  Predicate.isString(set) ? cached(stringMatchers, set, compileAnyImpl) : compileAnyImpl(set)
 
 const compileAnyImpl = (set: unknown): AnyMatcher => {
   const forCode = compile(set, "code")
-  const needsString = typeof set === "function" || Array.isArray(set)
+  const needsString = Predicate.isFunction(set) || Array.isArray(set)
   return {
     forString: needsString ? compile(set, "string") : forCode,
     forCode,

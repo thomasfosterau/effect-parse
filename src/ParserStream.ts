@@ -23,6 +23,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import type * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -45,7 +46,7 @@ import type { Parser } from "./Parser.js"
 export type Chunkable = string | Uint8Array | ReadonlyArray<unknown>
 
 const concat = <I extends Chunkable>(a: I, b: I): I => {
-  if (typeof a === "string") return (a + (b as string)) as I
+  if (Predicate.isString(a)) return (a + (b as string)) as I
   if (a instanceof Uint8Array) {
     if (a.length === 0) return b
     const out = new Uint8Array(a.length + (b as Uint8Array).length)
@@ -57,7 +58,7 @@ const concat = <I extends Chunkable>(a: I, b: I): I => {
 }
 
 const sliceFrom = <I extends Chunkable>(input: I, offset: number): I =>
-  (typeof input === "string" ? input.slice(offset) : input.slice(offset)) as I
+  (Predicate.isString(input) ? input.slice(offset) : input.slice(offset)) as I
 
 const noProgress = (input: Input, offset: number) =>
   ParseError.fromFailure<never>(
@@ -177,7 +178,7 @@ class Incremental<A, E, I extends Chunkable> {
   }
 
   private append(chunk: I): void {
-    if (typeof chunk === "string") {
+    if (Predicate.isString(chunk)) {
       this.kind ??= 0
       this.text += chunk
       this.length += chunk.length

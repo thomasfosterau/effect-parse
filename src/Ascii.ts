@@ -21,6 +21,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import type { Encoding } from "./Encoding.js"
 import type { Input, Slice, State } from "./Input.js"
@@ -39,7 +40,7 @@ import * as Token from "./Token.js"
 // Character predicates
 // -----------------------------------------------------------------------------
 
-const code = (c: string | number): number => (typeof c === "number" ? c : c.charCodeAt(0))
+const code = (c: string | number): number => (Predicate.isNumber(c) ? c : c.charCodeAt(0))
 
 /**
  * `[a-zA-Z]`
@@ -386,7 +387,7 @@ export const tillLineEnding: Parser<string> = /*#__PURE__*/ P.described<string>(
 // -----------------------------------------------------------------------------
 
 const toText = (s: Input): string =>
-  typeof s === "string" ? s : s instanceof Uint8Array ? latin1.text(s, 0, s.length) : s.join("")
+  Predicate.isString(s) ? s : s instanceof Uint8Array ? latin1.text(s, 0, s.length) : s.join("")
 
 /** @internal */
 export const overflow = (value: number): Result.Result<number, string> =>
@@ -517,7 +518,7 @@ export const caseless: {
 // Escapes
 // -----------------------------------------------------------------------------
 
-const controlCode = (c: string | number): number => (typeof c === "number" ? c : c.charCodeAt(0))
+const controlCode = (c: string | number): number => (Predicate.isNumber(c) ? c : c.charCodeAt(0))
 
 const atControl = (state: State<Input>, control: number): boolean => {
   if (state.pos >= state.end) return false
