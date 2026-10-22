@@ -27,7 +27,7 @@ const doc = JSON.stringify(
 )
 
 const tree = Syntax.parse(json, doc)
-const middle = doc.indexOf("\"item 1000\"") + 6
+const middle = doc.indexOf('"item 1000"') + 6
 const keystrokes = "hello world"
 
 const time = (run: () => unknown, rounds: number): number => {
@@ -47,11 +47,14 @@ const cases: ReadonlyArray<readonly [string, () => unknown]> = [
   ["reparse: insert a character", () => Syntax.replace(tree, middle, middle, "X")],
   ["reparse: delete a character", () => Syntax.replace(tree, middle, middle + 1, "")],
   ["reparse: edit found by diff", () => Syntax.reparse(tree, doc.slice(0, middle) + "X" + doc.slice(middle + 1))],
-  [`reparse: ${keystrokes.length} keystrokes, each`, () => {
-    let t = tree
-    for (let i = 0; i < keystrokes.length; i++) t = Syntax.replace(t, middle + i, middle + i, keystrokes[i]!)
-    return t
-  }]
+  [
+    `reparse: ${keystrokes.length} keystrokes, each`,
+    () => {
+      let t = tree
+      for (let i = 0; i < keystrokes.length; i++) t = Syntax.replace(t, middle + i, middle + i, keystrokes[i])
+      return t
+    }
+  ]
 ]
 
 // Every reparse must give the tree a fresh parse does

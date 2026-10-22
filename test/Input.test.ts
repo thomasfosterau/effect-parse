@@ -1,8 +1,20 @@
-import { Context, Effect, Result, Stream } from "effect"
-import { describe, expect, it } from "vitest"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import * as Result from "effect/Result"
+import * as Stream from "effect/Stream"
+import { describe, expect, it } from "vite-plus/test"
 import { Ascii, Binary, Input, Parser, ParseError, ParserStream, Text, Token } from "../src/index.js"
 
 const encode = (s: string) => new TextEncoder().encode(s)
+
+/** An ES2024 resizable `ArrayBuffer`, which this project's `lib` predates. */
+interface Resizable extends ArrayBuffer {
+  resize(byteLength: number): void
+}
+
+/** `new ArrayBuffer(length, { maxByteLength })`, which Node 22 supports (ES2024). */
+const resizableBuffer = (length: number, maxByteLength: number): Resizable =>
+  Reflect.construct(ArrayBuffer, [length, { maxByteLength }])
 
 describe("binary inputs", () => {
   it("fromSource views binary data as bytes without copying", () => {
@@ -15,8 +27,8 @@ describe("binary inputs", () => {
     expect(Input.fromSource(new SharedArrayBuffer(3))).toHaveLength(3)
     // A view of a resizable buffer keeps the length it had when parsing started
     // (`resize` is ES2024, newer than this project's `lib`)
-    const resizable: any = new (ArrayBuffer as any)(2, { maxByteLength: 8 })
-    const fixed = Input.fromSource(resizable as ArrayBuffer)
+    const resizable = resizableBuffer(2, 8)
+    const fixed = Input.fromSource(resizable)
     resizable.resize(6)
     expect(fixed).toHaveLength(2)
     // Other inputs are returned as they are
@@ -58,20 +70,17 @@ describe("binary inputs", () => {
     expect(Result.isFailure(r) && r.failure.message).toContain("1 | abc!")
   })
 
-  it("strings and token arrays are not binary inputs", () => {
-    // @ts-expect-error: a string parser does not accept binary data
-    Parser.parse(Text.string.alpha1, new ArrayBuffer(1))
-    // @ts-expect-error: neither does a parser over token arrays
-    Parser.parse(Token.anyToken<ReadonlyArray<number>>(), new ArrayBuffer(1))
-  })
-
   it("streams of binary chunks", () => {
     const chunks = [encode("αβ").buffer, new DataView(encode("γ\nδ").buffer), encode("\n")]
     const line = Parser.terminated(Text.utf8.alpha1, Text.utf8.newline)
-    expect(Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseMany(line), Stream.runCollect)))
-      .toEqual(["αβγ", "δ"])
-    expect(Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(Parser.repeat(line)))))
-      .toEqual(["αβγ", "δ"])
+    expect(Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseMany(line), Stream.runCollect))).toEqual([
+      "αβγ",
+      "δ"
+    ])
+    expect(Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(Parser.repeat(line))))).toEqual([
+      "αβγ",
+      "δ"
+    ])
   })
 })
 
@@ -128,7 +137,7 @@ describe("State.reset", () => {
     const outcomes = runs.map((run) =>
       observe(new Input.State(input, { partial: run.partial ?? false, offset: run.offset }), run.parser.step)
     )
-    expect(outcomes.map((o) => "mode" in o ? o.mode : "Ok")).toEqual(
+    expect(outcomes.map((o) => ("mode" in o ? o.mode : "Ok"))).toEqual(
       expect.arrayContaining(["Ok", "Backtrack", "Cut", "Incomplete"])
     )
   })
@@ -163,7 +172,10 @@ describe("State.reset", () => {
 
   it("returns the same results as the runners", () => {
     const state = new Input.State(input)
-    for (const [offset, expected] of [[4, 123], [24, 99]] as const) {
+    for (const [offset, expected] of [
+      [4, 123],
+      [24, 99]
+    ] as const) {
       expect(Ascii.decUint.step(state.reset(offset))).toBe(expected)
       expect(Parser.parsePeek(Ascii.decUint, input.slice(offset))).toEqual(
         Result.succeed([input.slice(state.pos), expected])

@@ -15,7 +15,7 @@ export const mutations = (doc: string, alphabet: string, count: number, seed: nu
   const out: Array<string> = []
   for (let i = 0; i < count; i++) {
     const at = Math.floor(random() * (doc.length + 1))
-    const c = chars[Math.floor(random() * chars.length)]!
+    const c = chars[Math.floor(random() * chars.length)]
     switch (i % 4) {
       case 0:
         out.push(doc.slice(0, at) + doc.slice(at + 1))
@@ -45,7 +45,7 @@ export const allStrings = (alphabet: ReadonlyArray<string>, max: number): Array<
 }
 
 export const randomJson = (random: () => number, depth = 0): string => {
-  const ws = () => [" ", "", "\n  ", "\t", ""][Math.floor(random() * 5)]!
+  const ws = () => [" ", "", "\n  ", "\t", ""][Math.floor(random() * 5)]
   const pick = random()
   if (depth > 3 || pick < 0.45) {
     const atoms = [
@@ -56,15 +56,18 @@ export const randomJson = (random: () => number, depth = 0): string => {
       () => "true",
       () => "false",
       () => "null",
-      () => JSON.stringify(["abc", "é", "😀 x", "\"q\"", "\\", "\n\t", "\u0001", ""][Math.floor(random() * 8)]),
-      () => "\"\\u00e9\\ud83d\\ude00\\/\\b\""
+      () => JSON.stringify(["abc", "é", "😀 x", '"q"', "\\", "\n\t", "\u0001", ""][Math.floor(random() * 8)]),
+      () => '"\\u00e9\\ud83d\\ude00\\/\\b"'
     ]
-    return atoms[Math.floor(random() * atoms.length)]!()
+    return atoms[Math.floor(random() * atoms.length)]()
   }
   const n = Math.floor(random() * 4)
   if (pick < 0.75) {
     return `[${ws()}${Array.from({ length: n }, () => randomJson(random, depth + 1)).join(`${ws()},${ws()}`)}${ws()}]`
   }
-  const members = Array.from({ length: n }, (_, i) => `${JSON.stringify(`k${i}é`)}${ws()}:${ws()}${randomJson(random, depth + 1)}`)
+  const members = Array.from(
+    { length: n },
+    (_, i) => `${JSON.stringify(`k${i}é`)}${ws()}:${ws()}${randomJson(random, depth + 1)}`
+  )
   return `{${ws()}${members.join(`${ws()},${ws()}`)}${ws()}}`
 }

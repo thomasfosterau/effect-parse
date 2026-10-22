@@ -23,6 +23,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import type * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -45,7 +46,7 @@ import type { Parser } from "./Parser.js"
 export type Chunkable = string | Uint8Array | ReadonlyArray<unknown>
 
 const concat = <I extends Chunkable>(a: I, b: I): I => {
-  if (typeof a === "string") return (a + (b as string)) as I
+  if (Predicate.isString(a)) return (a + (b as string)) as I
   if (a instanceof Uint8Array) {
     if (a.length === 0) return b
     const out = new Uint8Array(a.length + (b as Uint8Array).length)
@@ -57,7 +58,7 @@ const concat = <I extends Chunkable>(a: I, b: I): I => {
 }
 
 const sliceFrom = <I extends Chunkable>(input: I, offset: number): I =>
-  (typeof input === "string" ? input.slice(offset) : input.slice(offset)) as I
+  (Predicate.isString(input) ? input.slice(offset) : input.slice(offset)) as I
 
 const noProgress = (input: Input, offset: number) =>
   ParseError.fromFailure<never>(
@@ -98,54 +99,55 @@ export const parseMany: {
     parser: Parser<A, E, R, I>,
     options?: ParseManyOptions<I>
   ): Stream.Stream<A, E0 | ParseError.ParseError<E>, R0 | R>
-} = /*#__PURE__*/ dual((args) => Stream.isStream(args[0]), <I extends Chunkable, E0, R0, A, E, R>(
-  self: Stream.Stream<Source<I>, E0, R0>,
-  parser: Parser<A, E, R, I>,
-  options?: ParseManyOptions<I>
-): Stream.Stream<A, E0 | ParseError.ParseError<E>, R0 | R> =>
-  Stream.suspend(() => {
-    const step = parser.step
-    let buffer: I | undefined = options?.empty === undefined ? undefined : fromSource<I>(options.empty)
+} = /*#__PURE__*/ dual(
+  (args) => Stream.isStream(args[0]),
+  <I extends Chunkable, E0, R0, A, E, R>(
+    self: Stream.Stream<Source<I>, E0, R0>,
+    parser: Parser<A, E, R, I>,
+    options?: ParseManyOptions<I>
+  ): Stream.Stream<A, E0 | ParseError.ParseError<E>, R0 | R> =>
+    Stream.suspend(() => {
+      const step = parser.step
+      let buffer: I | undefined = options?.empty === undefined ? undefined : fromSource<I>(options.empty)
 
-    const drain = (
-      context: any,
-      partial: boolean
-    ): Effect.Effect<Array<A>, ParseError.ParseError<E>> => {
-      const out: Array<A> = []
-      if (buffer === undefined) return Effect.succeed(out)
-      const input = buffer
-      let offset = 0
-      while (offset < input.length) {
-        const state = new State(input, { partial, context, offset })
-        const a = Stack.run(step, state)
-        if (a === Fail) {
-          if (partial && state.mode === "Incomplete") break
-          return Effect.fail(ParseError.fromFailure<E>(input, state.reportedFailure(), state.mode, state.encoding))
+      const drain = (context: any, partial: boolean): Effect.Effect<Array<A>, ParseError.ParseError<E>> => {
+        const out: Array<A> = []
+        if (buffer === undefined) return Effect.succeed(out)
+        const input = buffer
+        let offset = 0
+        while (offset < input.length) {
+          const state = new State(input, { partial, context, offset })
+          const a = Stack.run(step, state)
+          if (a === Fail) {
+            if (partial && state.mode === "Incomplete") break
+            return Effect.fail(ParseError.fromFailure<E>(input, state.reportedFailure(), state.mode, state.encoding))
+          }
+          if (state.pos === offset) return Effect.fail(noProgress(input, offset))
+          out.push(a)
+          offset = state.pos
         }
-        if (state.pos === offset) return Effect.fail(noProgress(input, offset))
-        out.push(a)
-        offset = state.pos
+        buffer = sliceFrom(input, offset)
+        return Effect.succeed(out)
       }
-      buffer = sliceFrom(input, offset)
-      return Effect.succeed(out)
-    }
 
-    const feed = (source: Source<I>) =>
-      Effect.flatMap(Effect.context<R>(), (context) =>
-        Effect.suspend(() => {
-          const chunk = fromSource<I>(source)
-          buffer = buffer === undefined ? chunk : concat(buffer, chunk)
-          return drain(context, true)
-        }))
+      const feed = (source: Source<I>) =>
+        Effect.flatMap(Effect.context<R>(), (context) =>
+          Effect.suspend(() => {
+            const chunk = fromSource<I>(source)
+            buffer = buffer === undefined ? chunk : concat(buffer, chunk)
+            return drain(context, true)
+          })
+        )
 
-    const finish = Effect.flatMap(Effect.context<R>(), (context) => Effect.suspend(() => drain(context, false)))
+      const finish = Effect.flatMap(Effect.context<R>(), (context) => Effect.suspend(() => drain(context, false)))
 
-    return self.pipe(
-      Stream.mapEffect(feed),
-      Stream.flattenIterable,
-      Stream.concat(Stream.unwrap(Effect.map(finish, Stream.fromIterable)))
-    )
-  }))
+      return self.pipe(
+        Stream.mapEffect(feed),
+        Stream.flattenIterable,
+        Stream.concat(Stream.unwrap(Effect.map(finish, Stream.fromIterable)))
+      )
+    })
+)
 
 /**
  * Parses a stream of chunks incrementally, as one input. Chunks are parsed
@@ -176,7 +178,7 @@ class Incremental<A, E, I extends Chunkable> {
   }
 
   private append(chunk: I): void {
-    if (typeof chunk === "string") {
+    if (Predicate.isString(chunk)) {
       this.kind ??= 0
       this.text += chunk
       this.length += chunk.length
@@ -297,20 +299,24 @@ export const parseAll: {
     parser: Parser<A, E, R, I>,
     options?: ParseManyOptions<I>
   ): Effect.Effect<A, E0 | ParseError.ParseError<E>, R0 | R>
-} = /*#__PURE__*/ dual((args) => Stream.isStream(args[0]), <I extends Chunkable, E0, R0, A, E, R>(
-  self: Stream.Stream<Source<I>, E0, R0>,
-  parser: Parser<A, E, R, I>,
-  options?: ParseManyOptions<I>
-): Effect.Effect<A, E0 | ParseError.ParseError<E>, R0 | R> =>
-  Effect.flatMap(Effect.context<R>(), (context) =>
-    Effect.suspend(() => {
-      const empty = options?.empty === undefined ? undefined : fromSource<I>(options.empty)
-      const incremental = new Incremental(parser, context as Context.Context<never>, empty)
-      return Effect.flatMap(
-        Stream.runForEach(self, (chunk) => Effect.sync(() => incremental.push(fromSource<I>(chunk)))),
-        () => Effect.suspend(() => incremental.finish())
-      )
-    })))
+} = /*#__PURE__*/ dual(
+  (args) => Stream.isStream(args[0]),
+  <I extends Chunkable, E0, R0, A, E, R>(
+    self: Stream.Stream<Source<I>, E0, R0>,
+    parser: Parser<A, E, R, I>,
+    options?: ParseManyOptions<I>
+  ): Effect.Effect<A, E0 | ParseError.ParseError<E>, R0 | R> =>
+    Effect.flatMap(Effect.context<R>(), (context) =>
+      Effect.suspend(() => {
+        const empty = options?.empty === undefined ? undefined : fromSource<I>(options.empty)
+        const incremental = new Incremental(parser, context as Context.Context<never>, empty)
+        return Effect.flatMap(
+          Stream.runForEach(self, (chunk) => Effect.sync(() => incremental.push(fromSource<I>(chunk)))),
+          () => Effect.suspend(() => incremental.finish())
+        )
+      })
+    )
+)
 
 /**
  * An error reading a `ReadableStream` given to {@link parseReadable} or
@@ -350,15 +356,18 @@ export const parseReadable: {
     self: ReadableStream<BinaryInput>,
     parser: Parser<A, E, R, Uint8Array>
   ): Effect.Effect<A, ParseError.ParseError<E> | ReadError, R>
-} = /*#__PURE__*/ dual(2, <A, E, R>(
-  self: ReadableStream<BinaryInput>,
-  parser: Parser<A, E, R, Uint8Array>
-): Effect.Effect<A, ParseError.ParseError<E> | ReadError, R> =>
-  parseAll(
-    Stream.fromReadableStream({ evaluate: () => self, onError: (cause) => new ReadError({ cause }) }),
-    parser,
-    { empty: new Uint8Array(0) }
-  ))
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R>(
+    self: ReadableStream<BinaryInput>,
+    parser: Parser<A, E, R, Uint8Array>
+  ): Effect.Effect<A, ParseError.ParseError<E> | ReadError, R> =>
+    parseAll(
+      Stream.fromReadableStream({ evaluate: () => self, onError: (cause) => new ReadError({ cause }) }),
+      parser,
+      { empty: new Uint8Array(0) }
+    )
+)
 
 /**
  * Parses the body of a `fetch` `Response` incrementally, as it downloads
@@ -383,9 +392,15 @@ export const parseResponse: {
   <A, E, R>(
     parser: Parser<A, E, R, Uint8Array>
   ): (self: Response) => Effect.Effect<A, ParseError.ParseError<E> | ReadError, R>
-  <A, E, R>(self: Response, parser: Parser<A, E, R, Uint8Array>): Effect.Effect<A, ParseError.ParseError<E> | ReadError, R>
-} = /*#__PURE__*/ dual(2, <A, E, R>(
-  self: Response,
-  parser: Parser<A, E, R, Uint8Array>
-): Effect.Effect<A, ParseError.ParseError<E> | ReadError, R> =>
-  parseReadable(self.body ?? new ReadableStream<Uint8Array>({ start: (c) => c.close() }), parser))
+  <A, E, R>(
+    self: Response,
+    parser: Parser<A, E, R, Uint8Array>
+  ): Effect.Effect<A, ParseError.ParseError<E> | ReadError, R>
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R>(
+    self: Response,
+    parser: Parser<A, E, R, Uint8Array>
+  ): Effect.Effect<A, ParseError.ParseError<E> | ReadError, R> =>
+    parseReadable(self.body ?? new ReadableStream<Uint8Array>({ start: (c) => c.close() }), parser)
+)

@@ -17,6 +17,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import type { Input, Slice, State } from "./Input.js"
 import { Fail } from "./Input.js"
 import type { Parser } from "./Parser.js"
@@ -43,7 +44,11 @@ export type Endianness = "big" | "little" | "native"
 
 const nativeLittle = /*#__PURE__*/ new Uint8Array(/*#__PURE__*/ new Uint16Array([1]).buffer)[0] === 1
 
-const fixed = <A>(size: number, name: string, read: (view: DataView, offset: number) => A): Parser<A, never, never, Uint8Array> => {
+const fixed = <A>(
+  size: number,
+  name: string,
+  read: (view: DataView, offset: number) => A
+): Parser<A, never, never, Uint8Array> => {
   const expected = [`${size} byte${size === 1 ? "" : "s"}`]
   return P.make((state: State<Uint8Array>) => {
     const pos = state.pos
@@ -97,57 +102,123 @@ export const u8: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
 export const i8: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(1, "i8", (v, o) => v.getInt8(o))
 
 /** @since 0.1.0 @category integers */
-export const beU16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(2, "beU16", (v, o) => v.getUint16(o, false))
+export const beU16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(2, "beU16", (v, o) =>
+  v.getUint16(o, false)
+)
 /** @since 0.1.0 @category integers */
-export const leU16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(2, "leU16", (v, o) => v.getUint16(o, true))
+export const leU16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(2, "leU16", (v, o) =>
+  v.getUint16(o, true)
+)
 /** @since 0.1.0 @category integers */
-export const beI16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(2, "beI16", (v, o) => v.getInt16(o, false))
+export const beI16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(2, "beI16", (v, o) =>
+  v.getInt16(o, false)
+)
 /** @since 0.1.0 @category integers */
-export const leI16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(2, "leI16", (v, o) => v.getInt16(o, true))
+export const leI16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(2, "leI16", (v, o) =>
+  v.getInt16(o, true)
+)
 /** @since 0.1.0 @category integers */
-export const beU24: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(3, "beU24", /*#__PURE__*/ readU24(false))
+export const beU24: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  3,
+  "beU24",
+  /*#__PURE__*/ readU24(false)
+)
 /** @since 0.1.0 @category integers */
-export const leU24: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(3, "leU24", /*#__PURE__*/ readU24(true))
+export const leU24: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  3,
+  "leU24",
+  /*#__PURE__*/ readU24(true)
+)
 /** @since 0.1.0 @category integers */
-export const beI24: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(3, "beI24", /*#__PURE__*/ readI24(false))
+export const beI24: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  3,
+  "beI24",
+  /*#__PURE__*/ readI24(false)
+)
 /** @since 0.1.0 @category integers */
-export const leI24: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(3, "leI24", /*#__PURE__*/ readI24(true))
+export const leI24: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  3,
+  "leI24",
+  /*#__PURE__*/ readI24(true)
+)
 /** @since 0.1.0 @category integers */
-export const beU32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "beU32", (v, o) => v.getUint32(o, false))
+export const beU32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "beU32", (v, o) =>
+  v.getUint32(o, false)
+)
 /** @since 0.1.0 @category integers */
-export const leU32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "leU32", (v, o) => v.getUint32(o, true))
+export const leU32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "leU32", (v, o) =>
+  v.getUint32(o, true)
+)
 /** @since 0.1.0 @category integers */
-export const beI32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "beI32", (v, o) => v.getInt32(o, false))
+export const beI32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "beI32", (v, o) =>
+  v.getInt32(o, false)
+)
 /** @since 0.1.0 @category integers */
-export const leI32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "leI32", (v, o) => v.getInt32(o, true))
+export const leI32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "leI32", (v, o) =>
+  v.getInt32(o, true)
+)
 /** @since 0.1.0 @category integers */
-export const beU64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "beU64", (v, o) => v.getBigUint64(o, false))
+export const beU64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "beU64", (v, o) =>
+  v.getBigUint64(o, false)
+)
 /** @since 0.1.0 @category integers */
-export const leU64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "leU64", (v, o) => v.getBigUint64(o, true))
+export const leU64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "leU64", (v, o) =>
+  v.getBigUint64(o, true)
+)
 /** @since 0.1.0 @category integers */
-export const beI64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "beI64", (v, o) => v.getBigInt64(o, false))
+export const beI64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "beI64", (v, o) =>
+  v.getBigInt64(o, false)
+)
 /** @since 0.1.0 @category integers */
-export const leI64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "leI64", (v, o) => v.getBigInt64(o, true))
+export const leI64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "leI64", (v, o) =>
+  v.getBigInt64(o, true)
+)
 /** @since 0.1.0 @category integers */
-export const beU128: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(16, "beU128", /*#__PURE__*/ readU128(false))
+export const beU128: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  16,
+  "beU128",
+  /*#__PURE__*/ readU128(false)
+)
 /** @since 0.1.0 @category integers */
-export const leU128: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(16, "leU128", /*#__PURE__*/ readU128(true))
+export const leU128: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  16,
+  "leU128",
+  /*#__PURE__*/ readU128(true)
+)
 /** @since 0.1.0 @category integers */
-export const beI128: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(16, "beI128", /*#__PURE__*/ readI128(false))
+export const beI128: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  16,
+  "beI128",
+  /*#__PURE__*/ readI128(false)
+)
 /** @since 0.1.0 @category integers */
-export const leI128: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(16, "leI128", /*#__PURE__*/ readI128(true))
+export const leI128: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  16,
+  "leI128",
+  /*#__PURE__*/ readI128(true)
+)
 
 /** @since 0.1.0 @category floats */
-export const beF32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "beF32", (v, o) => v.getFloat32(o, false))
+export const beF32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "beF32", (v, o) =>
+  v.getFloat32(o, false)
+)
 /** @since 0.1.0 @category floats */
-export const leF32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "leF32", (v, o) => v.getFloat32(o, true))
+export const leF32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "leF32", (v, o) =>
+  v.getFloat32(o, true)
+)
 /** @since 0.1.0 @category floats */
-export const beF64: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "beF64", (v, o) => v.getFloat64(o, false))
+export const beF64: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "beF64", (v, o) =>
+  v.getFloat64(o, false)
+)
 /** @since 0.1.0 @category floats */
-export const leF64: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "leF64", (v, o) => v.getFloat64(o, true))
+export const leF64: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "leF64", (v, o) =>
+  v.getFloat64(o, true)
+)
 
-const byEndian = <A>(big: A, little: A) => (endian: Endianness): A =>
-  endian === "big" ? big : endian === "little" ? little : nativeLittle ? little : big
+const byEndian =
+  <A>(big: A, little: A) =>
+  (endian: Endianness): A =>
+    endian === "big" ? big : endian === "little" ? little : nativeLittle ? little : big
 
 /**
  * An unsigned 16-bit integer in the given byte order (winnow's `u16`).
@@ -155,32 +226,67 @@ const byEndian = <A>(big: A, little: A) => (endian: Endianness): A =>
  * @since 0.1.0
  * @category integers
  */
-export const u16: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(beU16, leU16)
+export const u16: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(
+  beU16,
+  leU16
+)
 /** @since 0.1.0 @category integers */
-export const i16: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(beI16, leI16)
+export const i16: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(
+  beI16,
+  leI16
+)
 /** @since 0.1.0 @category integers */
-export const u24: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(beU24, leU24)
+export const u24: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(
+  beU24,
+  leU24
+)
 /** @since 0.1.0 @category integers */
-export const i24: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(beI24, leI24)
+export const i24: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(
+  beI24,
+  leI24
+)
 /** @since 0.1.0 @category integers */
-export const u32: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(beU32, leU32)
+export const u32: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(
+  beU32,
+  leU32
+)
 /** @since 0.1.0 @category integers */
-export const i32: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(beI32, leI32)
+export const i32: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(
+  beI32,
+  leI32
+)
 /** @since 0.1.0 @category integers */
-export const u64: (endian: Endianness) => Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ byEndian(beU64, leU64)
+export const u64: (endian: Endianness) => Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ byEndian(
+  beU64,
+  leU64
+)
 /** @since 0.1.0 @category integers */
-export const i64: (endian: Endianness) => Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ byEndian(beI64, leI64)
+export const i64: (endian: Endianness) => Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ byEndian(
+  beI64,
+  leI64
+)
 /** @since 0.1.0 @category integers */
-export const u128: (endian: Endianness) => Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ byEndian(beU128, leU128)
+export const u128: (endian: Endianness) => Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ byEndian(
+  beU128,
+  leU128
+)
 /** @since 0.1.0 @category integers */
-export const i128: (endian: Endianness) => Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ byEndian(beI128, leI128)
+export const i128: (endian: Endianness) => Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ byEndian(
+  beI128,
+  leI128
+)
 /** @since 0.1.0 @category floats */
-export const f32: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(beF32, leF32)
+export const f32: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(
+  beF32,
+  leF32
+)
 /** @since 0.1.0 @category floats */
-export const f64: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(beF64, leF64)
+export const f64: (endian: Endianness) => Parser<number, never, never, Uint8Array> = /*#__PURE__*/ byEndian(
+  beF64,
+  leF64
+)
 
-
-const toCount = (n: number | bigint): number => typeof n === "bigint" ? Number(n) : n
+const toCount = (n: number | bigint): number => (Predicate.isBigInt(n) ? Number(n) : n)
 
 /**
  * Parses a length with `count`, then takes that many tokens (winnow's

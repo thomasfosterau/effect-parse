@@ -22,16 +22,14 @@ type Bytes = Uint8Array
 const decoder = new TextDecoder()
 const text = (b: Uint8Array) => decoder.decode(b)
 
-const isToken = (c: number): boolean =>
-  c > 31 && c < 128 && !"()<>@,;:\\\"/[]?={} ".includes(String.fromCharCode(c))
+const isToken = (c: number): boolean => c > 31 && c < 128 && !'()<>@,;:\\"/[]?={} '.includes(String.fromCharCode(c))
 const isSpace = (c: number) => c === 0x20
 const isNotSpace = (c: number) => c !== 0x20
 const isVersion = (c: number) => (c >= 0x30 && c <= 0x39) || c === 0x2e
 const isHorizontalSpace = (c: number) => c === 0x20 || c === 0x09
 const isNotLineEnding = (c: number) => c !== 0x0d && c !== 0x0a
 
-const takeWhile1 = (pred: (b: number) => boolean) =>
-  Token.takeWhile<Bytes>(pred, { min: 1 }).pipe(Parser.map(text))
+const takeWhile1 = (pred: (b: number) => boolean) => Token.takeWhile<Bytes>(pred, { min: 1 }).pipe(Parser.map(text))
 
 const lineEnding = Ascii.bytes.lineEnding
 

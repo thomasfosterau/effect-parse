@@ -2,16 +2,18 @@
  * Number conversions shared by the `Ascii` and `Text` parsers and the
  * compilers.
  */
+import * as Predicate from "effect/Predicate"
 import type { Input } from "../Input.js"
 import { Fail } from "../Input.js"
 import { latin1 } from "./text.js"
 
-const toText = (s: Input): string =>
-  typeof s === "string" ? s : s instanceof Uint8Array ? latin1.text(s, 0, s.length) : s.join("")
+/** The text of an input slice: as is for a string, Latin-1 for bytes, joined for tokens. */
+export const toText = (s: Input): string =>
+  Predicate.isString(s) ? s : s instanceof Uint8Array ? latin1.text(s, 0, s.length) : s.join("")
 
 /** The value of the text matched by `Ascii.float` and `Text.float`. */
 export const toFloat = (s: Input): number => {
-  if (typeof s === "string") {
+  if (Predicate.isString(s)) {
     // Plain decimal notation (as opposed to `inf` or `nan`) ends in a digit or "."
     const last = s.charCodeAt(s.length - 1)
     if ((last >= 48 && last <= 57) || last === 46) return Number(s)
@@ -63,7 +65,7 @@ const twoProduct = (a: number, b: number): void => {
   const bh = t - (t - b)
   const bl = b - bh
   productHi = p
-  productLo = ((ah * bh - p) + ah * bl + al * bh) + al * bl
+  productLo = ah * bh - p + ah * bl + al * bh + al * bl
 }
 
 /** 2^-96: a bound on the relative error of {@link decimal}'s 19-digit path. */
@@ -87,25 +89,25 @@ const decimal = (negative: boolean, high: number, low: number, lowDigits: number
   let v: number
   if (lowDigits === 0) {
     if (e10 > 22 || e10 < -22) return undefined
-    v = e10 === 0 ? high : e10 > 0 ? high * exact[e10]! : high / exact[-e10]!
+    v = e10 === 0 ? high : e10 > 0 ? high * exact[e10] : high / exact[-e10]
   } else {
     if (e10 > 22 || e10 < -22) return undefined
     // The digits: high * 10^lowDigits + low = wh + wl, exactly
-    twoProduct(high, exact[lowDigits]!)
+    twoProduct(high, exact[lowDigits])
     const wh = productHi + low
     const wl = productLo + (low - (wh - productHi))
     let xh: number
     let xl: number
     if (e10 >= 0) {
-      const p = exact[e10]!
+      const p = exact[e10]
       twoProduct(wh, p)
       xh = productHi
       xl = productLo + wl * p
     } else {
-      const p = exact[-e10]!
+      const p = exact[-e10]
       xh = wh / p
       twoProduct(xh, p)
-      xl = ((wh - productHi) - productLo + wl) / p
+      xl = (wh - productHi - productLo + wl) / p
     }
     v = xh + xl
     const error = (xh < 0 ? -xh : xh) * Error19
@@ -211,9 +213,9 @@ export const scanFloatString = (s: string, i: number, end: number): number | Fai
 /** {@link scanFloatString} on bytes, or the units of an ASCII compatible encoding. */
 export const scanFloatBytes = (b: Uint8Array, i: number, end: number): number | Fail | undefined => {
   const start = i
-  let c = i < end ? b[i]! : -1
+  let c = i < end ? b[i] : -1
   if (c === 45 || c === 43) {
-    c = i + 1 < end ? b[i + 1]! : -1
+    c = i + 1 < end ? b[i + 1] : -1
     if (!isDigit(c) && c !== 46) return undefined
     i++
   } else if (!isDigit(c) && c !== 46) {
@@ -235,11 +237,11 @@ export const scanFloatBytes = (b: Uint8Array, i: number, end: number): number | 
         else e10++
         digits++
       }
-      c = ++i < end ? b[i]! : -1
+      c = ++i < end ? b[i] : -1
     } while (isDigit(c))
-    if (c === 46) c = ++i < end ? b[i]! : -1
+    if (c === 46) c = ++i < end ? b[i] : -1
   } else {
-    c = ++i < end ? b[i]! : -1
+    c = ++i < end ? b[i] : -1
     if (!isDigit(c)) {
       floatScan.read = i
       return Fail
@@ -259,19 +261,19 @@ export const scanFloatBytes = (b: Uint8Array, i: number, end: number): number | 
       }
       digits++
     }
-    c = ++i < end ? b[i]! : -1
+    c = ++i < end ? b[i] : -1
   }
   let read = i
   if (c === 101 || c === 69) {
     let j = i + 1
-    c = j < end ? b[j]! : -1
+    c = j < end ? b[j] : -1
     const negative = c === 45
-    if (negative || c === 43) c = ++j < end ? b[j]! : -1
+    if (negative || c === 43) c = ++j < end ? b[j] : -1
     if (isDigit(c)) {
       let e = 0
       do {
         if (e < 1e6) e = e * 10 + (c - 48)
-        c = ++j < end ? b[j]! : -1
+        c = ++j < end ? b[j] : -1
       } while (isDigit(c))
       e10 += negative ? -e : e
       i = j

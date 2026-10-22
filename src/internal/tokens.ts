@@ -1,5 +1,8 @@
+// fallow-ignore-file duplicate-export -- `End` and `scan` here are the token-set versions of the text
+// helpers in ./text.ts; both are internal modules, imported by path, never re-exported from one barrel.
+import * as Predicate from "effect/Predicate"
 import type { Input, State } from "../Input.js"
-import { charOf } from "./text.js"
+import { charOf, firstCodePoint } from "./text.js"
 
 /** A compiled token set. */
 export interface Matcher {
@@ -18,21 +21,20 @@ export interface TokenRangeLike {
   readonly to: string | number
 }
 
-const isRange = (u: unknown): u is TokenRangeLike =>
-  typeof u === "object" && u !== null && (u as any)._tag === "TokenRange"
+const isRange = (u: unknown): u is TokenRangeLike => Predicate.isObjectOrArray(u) && (u as any)._tag === "TokenRange"
 
-const toCode = (u: string | number): number => typeof u === "number" ? u : u.codePointAt(0)!
+const toCode = (u: string | number): number => (Predicate.isNumber(u) ? u : firstCodePoint(u))
 
 /** @internal */
 export const describeChar = (s: string): string => JSON.stringify(s)
 
 const describeSet = (u: unknown): string => {
-  if (typeof u === "string") {
+  if (Predicate.isString(u)) {
     const chars = Array.from(u)
     return chars.length === 1 ? describeChar(u) : `one of ${JSON.stringify(u)}`
   }
-  if (typeof u === "number") return `0x${u.toString(16).padStart(2, "0")}`
-  if (typeof u === "function") return u.name ? u.name : "a matching token"
+  if (Predicate.isNumber(u)) return `0x${u.toString(16).padStart(2, "0")}`
+  if (Predicate.isFunction(u)) return u.name ? u.name : "a matching token"
   if (u instanceof Uint8Array) return `one of ${describeBytes(u)}`
   if (isRange(u)) return `${describeSet(u.from)}..=${describeSet(u.to)}`
   if (Array.isArray(u)) return u.map(describeSet).join(" or ")
@@ -40,10 +42,10 @@ const describeSet = (u: unknown): string => {
 }
 
 /** Renders bytes as a Rust-style byte string literal: b"GET\r\n". */
-export const describeBytes = (bytes: Uint8Array): string => {
-  let out = "b\""
+const describeBytes = (bytes: Uint8Array): string => {
+  let out = 'b"'
   for (const b of bytes) {
-    if (b === 0x22) out += "\\\""
+    if (b === 0x22) out += '\\"'
     else if (b === 0x5c) out += "\\\\"
     else if (b === 0x0a) out += "\\n"
     else if (b === 0x0d) out += "\\r"
@@ -51,20 +53,20 @@ export const describeBytes = (bytes: Uint8Array): string => {
     else if (b >= 0x20 && b < 0x7f) out += String.fromCharCode(b)
     else out += `\\x${b.toString(16).padStart(2, "0")}`
   }
-  return out + "\""
+  return out + '"'
 }
 
-const compileCode = (u: unknown): (code: number) => boolean => {
-  if (typeof u === "string") {
-    const codes = Array.from(u, (c) => c.codePointAt(0)!)
+const compileCode = (u: unknown): ((code: number) => boolean) => {
+  if (Predicate.isString(u)) {
+    const codes = Array.from(u, firstCodePoint)
     if (codes.length === 1) {
-      const c = codes[0]!
+      const c = codes[0]
       return (x) => x === c
     }
     return bitmap(codes)
   }
-  if (typeof u === "number") return (x) => x === u
-  if (typeof u === "function") return u as (code: number) => boolean
+  if (Predicate.isNumber(u)) return (x) => x === u
+  if (Predicate.isFunction(u)) return u as (code: number) => boolean
   if (u instanceof Uint8Array) return bitmap(Array.from(u))
   if (isRange(u)) {
     const from = toCode(u.from)
@@ -73,16 +75,16 @@ const compileCode = (u: unknown): (code: number) => boolean => {
   }
   if (Array.isArray(u)) {
     const tests = u.map(compileCode)
-    if (tests.length === 1) return tests[0]!
+    if (tests.length === 1) return tests[0]
     return (x) => {
-      for (let i = 0; i < tests.length; i++) if (tests[i]!(x)) return true
+      for (let i = 0; i < tests.length; i++) if (tests[i](x)) return true
       return false
     }
   }
   throw new TypeError(`invalid token set: ${String(u)}`)
 }
 
-const bitmap = (codes: ReadonlyArray<number>): (code: number) => boolean => {
+const bitmap = (codes: ReadonlyArray<number>): ((code: number) => boolean) => {
   const ascii = new Uint8Array(256)
   let other: Set<number> | undefined
   for (const c of codes) {
@@ -91,11 +93,11 @@ const bitmap = (codes: ReadonlyArray<number>): (code: number) => boolean => {
   }
   if (other === undefined) return (x) => x < 256 && ascii[x] === 1
   const set = other
-  return (x) => x < 256 ? ascii[x] === 1 : set.has(x)
+  return (x) => (x < 256 ? ascii[x] === 1 : set.has(x))
 }
 
-const compileToken = (u: unknown): (token: unknown) => boolean => {
-  if (typeof u === "function") return u as (token: unknown) => boolean
+const compileToken = (u: unknown): ((token: unknown) => boolean) => {
+  if (Predicate.isFunction(u)) return u as (token: unknown) => boolean
   if (Array.isArray(u)) {
     const set = new Set(u)
     return (t) => set.has(t)
@@ -108,7 +110,7 @@ const compileToken = (u: unknown): (token: unknown) => boolean => {
  * number), so string inputs can call it without allocating a string per
  * character.
  */
-export const CodePointPredicate: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/CodePointPredicate")
+const CodePointPredicate: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/CodePointPredicate")
 
 /**
  * The code points accepted by a predicate, as sorted, disjoint, inclusive
@@ -140,7 +142,7 @@ export const codePointPredicate = <F extends (c: never) => boolean>(
 export const compile = (set: unknown, kind: "string" | "code" = "code"): Matcher => {
   const description = describeSet(set)
   let code: (code: number) => boolean
-  if (typeof set === "function" && kind === "string" && !(CodePointPredicate in set)) {
+  if (Predicate.isFunction(set) && kind === "string" && !(CodePointPredicate in set)) {
     const pred = set as (c: string) => boolean
     code = (x) => pred(charOf(x))
   } else {
@@ -149,12 +151,12 @@ export const compile = (set: unknown, kind: "string" | "code" = "code"): Matcher
   return { code, token: compileToken(set), description }
 }
 
-const compileCodeSafe = (set: unknown, kind: "string" | "code"): (code: number) => boolean => {
+const compileCodeSafe = (set: unknown, kind: "string" | "code"): ((code: number) => boolean) => {
   if (Array.isArray(set) && kind === "string") {
     // Predicates nested in arrays also take strings
     const tests = set.map((s) => compile(s, kind).code)
     return (x) => {
-      for (let i = 0; i < tests.length; i++) if (tests[i]!(x)) return true
+      for (let i = 0; i < tests.length; i++) if (tests[i](x)) return true
       return false
     }
   }
@@ -196,21 +198,21 @@ const literalDescriptions = /*#__PURE__*/ new Map<string, string>()
 
 /** Describes a literal for error messages: `"abc"`, `b"abc"` or `["a", 1]`. */
 export const describeLiteral = (lit: Input): string =>
-  typeof lit === "string"
+  Predicate.isString(lit)
     ? cached(literalDescriptions, lit, describeChar)
     : lit instanceof Uint8Array
-    ? describeBytes(lit)
-    : `[${lit.map((t) => JSON.stringify(t)).join(", ")}]`
+      ? describeBytes(lit)
+      : `[${lit.map((t) => JSON.stringify(t)).join(", ")}]`
 
 const stringMatchers = /*#__PURE__*/ new Map<string, AnyMatcher>()
 
 export const compileAny = (set: unknown): AnyMatcher =>
   // Matchers for strings are pure functions of the string, so they're shared
-  typeof set === "string" ? cached(stringMatchers, set, compileAnyImpl) : compileAnyImpl(set)
+  Predicate.isString(set) ? cached(stringMatchers, set, compileAnyImpl) : compileAnyImpl(set)
 
 const compileAnyImpl = (set: unknown): AnyMatcher => {
   const forCode = compile(set, "code")
-  const needsString = typeof set === "function" || Array.isArray(set)
+  const needsString = Predicate.isFunction(set) || Array.isArray(set)
   return {
     forString: needsString ? compile(set, "string") : forCode,
     forCode,
@@ -230,7 +232,7 @@ export const splitSurrogate = (state: State<Input>, i: number): boolean => {
 }
 
 /** Reads the code point at `i` of a string. */
-export const codePointAt = (s: string, i: number): number => {
+const codePointAt = (s: string, i: number): number => {
   const c = s.charCodeAt(i)
   if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
     const d = s.charCodeAt(i + 1)
@@ -246,11 +248,7 @@ export const codePointAt = (s: string, i: number): number => {
 export const NoMatch: unique symbol = /*#__PURE__*/ Symbol("NoMatch")
 export const End: unique symbol = /*#__PURE__*/ Symbol("End")
 
-export const nextIf = (
-  state: State<Input>,
-  m: AnyMatcher,
-  negate: boolean
-): unknown => {
+export const nextIf = (state: State<Input>, m: AnyMatcher, negate: boolean): unknown => {
   const pos = state.pos
   if (pos >= state.end) return End
   switch (state.inputKind) {
@@ -264,7 +262,7 @@ export const nextIf = (
       return len === 1 ? s[pos] : s.slice(pos, pos + 2)
     }
     case 1: {
-      const b = (state.input as Uint8Array)[pos]!
+      const b = (state.input as Uint8Array)[pos]
       if (m.forCode.code(b) === negate) return NoMatch
       state.pos = pos + 1
       return b
@@ -317,7 +315,7 @@ export const scan = (
       const test = m.forCode.code
       while (count < max) {
         if (i >= end) return { offset: i, count, hitEnd: true }
-        if (test(bytes[i]!) === negate) break
+        if (test(bytes[i]) === negate) break
         i++
         count++
       }
@@ -382,7 +380,7 @@ export const indexOf = (state: State<Input>, needle: Input, from: number): numbe
       const hay = state.input as Uint8Array
       const n = needle as Uint8Array
       if (n.length === 0) return from
-      const first = n[0]!
+      const first = n[0]
       let i = hay.indexOf(first, from)
       while (i !== -1 && i <= last) {
         let j = 1
@@ -438,8 +436,8 @@ const match = (state: State<Input>, lit: Input, caseless: boolean): number => {
       const b = state.input as Uint8Array
       const l = lit as Uint8Array
       for (let i = 0; i < n; i++) {
-        const x = b[pos + i]!
-        const y = l[i]!
+        const x = b[pos + i]
+        const y = l[i]
         if (caseless ? lowerAscii(x) !== lowerAscii(y) : x !== y) return -1
       }
       return n === len ? len : -2
@@ -453,4 +451,4 @@ const match = (state: State<Input>, lit: Input, caseless: boolean): number => {
   }
 }
 
-const lowerAscii = (c: number): number => c >= 65 && c <= 90 ? c + 32 : c
+const lowerAscii = (c: number): number => (c >= 65 && c <= 90 ? c + 32 : c)

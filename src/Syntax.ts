@@ -46,6 +46,7 @@
  *
  * @since 0.2.0
  */
+import * as Predicate from "effect/Predicate"
 import type * as Context from "effect/Context"
 import { dual } from "effect/Function"
 import * as Option from "effect/Option"
@@ -63,18 +64,18 @@ import { described, isParser } from "./Parser.js"
 // Grammar annotations
 // -----------------------------------------------------------------------------
 
-const syntaxNode = (
-  self: Parser.Any,
-  kind: string,
-  named: boolean
-): Parser.Any => {
+const syntaxNode = (self: Parser.Any, kind: string, named: boolean): Parser.Any => {
   const step = self.step
   // Identifies the nodes this parser builds, so a reparse can reuse them
   const key = {}
-  return described<unknown, unknown, unknown, Input>((state) => {
-    const builder = state.syntax
-    return builder === undefined ? step(state) : builder.node(state, step, key, kind, named)
-  }, self.name, { _tag: "Syntax", self, kind, named })
+  return described<unknown, unknown, unknown, Input>(
+    (state) => {
+      const builder = state.syntax
+      return builder === undefined ? step(state) : builder.node(state, step, key, kind, named)
+    },
+    self.name,
+    { _tag: "Syntax", self, kind, named }
+  )
 }
 
 /**
@@ -132,7 +133,7 @@ export const token: {
 
 const defaultTokenKind = (self: Parser.Any): string => {
   const n = nodeOf(self)
-  if (n._tag === "Literal" && typeof n.literal === "string" && !n.caseless) return n.literal
+  if (n._tag === "Literal" && Predicate.isString(n.literal) && !n.caseless) return n.literal
   return self.name ?? "token"
 }
 
@@ -162,10 +163,14 @@ export const field: {
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I>
 } = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I> => {
   const step = self.step
-  return described<A, E, R, I>((state) => {
-    const builder = state.syntax
-    return (builder === undefined ? step(state) : builder.field(state, step, name)) as A | typeof Fail
-  }, self.name, { _tag: "Syntax", self, kind: undefined, named: false })
+  return described<A, E, R, I>(
+    (state) => {
+      const builder = state.syntax
+      return (builder === undefined ? step(state) : builder.field(state, step, name)) as A | typeof Fail
+    },
+    self.name,
+    { _tag: "Syntax", self, kind: undefined, named: false }
+  )
 })
 
 // -----------------------------------------------------------------------------
@@ -279,7 +284,7 @@ export class Tree<out A, out E = never, I extends Input = string> {
       const visit = (green: Green, start: number) => {
         if (!green.hasError) return
         if (green.error !== undefined) out.push(this.toError(green.error, start))
-        for (let i = 0; i < green.children.length; i++) visit(green.children[i]!, start + green.offsets[i]!)
+        for (let i = 0; i < green.children.length; i++) visit(green.children[i], start + green.offsets[i])
       }
       visit(this.green, 0)
       this.errorList = out
@@ -309,7 +314,7 @@ export class Tree<out A, out E = never, I extends Input = string> {
    */
   lineColumn(offset: number): ParseError.LineColumn {
     const input = this.input
-    if (typeof input !== "string") return ParseError.lineColumn(input, offset, this.encoding)
+    if (!Predicate.isString(input)) return ParseError.lineColumn(input, offset, this.encoding)
     let lines = this.lines
     if (lines === undefined) {
       lines = [0]
@@ -321,10 +326,10 @@ export class Tree<out A, out E = never, I extends Input = string> {
     let hi = lines.length - 1
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1
-      if (lines[mid]! <= at) lo = mid
+      if (lines[mid] <= at) lo = mid
       else hi = mid - 1
     }
-    const lineStart = lines[lo]!
+    const lineStart = lines[lo]
     return { line: lo + 1, column: ParseError.lineColumn(input.slice(lineStart, at), at - lineStart).column }
   }
 
@@ -397,7 +402,9 @@ export class SyntaxNode<I extends Input = string> {
   /** The input the node spans. */
   get text(): Slice<I> {
     const input = this.tree.input as any
-    return input instanceof Uint8Array ? input.subarray(this.start, this.end) as any : input.slice(this.start, this.end)
+    return input instanceof Uint8Array
+      ? (input.subarray(this.start, this.end) as any)
+      : input.slice(this.start, this.end)
   }
 
   /** Whether this is an `ERROR` node. */
@@ -478,7 +485,7 @@ export class SyntaxNode<I extends Input = string> {
   get nextNamedSibling(): SyntaxNode<I> | undefined {
     const siblings = this.parent?.children
     if (siblings === undefined) return undefined
-    for (let i = this.index + 1; i < siblings.length; i++) if (siblings[i]!.named) return siblings[i]
+    for (let i = this.index + 1; i < siblings.length; i++) if (siblings[i].named) return siblings[i]
     return undefined
   }
 
@@ -486,7 +493,7 @@ export class SyntaxNode<I extends Input = string> {
   get previousNamedSibling(): SyntaxNode<I> | undefined {
     const siblings = this.parent?.children
     if (siblings === undefined) return undefined
-    for (let i = this.index - 1; i >= 0; i--) if (siblings[i]!.named) return siblings[i]
+    for (let i = this.index - 1; i >= 0; i--) if (siblings[i].named) return siblings[i]
     return undefined
   }
 
@@ -503,7 +510,7 @@ export class SyntaxNode<I extends Input = string> {
     let found = -1
     while (lo <= hi) {
       const mid = (lo + hi) >> 1
-      if (offsets[mid]! <= rel) {
+      if (offsets[mid] <= rel) {
         found = mid
         lo = mid + 1
       } else {
@@ -511,8 +518,8 @@ export class SyntaxNode<I extends Input = string> {
       }
     }
     // Skip back over empty `ERROR` nodes at `offset`
-    while (found >= 0 && green.children[found]!.width === 0 && offsets[found] === rel) found--
-    return found >= 0 && rel < offsets[found]! + green.children[found]!.width ? found : -1
+    while (found >= 0 && green.children[found].width === 0 && offsets[found] === rel) found--
+    return found >= 0 && rel < offsets[found] + green.children[found].width ? found : -1
   }
 
   /** The child containing the input unit at `offset`. */
@@ -529,20 +536,14 @@ export class SyntaxNode<I extends Input = string> {
    * number of children.
    */
   descendantAt(start: number, end: number = start + 1): SyntaxNode<I> {
-    let node: SyntaxNode<I> = this
-    while (true) {
-      const i = node.childIndexAt(start)
-      if (i < 0) return node
-      const child = node.children[i]!
-      if (end > child.end) return node
-      node = child
-    }
+    return descendantOf(this, start, end)
   }
 
   /** Like {@link descendantAt}, but only stops at named nodes. */
   namedDescendantAt(start: number, end: number = start + 1): SyntaxNode<I> {
     let node: SyntaxNode<I> = this.descendantAt(start, end)
-    while (!node.named && node !== this) node = node.parent!
+    // Every node below `this` has a parent, so the walk stops at `this` at the latest
+    while (!node.named && node !== this) node = node.parent ?? this
     return node
   }
 
@@ -579,10 +580,10 @@ export class SyntaxNode<I extends Input = string> {
         if (out.length > 0) out += " "
         if (field !== undefined) out += `${field}: `
         out += `(${green.kind}`
-        for (let i = 0; i < green.children.length; i++) visit(green.children[i]!, green.fields?.[i])
+        for (let i = 0; i < green.children.length; i++) visit(green.children[i], green.fields?.[i])
         out += ")"
       } else {
-        for (let i = 0; i < green.children.length; i++) visit(green.children[i]!, green.fields?.[i])
+        for (let i = 0; i < green.children.length; i++) visit(green.children[i], green.fields?.[i])
       }
     }
     visit(this.green, this.field)
@@ -595,7 +596,19 @@ export class SyntaxNode<I extends Input = string> {
 
   private makeChild(i: number): SyntaxNode<I> {
     const green = this.green
-    return new SyntaxNode(this.tree, green.children[i]!, this.start + green.offsets[i]!, this, i)
+    return new SyntaxNode(this.tree, green.children[i], this.start + green.offsets[i], this, i)
+  }
+}
+
+/** The smallest node, `root` or a descendant, that contains `[start, end)` (see `SyntaxNode.descendantAt`). */
+const descendantOf = <I extends Input>(root: SyntaxNode<I>, start: number, end: number): SyntaxNode<I> => {
+  let node = root
+  while (true) {
+    const i = node.childIndexAt(start)
+    if (i < 0) return node
+    const child = node.children[i]
+    if (end > child.end) return node
+    node = child
   }
 }
 
@@ -660,8 +673,9 @@ export class TreeCursor<I extends Input = string> {
 
   /** Moves to the parent; `false` at the node the cursor started at. */
   gotoParent(): boolean {
-    if (this.depth === 0) return false
-    this.current = this.current.parent!
+    const parent = this.current.parent
+    if (this.depth === 0 || parent === undefined) return false
+    this.current = parent
     this.depth--
     return true
   }
@@ -693,11 +707,7 @@ export class TreeCursor<I extends Input = string> {
 
 const expectedEof = ["end of input"]
 
-const run = <A, E, I extends Input>(
-  config: Config,
-  input: I,
-  previous: Previous | undefined
-): Tree<A, E, I> => {
+const run = <A, E, I extends Input>(config: Config, input: I, previous: Previous | undefined): Tree<A, E, I> => {
   const state = new SyntaxState<I>(input, { context: config.context }, previous)
   const a = Stack.run(config.inner.step, state)
   // Text parsers record the encoding when they fail, which they may have done inside reused nodes
@@ -748,8 +758,8 @@ export const parse: {
   const n = nodeOf(grammar)
   const isRoot = n._tag === "Syntax" && n.kind !== undefined && n.named
   const config: Config = {
-    kind: isRoot ? n.kind! : options?.kind ?? "document",
-    inner: isRoot ? n.self as Parser.Any : grammar,
+    kind: isRoot ? n.kind : (options?.kind ?? "document"),
+    inner: isRoot ? (n.self as Parser.Any) : grammar,
     lookahead: options?.lookahead ?? 0,
     context: options?.context as Context.Context<never> | undefined
   }
@@ -791,7 +801,12 @@ export const reparse = <A, E, I extends Input>(
   edits?: Edit | ReadonlyArray<Edit>
 ): Tree<A, E, I> => {
   const next = fromSource(input as Input) as I
-  const list = edits === undefined ? diffList(tree.input, next) : "start" in edits ? [edits as Edit] : edits as ReadonlyArray<Edit>
+  const list =
+    edits === undefined
+      ? diffList(tree.input, next)
+      : "start" in edits
+        ? [edits as Edit]
+        : (edits as ReadonlyArray<Edit>)
   const previous: Previous = {
     root: tree.green,
     oldLength: tree.input.length,
@@ -811,12 +826,21 @@ export const reparse = <A, E, I extends Input>(
  * @since 0.2.0
  * @category parsing
  */
-export const replace = <A, E>(tree: Tree<A, E, string>, start: number, end: number, text: string): Tree<A, E, string> => {
+export const replace = <A, E>(
+  tree: Tree<A, E, string>,
+  start: number,
+  end: number,
+  text: string
+): Tree<A, E, string> => {
   const input = tree.input
   if (start < 0 || end < start || end > input.length) {
     throw new RangeError(`invalid range [${start}, ${end}) of an input of length ${input.length}`)
   }
-  return reparse(tree, input.slice(0, start) + text + input.slice(end), { start, oldEnd: end, newEnd: start + text.length })
+  return reparse(tree, input.slice(0, start) + text + input.slice(end), {
+    start,
+    oldEnd: end,
+    newEnd: start + text.length
+  })
 }
 
 /**
@@ -829,7 +853,7 @@ export const replace = <A, E>(tree: Tree<A, E, string>, start: number, end: numb
 export const diff = <I extends Input>(before: I, after: I): Edit | undefined => {
   const a = before as any
   const b = after as any
-  const at = typeof a === "string" ? (s: string, i: number) => s.charCodeAt(i) : (s: any, i: number) => s[i]
+  const at = Predicate.isString(a) ? (s: string, i: number) => s.charCodeAt(i) : (s: any, i: number) => s[i]
   const max = Math.min(a.length, b.length)
   let prefix = 0
   while (prefix < max && at(a, prefix) === at(b, prefix)) prefix++
@@ -850,7 +874,9 @@ const segmentsOf = (oldLength: number, newLength: number, edits: ReadonlyArray<E
   let length = oldLength
   for (const { newEnd, oldEnd, start } of edits) {
     if (!(start >= 0 && oldEnd >= start && oldEnd <= length && newEnd >= start)) {
-      throw new RangeError(`invalid edit { start: ${start}, oldEnd: ${oldEnd}, newEnd: ${newEnd} } of an input of length ${length}`)
+      throw new RangeError(
+        `invalid edit { start: ${start}, oldEnd: ${oldEnd}, newEnd: ${newEnd} } of an input of length ${length}`
+      )
     }
     const delta = newEnd - oldEnd
     const out: Array<Segment> = []

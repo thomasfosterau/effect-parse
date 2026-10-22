@@ -1,5 +1,6 @@
-import { Option, Result } from "effect"
-import { describe, expect, it } from "vitest"
+import * as Option from "effect/Option"
+import * as Result from "effect/Result"
+import { describe, expect, it } from "vite-plus/test"
 import { Ascii, Parser, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 
@@ -92,7 +93,7 @@ describe("Ascii", () => {
       expectSuccess(Ascii.decInt, "-12", -12)
       expectSuccess(Ascii.decInt, "+12", 12)
       const err = expectFailure(Ascii.decInt, "x")
-      expect(err.expected).toEqual(["one of \"+-\"", "digit"])
+      expect(err.expected).toEqual(['one of "+-"', "digit"])
     })
 
     it("big integers", () => {
@@ -150,12 +151,12 @@ describe("Ascii", () => {
 
   describe("escapes", () => {
     it("takeEscaped (winnow take_escaped tests)", () => {
-      const esc = Ascii.takeEscaped(Ascii.alpha1, "\\", Token.oneOf("\"n\\"))
+      const esc = Ascii.takeEscaped(Ascii.alpha1, "\\", Token.oneOf('"n\\'))
       expect(peek(esc, "abcd;")).toEqual(Result.succeed([";", "abcd"]))
-      expect(peek(esc, "ab\\\"cd;")).toEqual(Result.succeed([";", "ab\\\"cd"]))
-      expect(peek(esc, "\\\"abcd;")).toEqual(Result.succeed([";", "\\\"abcd"]))
+      expect(peek(esc, 'ab\\"cd;')).toEqual(Result.succeed([";", 'ab\\"cd']))
+      expect(peek(esc, '\\"abcd;')).toEqual(Result.succeed([";", '\\"abcd']))
       expect(peek(esc, "\\n;")).toEqual(Result.succeed([";", "\\n"]))
-      expect(peek(esc, "ab\\\"12")).toEqual(Result.succeed(["12", "ab\\\""]))
+      expect(peek(esc, 'ab\\"12')).toEqual(Result.succeed(["12", 'ab\\"']))
       expectFailure(Parser.allConsuming(esc), "AB\\")
       expectFailure(Parser.allConsuming(esc), "AB\\A")
     })
@@ -166,31 +167,31 @@ describe("Ascii", () => {
         "\\",
         Parser.alt(
           Token.literal("\\"),
-          Token.literal("\"").pipe(Parser.as("\"")),
+          Token.literal('"').pipe(Parser.as('"')),
           Token.literal("n").pipe(Parser.as("\n"))
         )
       )
       expect(peek(esc, "abcd;")).toEqual(Result.succeed([";", "abcd"]))
-      expect(peek(esc, "ab\\\"cd;")).toEqual(Result.succeed([";", "ab\"cd"]))
-      expect(peek(esc, "\\\"abcd;")).toEqual(Result.succeed([";", "\"abcd"]))
+      expect(peek(esc, 'ab\\"cd;')).toEqual(Result.succeed([";", 'ab"cd']))
+      expect(peek(esc, '\\"abcd;')).toEqual(Result.succeed([";", '"abcd']))
       expect(peek(esc, "\\n;")).toEqual(Result.succeed([";", "\n"]))
-      expect(peek(esc, "ab\\\"12")).toEqual(Result.succeed(["12", "ab\""]))
+      expect(peek(esc, 'ab\\"12')).toEqual(Result.succeed(["12", 'ab"']))
       expectFailure(Parser.allConsuming(esc), "AB\\")
       expectFailure(Parser.allConsuming(esc), "AB\\A")
     })
 
     it("escaped with a normal parser that may match nothing", () => {
       const str = Parser.delimited(
-        Token.literal("\""),
+        Token.literal('"'),
         Ascii.escaped(
-          Token.takeTill("\"\\"),
+          Token.takeTill('"\\'),
           "\\",
-          Parser.alt(Token.literal("\\"), Token.literal("\""), Token.literal("n").pipe(Parser.as("\n")))
+          Parser.alt(Token.literal("\\"), Token.literal('"'), Token.literal("n").pipe(Parser.as("\n")))
         ),
-        Token.literal("\"")
+        Token.literal('"')
       )
-      expectSuccess(str, "\"\"", "")
-      expectSuccess(str, "\"a\\\"b\\nc\"", "a\"b\nc")
+      expectSuccess(str, '""', "")
+      expectSuccess(str, '"a\\"b\\nc"', 'a"b\nc')
     })
   })
 })

@@ -116,8 +116,9 @@ export const isA = <I extends Input = string>(set: TokenSet<I>): Parser<Slice<No
  * @since 0.1.0
  * @category bytes
  */
-export const isNot = <I extends Input = string>(set: TokenSet<I>): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> =>
-  Token.takeTill<I>(set, { min: 1 })
+export const isNot = <I extends Input = string>(
+  set: TokenSet<I>
+): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> => Token.takeTill<I>(set, { min: 1 })
 
 /**
  * @since 0.1.0

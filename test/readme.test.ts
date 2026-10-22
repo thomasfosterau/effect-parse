@@ -1,9 +1,25 @@
-import { Context, Data, Effect, Option, Result, Stream } from "effect"
-import { expect, it } from "vitest"
-import { Ascii, Compiler, Encoding, Input, Parser, ParseError, ParserStream, Syntax, Text, Token } from "../src/index.js"
+import * as Context from "effect/Context"
+import * as Schema from "effect/Schema"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Result from "effect/Result"
+import * as Stream from "effect/Stream"
+import { expect, it } from "vite-plus/test"
+import {
+  Ascii,
+  Compiler,
+  Encoding,
+  Input,
+  Parser,
+  ParseError,
+  ParserStream,
+  Syntax,
+  Text,
+  Token
+} from "../src/index.js"
 
 it("README examples behave as documented", () => {
-  const point = Parser.gen(function*() {
+  const point = Parser.gen(function* () {
     yield* Token.literal("(")
     const x = yield* Ascii.decInt
     yield* Token.literal(",")
@@ -13,17 +29,18 @@ it("README examples behave as documented", () => {
   })
   expect(Parser.parse(point, "(1,-2)")).toEqual(Result.succeed({ x: 1, y: -2 }))
   const r = Parser.parse(point, "(1;-2)")
-  expect(Result.isFailure(r) && r.failure.message).toBe([
-    "Parse error at line 1, column 3:",
-    "1 | (1;-2)",
-    "  |   ^",
-    "expected digit or \",\", found \";\""
-  ].join("\n"))
+  expect(Result.isFailure(r) && r.failure.message).toBe(
+    ["Parse error at line 1, column 3:", "1 | (1;-2)", "  |   ^", 'expected digit or ",", found ";"'].join("\n")
+  )
 
-  expect(Parser.parsePartial(Ascii.digit1, "123")).toEqual(Result.succeed({ _tag: "Incomplete", needed: Option.some(1) }))
+  expect(Parser.parsePartial(Ascii.digit1, "123")).toEqual(
+    Result.succeed({ _tag: "Incomplete", needed: Option.some(1) })
+  )
 
   const lexeme = Compiler.jit(Parser.preceded(Ascii.multispace0, Ascii.alpha1))
-  expect(Parser.parsePartial(lexeme, "let x = 1", { offset: 3 })).toEqual(Result.succeed({ _tag: "Done", value: "x", offset: 5 }))
+  expect(Parser.parsePartial(lexeme, "let x = 1", { offset: 3 })).toEqual(
+    Result.succeed({ _tag: "Done", value: "x", offset: 5 })
+  )
   expect(Parser.parsePeek(lexeme, "let x = 1", { offset: 0 })).toEqual(Result.succeed([" x = 1", "let"]))
 
   class Radix extends Context.Service<Radix, number>()("Radix") {}
@@ -33,20 +50,28 @@ it("README examples behave as documented", () => {
   expect(Parser.parseSync(Parser.provideService(number, Radix, 16), "ff")).toBe(255)
   expect(Effect.runSync(Parser.parseEffect(number, "777").pipe(Effect.provideService(Radix, 8)))).toBe(511)
 
-  class OutOfRange extends Data.TaggedError("OutOfRange")<{ value: number }> {}
+  class OutOfRange extends Schema.TaggedError<OutOfRange>()("OutOfRange", { value: Schema.Number }) {}
   const port: Parser.Parser<number, string | OutOfRange> = Ascii.decUint.pipe(
-    Parser.filterOrFail((n) => n < 65536, (value) => new OutOfRange({ value }))
+    Parser.filterOrFail(
+      (n) => n < 65536,
+      (value) => new OutOfRange({ value })
+    )
   )
   const e = Parser.parse(port, "70000")
   expect(Result.isFailure(e) && e.failure.cause).toBeInstanceOf(OutOfRange)
 
   const line = Parser.terminated(Ascii.decInt, Token.literal("\n"))
-  expect(Effect.runSync(Stream.make("1\n2", "3\n", "4\n").pipe(ParserStream.parseMany(line), Stream.runCollect))).toEqual([1, 23, 4])
+  expect(
+    Effect.runSync(Stream.make("1\n2", "3\n", "4\n").pipe(ParserStream.parseMany(line), Stream.runCollect))
+  ).toEqual([1, 23, 4])
 
   type Tree = ReadonlyArray<Tree>
   const tree: Parser.Parser<Tree> = Parser.delimited(
     Token.literal("["),
-    Parser.separated(Parser.suspend(() => tree), Token.literal(",")),
+    Parser.separated(
+      Parser.suspend(() => tree),
+      Token.literal(",")
+    ),
     Token.literal("]")
   )
   expect(Parser.parseSync(tree, "[[],[[]]]")).toEqual([[], [[]]])
@@ -70,12 +95,14 @@ it("README Unicode examples behave as documented", () => {
   expect(Parser.parse(assignment(Text.utf16le), Encoding.utf16le.encode(text))).toEqual(Result.succeed(["größe", 42]))
 
   const r = Parser.parse(Text.utf8.alpha1, new Uint8Array([0x61, 0x62, 0xff, 0x63]))
-  expect(Result.isFailure(r) && r.failure.message).toBe([
-    "Parse error at line 1, column 3 (byte 2):",
-    "1 | ab\ufffdc",
-    "  |   ^",
-    "expected letter or end of input, found invalid UTF-8 0xff"
-  ].join("\n"))
+  expect(Result.isFailure(r) && r.failure.message).toBe(
+    [
+      "Parse error at line 1, column 3 (byte 2):",
+      "1 | ab\ufffdc",
+      "  |   ^",
+      "expected letter or end of input, found invalid UTF-8 0xff"
+    ].join("\n")
+  )
 })
 
 it("Text and Encoding doc examples behave as documented", () => {
@@ -85,8 +112,9 @@ it("Text and Encoding doc examples behave as documented", () => {
   expect(Parser.parse(greeting(Text.utf8), new TextEncoder().encode("¡hola Zoë"))).toEqual(Result.succeed("Zoë"))
 
   const bytes = new TextEncoder().encode("naïve café")
-  expect(Parser.parse(Parser.separatedPair(Text.utf8.alpha1, Text.utf8.space1, Text.utf8.alpha1), bytes))
-    .toEqual(Result.succeed(["naïve", "café"]))
+  expect(Parser.parse(Parser.separatedPair(Text.utf8.alpha1, Text.utf8.space1, Text.utf8.alpha1), bytes)).toEqual(
+    Result.succeed(["naïve", "café"])
+  )
 
   const T = Text.make(Encoding.latin1)
   expect(Parser.parse(T.alpha1, new Uint8Array([0x63, 0x61, 0x66, 0xe9]))).toEqual(Result.succeed("café"))
@@ -97,11 +125,11 @@ it("Text and Encoding doc examples behave as documented", () => {
   expect(Encoding.sniff(new Uint8Array([0xff, 0xfe, 0x41, 0x00]))).toEqual(Option.some(Encoding.utf16le))
   expect(Text.utf8.encoding).toBe(Encoding.utf8)
 
-  const isNameStart = Token.codePoints(
-    "name start",
-    (c) => c === 0x5f || (c >= 0x61 && c <= 0x7a) || c >= 0xc0,
-    [[0x5f, 0x5f], [0x61, 0x7a], [0xc0, 0x10ffff]]
-  )
+  const isNameStart = Token.codePoints("name start", (c) => c === 0x5f || (c >= 0x61 && c <= 0x7a) || c >= 0xc0, [
+    [0x5f, 0x5f],
+    [0x61, 0x7a],
+    [0xc0, 0x10ffff]
+  ])
   expect(Parser.parse(Compiler.jit(Token.takeWhile(isNameStart)), "_aé😀")).toEqual(Result.succeed("_aé😀"))
 })
 
@@ -123,7 +151,7 @@ it("README: reusing a state for one run per token", () => {
 })
 
 it("README hoisted generator example behaves like the inline one", () => {
-  const inline = Parser.gen(function*() {
+  const inline = Parser.gen(function* () {
     const name = yield* Token.takeWhile(Ascii.isAlphanumeric, { min: 1 })
     yield* Token.literal(": ")
     const value = yield* Ascii.tillLineEnding
@@ -133,7 +161,7 @@ it("README hoisted generator example behaves like the inline one", () => {
 
   const colon = Token.literal(": ")
   const name = Token.takeWhile(Ascii.isAlphanumeric, { min: 1 })
-  const header = Parser.gen(function*() {
+  const header = Parser.gen(function* () {
     const n = yield* name
     yield* colon
     const value = yield* Ascii.tillLineEnding
@@ -162,17 +190,31 @@ it("Syntax examples behave as documented", () => {
   expect([node.kind, node.text, node.value]).toEqual(["number", "24", 24])
   expect(node.parent?.childByField("key")?.text).toBe("height")
   expect(tree.lineColumn(node.start)).toEqual({ line: 2, column: 8 })
-  expect(tree.value).toEqual(Option.some([["width", 80], ["height", 24]]))
+  expect(tree.value).toEqual(
+    Option.some([
+      ["width", 80],
+      ["height", 24]
+    ])
+  )
 
   const edited = Syntax.replace(tree, 6, 8, "100")
-  expect(edited.value).toEqual(Option.some([["width", 100], ["height", 24]]))
+  expect(edited.value).toEqual(
+    Option.some([
+      ["width", 100],
+      ["height", 24]
+    ])
+  )
   expect(edited.reused).toBe(2)
 
   // The module's own example
   const ws = Ascii.multispace0
   const n = Syntax.node(Ascii.decInt, "number")
   const list = Syntax.node(
-    Parser.delimited(Token.literal("["), Parser.separated(Parser.delimited(ws, n, ws), Token.literal(",")), Token.literal("]")),
+    Parser.delimited(
+      Token.literal("["),
+      Parser.separated(Parser.delimited(ws, n, ws), Token.literal(",")),
+      Token.literal("]")
+    ),
     "list"
   )
   const t = Syntax.parse(list, "[1, 2, 3]")

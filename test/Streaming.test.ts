@@ -3,14 +3,17 @@
  * exactly the result of parsing the whole input at once, however it is
  * split, while parsing as the chunks arrive.
  */
-import { Effect, Result, Stream } from "effect"
-import { describe, expect, it } from "vitest"
+import * as Predicate from "effect/Predicate"
+import * as Effect from "effect/Effect"
+import * as Result from "effect/Result"
+import * as Stream from "effect/Stream"
+import { assert, describe, expect, it } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
 import * as Http from "../examples/http.js"
 import * as Ini from "../examples/ini.js"
 import * as Json from "../examples/json.js"
 import * as JsonFast from "../examples/json-fast.js"
-import { makeJson } from "../examples/json-text.js"
+import { jsonGrammar } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
 import type { Input } from "../src/index.js"
 import { Ascii, Compiler, Encoding, Parser, ParserStream, Text, Token } from "../src/index.js"
@@ -41,8 +44,11 @@ const split = <I extends string | Uint8Array>(input: I, random: () => number, ma
   return out
 }
 
-const streamed = (p: Parser.Parser<any, any, never, any>, chunks: ReadonlyArray<string | Uint8Array>, empty?: Input.Input) =>
-  Effect.runSync(Effect.result(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(p, { empty: empty as any }))))
+const streamed = (
+  p: Parser.Parser<any, any, never, any>,
+  chunks: ReadonlyArray<string | Uint8Array>,
+  empty?: Input.Input
+) => Effect.runSync(Effect.result(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(p, { empty: empty as any }))))
 
 let checked = 0
 
@@ -62,7 +68,7 @@ const variants = <P extends Parser.Parser.Any>(p: P): ReadonlyArray<P> => {
 const same = <I extends string | Uint8Array>(p: Parser.Parser<any, any, never, I>, input: I, seed: number): void => {
   const expected = outcome(Parser.parse(p, input as never))
   const random = rng(seed)
-  const empty = typeof input === "string" ? "" : new Uint8Array(0)
+  const empty = Predicate.isString(input) ? "" : new Uint8Array(0)
   for (const max of [1, 3, 17, 4096]) {
     const chunks = split(input, random, max)
     for (const [i, v] of variants(p).entries()) {
@@ -75,8 +81,8 @@ const same = <I extends string | Uint8Array>(p: Parser.Parser<any, any, never, I
 const jsonDocs = (() => {
   const random = rng(5)
   const docs = Array.from({ length: 30 }, () => ` ${randomJson(random)} `)
-  docs.push("[1,,2]", "{\"a\": \"unterminated}", "\"\\x\"", "", " ", "[", "{\"a\" 1}", "[1] x", "\"\\ud800\\u0041\"")
-  return [...docs, ...docs.slice(0, 12).flatMap((d, i) => mutations(d, "{}[],:\"\\0123456789.e-tfnul é😀", 10, i))]
+  docs.push("[1,,2]", '{"a": "unterminated}', '"\\x"', "", " ", "[", '{"a" 1}', "[1] x", '"\\ud800\\u0041"')
+  return [...docs, ...docs.slice(0, 12).flatMap((d, i) => mutations(d, '{}[],:"\\0123456789.e-tfnul é😀', 10, i))]
 })()
 
 describe("streaming parses", () => {
@@ -89,7 +95,7 @@ describe("streaming parses", () => {
     ["Text.utf8", Text.utf8],
     ["Text.utf16le", Text.utf16le]
   ] as const)("json-text with %s", (_, T) => {
-    const p = makeJson(T as Text.TextParsers<any>)
+    const p = jsonGrammar(T as Text.TextParsers<any>)
     jsonDocs.forEach((doc, i) => same(p, (T.encoding as Encoding.Encoding<any>).encode(doc), i))
   })
 
@@ -97,17 +103,17 @@ describe("streaming parses", () => {
     ["Text.string", Text.string],
     ["Text.utf8", Text.utf8]
   ] as const)("json-fast with %s (objects built with fromEntries)", (_, T) => {
-    const p = JsonFast.makeJson(T as Text.TextParsers<any>)
+    const p = JsonFast.jsonGrammar(T as Text.TextParsers<any>)
     jsonDocs.forEach((doc, i) => same(p, (T.encoding as Encoding.Encoding<any>).encode(doc), i))
   })
 
   it("json-text on malformed bytes", () => {
-    const p = makeJson(Text.utf8)
+    const p = jsonGrammar(Text.utf8)
     const random = rng(8)
-    const base = Encoding.utf8.encode("[\"aé😀\", {\"k\": \"v\\n\"}, 12, [true]]")
+    const base = Encoding.utf8.encode('["aé😀", {"k": "v\\n"}, 12, [true]]')
     for (let i = 0; i < 100; i++) {
       const bytes = base.slice()
-      bytes[Math.floor(random() * bytes.length)] = [0x80, 0xc3, 0xf0, 0xff, 0x22, 0x5c][i % 6]!
+      bytes[Math.floor(random() * bytes.length)] = [0x80, 0xc3, 0xf0, 0xff, 0x22, 0x5c][i % 6]
       same(p, bytes, i)
     }
   })
@@ -135,16 +141,19 @@ describe("streaming parses", () => {
       Parser.fold(Parser.alt(a, b), { init: () => "", f: (acc, x) => acc + x, while: (acc) => acc.length < 4 }),
       Parser.separated(Parser.repeat(a, { min: 1 }), b, { min: 2, max: 5 }),
       Parser.separatedFoldl1(Ascii.digit1, Token.literal("+"), (l, _, r) => `(${l}+${r})`),
-      Parser.terminated(Ascii.escaped(Token.takeTill("\\\""), "\\", Token.oneOf("\\\"n")), Token.literal("\"")),
+      Parser.terminated(Ascii.escaped(Token.takeTill('\\"'), "\\", Token.oneOf('\\"n')), Token.literal('"')),
       Parser.terminated(Ascii.takeEscaped(Ascii.alpha1, "\\", Token.oneOf("an")), Token.literal(";")),
       Parser.repeat(Parser.separated(a, b), { min: 1, max: 3 }),
       Parser.alt(Parser.seq(Parser.repeat(a), b), Parser.seq(Parser.repeat(a), Token.literal("c")))
     ]
     const random = rng(9)
-    const alphabet = "ab+1\\\"n;c"
+    const alphabet = 'ab+1\\"n;c'
     for (const p of grammars) {
       for (let i = 0; i < 300; i++) {
-        const input = Array.from({ length: Math.floor(random() * 12) }, () => alphabet[Math.floor(random() * alphabet.length)]).join("")
+        const input = Array.from(
+          { length: Math.floor(random() * 12) },
+          () => alphabet[Math.floor(random() * alphabet.length)]
+        ).join("")
         same(p, input, i)
       }
     }
@@ -156,32 +165,41 @@ describe("streaming parses", () => {
 })
 
 describe("incremental parsing", () => {
-  it.each(["interpreted", "closure", "jit"] as const)("does not parse elements again when more input arrives (%s)", (backend) => {
-    let parsed = 0
-    const element = Ascii.decUint.pipe(Parser.tap(() => parsed++))
-    const list = Parser.delimited(Token.literal("["), Parser.separated(element, Token.literal(",")), Token.literal("]"))
-    if (backend !== "interpreted") Compiler[backend](list)
-    const doc = `[${Array.from({ length: 2000 }, (_, i) => i).join(",")}]`
-    const chunks = split(doc, rng(1), 16)
-    expect(Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(list)))).toHaveLength(2000)
-    // Each element is parsed about once, not once per chunk
-    expect(chunks.length).toBeGreaterThan(500)
-    expect(parsed).toBeLessThan(2000 * 1.5)
-    if (backend !== "interpreted") {
-      expect(Registry.compiled(list, 0, true)!.backend).toBe(backend)
+  it.each(["interpreted", "closure", "jit"] as const)(
+    "does not parse elements again when more input arrives (%s)",
+    (backend) => {
+      let parsed = 0
+      const element = Ascii.decUint.pipe(Parser.tap(() => parsed++))
+      const list = Parser.delimited(
+        Token.literal("["),
+        Parser.separated(element, Token.literal(",")),
+        Token.literal("]")
+      )
+      if (backend !== "interpreted") Compiler[backend](list)
+      const doc = `[${Array.from({ length: 2000 }, (_, i) => i).join(",")}]`
+      const chunks = split(doc, rng(1), 16)
+      expect(Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(list)))).toHaveLength(2000)
+      // Each element is parsed about once, not once per chunk
+      expect(chunks.length).toBeGreaterThan(500)
+      expect(parsed).toBeLessThan(2000 * 1.5)
+      if (backend !== "interpreted") assert.strictEqual(Registry.compiled(list, 0, true)?.backend, backend)
     }
-  })
+  )
 
   it.each(["interpreted", "closure", "jit"] as const)("resumes long strings where they stopped (%s)", (backend) => {
     let segments = 0
-    const normal = Text.utf8.takeTill("\\\"", { min: 1 }).pipe(Parser.tap(() => segments++))
-    const string = Parser.delimited(Text.utf8.literal("\""), Text.utf8.escaped(normal, "\\", Text.utf8.oneOf("\\\"")), Text.utf8.literal("\""))
+    const normal = Text.utf8.takeTill('\\"', { min: 1 }).pipe(Parser.tap(() => segments++))
+    const string = Parser.delimited(
+      Text.utf8.literal('"'),
+      Text.utf8.escaped(normal, "\\", Text.utf8.oneOf('\\"')),
+      Text.utf8.literal('"')
+    )
     if (backend !== "interpreted") Compiler[backend](string)
     const text = Array.from({ length: 500 }, (_, i) => `segment ${i}\\"`).join("")
     const bytes = new TextEncoder().encode(`"${text}"`)
     const chunks = split(bytes, rng(2), 32)
     const value = Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(string)))
-    expect(value).toBe(text.replaceAll("\\\"", "\""))
+    expect(value).toBe(text.replaceAll('\\"', '"'))
     expect(segments).toBeLessThan(500 * 1.5 + chunks.length)
   })
 
@@ -205,7 +223,7 @@ describe("incremental parsing", () => {
 })
 
 describe("parseReadable and parseResponse", () => {
-  const json = makeJson(Text.utf8)
+  const json = jsonGrammar(Text.utf8)
   const doc = { a: [1, 2.5, "é😀"], b: { c: null, d: true } }
 
   it("parses a fetch Response body", async () => {
@@ -221,7 +239,7 @@ describe("parseReadable and parseResponse", () => {
   })
 
   it("reports the same errors as Parser.parse", async () => {
-    const text = "{\"a\": [1,, 2]}"
+    const text = '{"a": [1,, 2]}'
     const exit = await Effect.runPromise(Effect.result(ParserStream.parseResponse(new Response(text), json)))
     const direct = Parser.parse(json, new TextEncoder().encode(text))
     expect(outcome(exit)).toEqual(outcome(direct))

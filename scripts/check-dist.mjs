@@ -61,7 +61,9 @@ for (const file of (await readdir(dist, { recursive: true })).filter((f) => f.en
   for (const start of unmarked) {
     failures++
     const line = source.slice(0, start).split("\n").length
-    console.error(`fail: dist/${file}:${line}: top-level call without /*#__PURE__*/: ${source.slice(start, start + 60).split("\n")[0]}`)
+    console.error(
+      `fail: dist/${file}:${line}: top-level call without /*#__PURE__*/: ${source.slice(start, start + 60).split("\n")[0]}`
+    )
   }
 }
 if (failures === 0) console.log("ok: every top-level call in dist/ is marked /*#__PURE__*/")
@@ -71,8 +73,8 @@ if (failures === 0) console.log("ok: every top-level call in dist/ is marked /*#
 // the closure compiler (the one for CSP pages) must not import the JIT.
 const importsOf = async (file) => {
   const source = await readFile(new URL(file, dist), "utf8")
-  return parseAst(source, undefined, file).body
-    .filter((s) => (s.type === "ImportDeclaration" || s.type.startsWith("Export")) && s.source != null)
+  return parseAst(source, undefined, file)
+    .body.filter((s) => (s.type === "ImportDeclaration" || s.type.startsWith("Export")) && s.source != null)
     .map((s) => new URL(s.source.value, new URL(file, dist)).href.slice(dist.href.length))
     .filter((f) => !f.startsWith("..") && f.endsWith(".js") && !f.includes(":"))
 }

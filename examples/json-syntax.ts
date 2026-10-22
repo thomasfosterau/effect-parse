@@ -37,7 +37,7 @@ const skip = Parser.make<void>((state) => {
 const recovering = <A>(p: Parser.Parser<A>) => Parser.resumeAfter(p, skip)
 
 const somes = <A>(options: ReadonlyArray<Option.Option<A>>): Array<A> =>
-  options.flatMap((o) => Option.isSome(o) ? [o.value] : [])
+  options.flatMap((o) => (Option.isSome(o) ? [o.value] : []))
 
 // \uXXXX: the halves of a surrogate pair are escaped separately, and join up in the string
 const unicodeEscape = Token.takeWhile(Ascii.isHexDigit, 4).pipe(
@@ -46,7 +46,7 @@ const unicodeEscape = Token.takeWhile(Ascii.isHexDigit, 4).pipe(
 )
 
 const escapeChar = Parser.dispatch(Token.any, {
-  "\"": Parser.succeed("\""),
+  '"': Parser.succeed('"'),
   "\\": Parser.succeed("\\"),
   "/": Parser.succeed("/"),
   b: Parser.succeed("\b"),
@@ -59,11 +59,17 @@ const escapeChar = Parser.dispatch(Token.any, {
 
 const string = Syntax.node(
   Parser.preceded(
-    Token.literal("\""),
-    Parser.cut(Parser.terminated(
-      Ascii.escaped(Token.takeTill((c: string) => c === "\"" || c === "\\" || c < " "), "\\", Parser.cut(escapeChar)),
-      Token.literal("\"")
-    ))
+    Token.literal('"'),
+    Parser.cut(
+      Parser.terminated(
+        Ascii.escaped(
+          Token.takeTill((c: string) => c === '"' || c === "\\" || c < " "),
+          "\\",
+          Parser.cut(escapeChar)
+        ),
+        Token.literal('"')
+      )
+    )
   ),
   "string"
 )
@@ -90,7 +96,10 @@ const pair = Syntax.node(
   Parser.separatedPair(
     Syntax.field(lexeme(string), "key"),
     punct(":"),
-    Syntax.field(Parser.suspend(() => value), "value")
+    Syntax.field(
+      Parser.suspend(() => value),
+      "value"
+    )
   ),
   "pair"
 )
@@ -114,7 +123,7 @@ export const value: Parser.Parser<Json> = lexeme(
     n: keyword("null", null),
     t: keyword("true", true),
     f: keyword("false", false),
-    "\"": string,
+    '"': string,
     "[": Parser.suspend(() => array),
     "{": Parser.suspend(() => object),
     "-": number,

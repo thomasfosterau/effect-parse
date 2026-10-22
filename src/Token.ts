@@ -20,6 +20,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import type { Input, Slice, State, Token } from "./Input.js"
 import {
   advance,
@@ -161,10 +162,13 @@ export type ByteTokenSet =
  * @since 0.1.0
  * @category models
  */
-export type TokenSet<I> = I extends string ? StringTokenSet
-  : I extends Uint8Array ? ByteTokenSet
-  : I extends ReadonlyArray<infer T> ? ((token: T) => boolean) | ReadonlyArray<T>
-  : never
+export type TokenSet<I> = I extends string
+  ? StringTokenSet
+  : I extends Uint8Array
+    ? ByteTokenSet
+    : I extends ReadonlyArray<infer T>
+      ? ((token: T) => boolean) | ReadonlyArray<T>
+      : never
 
 const expectedAny = ["any token"]
 
@@ -245,20 +249,24 @@ export const literalImpl = (lit: Input, caseless: boolean): Parser<any, never, n
   const expected = [caseless ? `${description} (case insensitive)` : description]
   // A string literal may also be matched against byte input (as UTF-8)
   let asBytes: Uint8Array | undefined
-  const literalKind = typeof lit === "string" ? 0 : lit instanceof Uint8Array ? 1 : 2
-  return described((state: State<Input>) => {
-    const pos = state.pos
-    const l = literalKind === 0 && state.inputKind === 1 ? (asBytes ??= new TextEncoder().encode(lit as string)) : lit
-    const len = l.length
-    const r = matchLiteral(state, l, caseless)
-    if (r === -1) return state.backtrack("Literal", expected)
-    if (r === -2) {
-      if (state.partial) return state.incomplete(len - (state.end - pos), expected)
-      return state.backtrack("Literal", expected)
-    }
-    state.pos = pos + len
-    return caseless || state.inputKind !== literalKind ? state.slice(pos, pos + len) : lit
-  }, description, { _tag: "Literal", literal: lit, caseless, encoding: undefined })
+  const literalKind = Predicate.isString(lit) ? 0 : lit instanceof Uint8Array ? 1 : 2
+  return described(
+    (state: State<Input>) => {
+      const pos = state.pos
+      const l = literalKind === 0 && state.inputKind === 1 ? (asBytes ??= new TextEncoder().encode(lit as string)) : lit
+      const len = l.length
+      const r = matchLiteral(state, l, caseless)
+      if (r === -1) return state.backtrack("Literal", expected)
+      if (r === -2) {
+        if (state.partial) return state.incomplete(len - (state.end - pos), expected)
+        return state.backtrack("Literal", expected)
+      }
+      state.pos = pos + len
+      return caseless || state.inputKind !== literalKind ? state.slice(pos, pos + len) : lit
+    },
+    description,
+    { _tag: "Literal", literal: lit, caseless, encoding: undefined }
+  )
 }
 
 /**
@@ -277,15 +285,21 @@ export const literalImpl = (lit: Input, caseless: boolean): Parser<any, never, n
  * @since 0.1.0
  * @category tokens
  */
-export const oneOf = <I extends Input = string>(set: TokenSet<I>): Parser<Token<NoInfer<I>>, never, never, NoInfer<I>> => {
+export const oneOf = <I extends Input = string>(
+  set: TokenSet<I>
+): Parser<Token<NoInfer<I>>, never, never, NoInfer<I>> => {
   const m = compileAny(set)
   const expected = [m.description]
-  return described((state) => {
-    const t = nextIf(state, m, false)
-    if (t === End) return state.eoi("OneOf", expected, 1)
-    if (t === NoMatch) return state.backtrack("OneOf", expected)
-    return t as Token<I>
-  }, m.description, { _tag: "OneOf", set, negate: false, encoding: undefined })
+  return described(
+    (state) => {
+      const t = nextIf(state, m, false)
+      if (t === End) return state.eoi("OneOf", expected, 1)
+      if (t === NoMatch) return state.backtrack("OneOf", expected)
+      return t as Token<I>
+    },
+    m.description,
+    { _tag: "OneOf", set, negate: false, encoding: undefined }
+  )
 }
 
 /**
@@ -295,15 +309,21 @@ export const oneOf = <I extends Input = string>(set: TokenSet<I>): Parser<Token<
  * @since 0.1.0
  * @category tokens
  */
-export const noneOf = <I extends Input = string>(set: TokenSet<I>): Parser<Token<NoInfer<I>>, never, never, NoInfer<I>> => {
+export const noneOf = <I extends Input = string>(
+  set: TokenSet<I>
+): Parser<Token<NoInfer<I>>, never, never, NoInfer<I>> => {
   const m = compileAny(set)
   const expected = [`anything but ${m.description}`]
-  return described((state) => {
-    const t = nextIf(state, m, true)
-    if (t === End) return state.eoi("NoneOf", expected, 1)
-    if (t === NoMatch) return state.backtrack("NoneOf", expected)
-    return t as Token<I>
-  }, expected[0], { _tag: "OneOf", set, negate: true, encoding: undefined })
+  return described(
+    (state) => {
+      const t = nextIf(state, m, true)
+      if (t === End) return state.eoi("NoneOf", expected, 1)
+      if (t === NoMatch) return state.backtrack("NoneOf", expected)
+      return t as Token<I>
+    },
+    expected[0],
+    { _tag: "OneOf", set, negate: true, encoding: undefined }
+  )
 }
 
 /**
@@ -314,18 +334,22 @@ export const noneOf = <I extends Input = string>(set: TokenSet<I>): Parser<Token
  */
 export const take = <I extends Input = string>(count: number): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> => {
   const expected = [count === 1 ? "1 token" : `${count} tokens`]
-  return described((state) => {
-    const start = state.pos
-    const { count: got, offset } = advance(state, start, count)
-    if (got < count) return state.eoi("Take", expected, count - got)
-    state.pos = offset
-    return state.slice(start, offset)
-  }, "take", { _tag: "Take", count, encoding: undefined })
+  return described(
+    (state) => {
+      const start = state.pos
+      const { count: got, offset } = advance(state, start, count)
+      if (got < count) return state.eoi("Take", expected, count - got)
+      state.pos = offset
+      return state.slice(start, offset)
+    },
+    "take",
+    { _tag: "Take", count, encoding: undefined }
+  )
 }
 
 const normalize = (r: Range | undefined): [number, number] => {
   if (r === undefined) return [0, Infinity]
-  if (typeof r === "number") return [r, r]
+  if (Predicate.isNumber(r)) return [r, r]
   return [r.min ?? 0, r.max ?? Infinity]
 }
 
@@ -342,16 +366,20 @@ export const takeWhileImpl = <I extends Input>(
   const m = compileAny(set)
   const [min, max] = normalize(r)
   const expected = [description ?? (negate ? `anything but ${m.description}` : m.description)]
-  return described((state) => {
-    const start = state.pos
-    const { count, hitEnd, offset } = scan(state, m, negate, max)
-    if (hitEnd && state.partial) return state.incomplete(1, expected)
-    if (count < min) return state.backtrack(kind, expected, offset)
-    // More matching tokens would have been accepted where we stopped
-    if (hint && count < max) state.setHint(offset, expected)
-    state.pos = offset
-    return state.slice(start, offset)
-  }, name, { _tag: "TakeWhile", set, negate, min, max, encoding: undefined })
+  return described(
+    (state) => {
+      const start = state.pos
+      const { count, hitEnd, offset } = scan(state, m, negate, max)
+      if (hitEnd && state.partial) return state.incomplete(1, expected)
+      if (count < min) return state.backtrack(kind, expected, offset)
+      // More matching tokens would have been accepted where we stopped
+      if (hint && count < max) state.setHint(offset, expected)
+      state.pos = offset
+      return state.slice(start, offset)
+    },
+    name,
+    { _tag: "TakeWhile", set, negate, min, max, encoding: undefined }
+  )
 }
 
 /**
@@ -406,24 +434,28 @@ export const takeUntil: {
   const [min, max] = normalize(r)
   const description = describeLiteral(lit)
   const expected = [description]
-  return described((state: State<Input>) => {
-    const start = state.pos
-    const idx = indexOf(state, lit, start)
-    if (idx < 0) {
-      if (state.partial) return state.incomplete(0, expected)
-      return state.backtrack("TakeUntil", expected, state.end)
-    }
-    // The literal was read but is not consumed (a string literal is up to three bytes per unit of UTF-8)
-    state.syntax?.read(idx + lit.length * (typeof lit === "string" && state.inputKind === 1 ? 3 : 1))
-    // As in winnow, the first occurrence must lie within the range
-    if (min > 0 || max !== Infinity) {
-      const count = countTokens(state, start, idx)
-      if (count < min) return state.backtrack("TakeUntil", expected, idx)
-      if (count > max) return state.backtrack("TakeUntil", expected)
-    }
-    state.pos = idx
-    return state.slice(start, idx)
-  }, "takeUntil", { _tag: "TakeUntil", literal: lit, ...bounds(r), encoding: undefined })
+  return described(
+    (state: State<Input>) => {
+      const start = state.pos
+      const idx = indexOf(state, lit, start)
+      if (idx < 0) {
+        if (state.partial) return state.incomplete(0, expected)
+        return state.backtrack("TakeUntil", expected, state.end)
+      }
+      // The literal was read but is not consumed (a string literal is up to three bytes per unit of UTF-8)
+      state.syntax?.read(idx + lit.length * (Predicate.isString(lit) && state.inputKind === 1 ? 3 : 1))
+      // As in winnow, the first occurrence must lie within the range
+      if (min > 0 || max !== Infinity) {
+        const count = countTokens(state, start, idx)
+        if (count < min) return state.backtrack("TakeUntil", expected, idx)
+        if (count > max) return state.backtrack("TakeUntil", expected)
+      }
+      state.pos = idx
+      return state.slice(start, idx)
+    },
+    "takeUntil",
+    { _tag: "TakeUntil", literal: lit, ...bounds(r), encoding: undefined }
+  )
 }
 
 /**
@@ -432,11 +464,15 @@ export const takeUntil: {
  * @since 0.1.0
  * @category slices
  */
-export const rest: Parser<string> = /*#__PURE__*/ described((state: State<any>) => {
-  const start = state.pos
-  state.pos = state.end
-  return state.slice(start, state.end) as string
-}, "rest", { _tag: "Rest", encoding: undefined })
+export const rest: Parser<string> = /*#__PURE__*/ described(
+  (state: State<any>) => {
+    const start = state.pos
+    state.pos = state.end
+    return state.slice(start, state.end) as string
+  },
+  "rest",
+  { _tag: "Rest", encoding: undefined }
+)
 
 /**
  * Takes the rest of an input of type `I`.
@@ -453,9 +489,13 @@ export const restOf = <I extends Input = string>(): Parser<Slice<NoInfer<I>>, ne
  * @since 0.1.0
  * @category slices
  */
-export const restLen: Parser<number, never, never, Input> = /*#__PURE__*/ described((state) => state.end - state.pos, "restLen", {
-  _tag: "RestLen"
-})
+export const restLen: Parser<number, never, never, Input> = /*#__PURE__*/ described(
+  (state) => state.end - state.pos,
+  "restLen",
+  {
+    _tag: "RestLen"
+  }
+)
 
 /**
  * Matches a token satisfying a predicate (nom's `satisfy`). Equivalent to

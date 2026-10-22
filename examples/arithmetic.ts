@@ -24,16 +24,10 @@ const parens: Parser.Parser<number, string> = Parser.delimited(
 
 const factor: Parser.Parser<number, string> = ws(Parser.alt(Ascii.decInt, parens))
 
-const term = Parser.separatedFoldl1(
-  factor,
-  Token.oneOf("*/"),
-  (l, op, r) => op === "*" ? l * r : l / r
-)
+const term = Parser.separatedFoldl1(factor, Token.oneOf("*/"), (l, op, r) => (op === "*" ? l * r : l / r))
 
-export const evaluate: Parser.Parser<number, string> = Parser.separatedFoldl1(
-  term,
-  Token.oneOf("+-"),
-  (l, op, r) => op === "+" ? l + r : l - r
+export const evaluate: Parser.Parser<number, string> = Parser.separatedFoldl1(term, Token.oneOf("+-"), (l, op, r) =>
+  op === "+" ? l + r : l - r
 )
 
 // -----------------------------------------------------------------------------
@@ -49,12 +43,16 @@ export type Expr =
 const binary = (left: Expr, op: string, right: Expr): Expr => ({ _tag: "Binary", op, left, right })
 
 export const ast: Parser.Parser<Expr, string> = Expression.make({
-  operand: ws(Parser.alt(
-    Ascii.decUint.pipe(Parser.map((value): Expr => ({ _tag: "Value", value }))),
-    Parser.delimited(Token.literal("("), Parser.suspend(() => ast), Token.literal(")")).pipe(
-      Parser.map((expr): Expr => ({ _tag: "Paren", expr }))
+  operand: ws(
+    Parser.alt(
+      Ascii.decUint.pipe(Parser.map((value): Expr => ({ _tag: "Value", value }))),
+      Parser.delimited(
+        Token.literal("("),
+        Parser.suspend(() => ast),
+        Token.literal(")")
+      ).pipe(Parser.map((expr): Expr => ({ _tag: "Paren", expr })))
     )
-  )),
+  ),
   operators: [
     Expression.prefix(ws(Token.literal("-")), 3, (_, expr: Expr): Expr => ({ _tag: "Neg", expr })),
     Expression.infixLeft(ws(Token.oneOf("*/")), 2, binary),
@@ -108,18 +106,25 @@ const kind = <K extends Tok["kind"]>(k: K) =>
   )
 
 const oper = (ops: string) =>
-  kind("Oper").pipe(Parser.filter((t) => ops.includes(t.op)), Parser.map((t) => t.op))
+  kind("Oper").pipe(
+    Parser.filter((t) => ops.includes(t.op)),
+    Parser.map((t) => t.op)
+  )
 
 const tokFactor: Parser.Parser<number, never, never, Tokens> = Parser.alt(
   kind("Value").pipe(Parser.map((t) => t.value)),
-  Parser.delimited(kind("OpenParen"), Parser.suspend(() => tokens), kind("CloseParen"))
+  Parser.delimited(
+    kind("OpenParen"),
+    Parser.suspend(() => tokens),
+    kind("CloseParen")
+  )
 )
 
-const tokTerm = Parser.separatedFoldl1(tokFactor, oper("*/"), (l, op, r) => op === "*" ? l * r : l / r)
+const tokTerm = Parser.separatedFoldl1(tokFactor, oper("*/"), (l, op, r) => (op === "*" ? l * r : l / r))
 
 /** The parser over tokens. */
 export const tokens: Parser.Parser<number, never, never, Tokens> = Parser.separatedFoldl1(
   tokTerm,
   oper("+-"),
-  (l, op, r) => op === "+" ? l + r : l - r
+  (l, op, r) => (op === "+" ? l + r : l - r)
 )

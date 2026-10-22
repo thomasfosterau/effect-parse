@@ -13,6 +13,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import * as Context from "effect/Context"
 import type { Encoding } from "./Encoding.js"
 import type { ErrorKind } from "./ParseError.js"
@@ -72,7 +73,7 @@ export const fromSource: {
   (source: BinaryInput): Uint8Array
   <I extends Input>(source: Source<I>): I
 } = (source: Input | BinaryInput): any => {
-  if (typeof source === "string" || source instanceof Uint8Array || Array.isArray(source)) return source
+  if (Predicate.isString(source) || source instanceof Uint8Array || Array.isArray(source)) return source
   if (ArrayBuffer.isView(source)) return new Uint8Array(source.buffer, source.byteOffset, source.byteLength)
   // An explicit length fixes the view's size even for a resizable buffer
   if (isArrayBufferLike(source)) return new Uint8Array(source, 0, source.byteLength)
@@ -80,7 +81,7 @@ export const fromSource: {
 }
 
 const isArrayBufferLike = (u: unknown): u is ArrayBufferLike =>
-  u instanceof ArrayBuffer || (typeof SharedArrayBuffer !== "undefined" && u instanceof SharedArrayBuffer)
+  u instanceof ArrayBuffer || (globalThis.SharedArrayBuffer !== undefined && u instanceof SharedArrayBuffer)
 
 /**
  * The type of a single token of an input.
@@ -88,10 +89,13 @@ const isArrayBufferLike = (u: unknown): u is ArrayBufferLike =>
  * @since 0.1.0
  * @category models
  */
-export type Token<I> = I extends string ? string
-  : I extends Uint8Array ? number
-  : I extends ReadonlyArray<infer T> ? T
-  : never
+export type Token<I> = I extends string
+  ? string
+  : I extends Uint8Array
+    ? number
+    : I extends ReadonlyArray<infer T>
+      ? T
+      : never
 
 /**
  * The type of a contiguous slice of an input.
@@ -99,10 +103,13 @@ export type Token<I> = I extends string ? string
  * @since 0.1.0
  * @category models
  */
-export type Slice<I> = I extends string ? string
-  : I extends Uint8Array ? Uint8Array
-  : I extends ReadonlyArray<infer T> ? ReadonlyArray<T>
-  : never
+export type Slice<I> = I extends string
+  ? string
+  : I extends Uint8Array
+    ? Uint8Array
+    : I extends ReadonlyArray<infer T>
+      ? ReadonlyArray<T>
+      : never
 
 /**
  * Sentinel returned by a parser step to signal failure. The failure details
@@ -252,18 +259,21 @@ export class State<I extends Input = Input> {
    */
   syntax: SyntaxBuilder | undefined = undefined
 
-  constructor(source: I | Source<I>, options?: {
-    readonly partial?: boolean | undefined
-    readonly context?: Context.Context<never> | undefined
-    readonly offset?: number | undefined
-  }) {
+  constructor(
+    source: I | Source<I>,
+    options?: {
+      readonly partial?: boolean | undefined
+      readonly context?: Context.Context<never> | undefined
+      readonly offset?: number | undefined
+    }
+  ) {
     const input = fromSource(source as Input) as I
     this.input = input
     this.end = input.length
     this.pos = options?.offset ?? 0
     this.partial = options?.partial ?? false
     this.context = options?.context ?? Context.empty()
-    this.inputKind = typeof input === "string" ? 0 : input instanceof Uint8Array ? 1 : 2
+    this.inputKind = Predicate.isString(input) ? 0 : input instanceof Uint8Array ? 1 : 2
     this.failure = initialFailure
   }
 
@@ -295,10 +305,13 @@ export class State<I extends Input = Input> {
    *
    * @since 0.2.0
    */
-  reset(offset: number = 0, options?: {
-    readonly partial?: boolean | undefined
-    readonly context?: Context.Context<never> | undefined
-  }): this {
+  reset(
+    offset: number = 0,
+    options?: {
+      readonly partial?: boolean | undefined
+      readonly context?: Context.Context<never> | undefined
+    }
+  ): this {
     this.pos = offset
     this.end = this.input.length
     this.partial = options?.partial ?? false
@@ -422,12 +435,17 @@ export class State<I extends Input = Input> {
     const f = this.failure
     const d = this.deepest
     if (
-      d === undefined || d === f || d.offset <= f.offset || this.mode === "Incomplete" ||
-      f.hasCause || f.message !== undefined
+      d === undefined ||
+      d === f ||
+      d.offset <= f.offset ||
+      this.mode === "Incomplete" ||
+      f.hasCause ||
+      f.message !== undefined
     ) {
       return f
     }
-    const context = d.context.length === 0 ? f.context : [...d.context, ...f.context.filter((l) => !d.context.includes(l))]
+    const context =
+      d.context.length === 0 ? f.context : [...d.context, ...f.context.filter((l) => !d.context.includes(l))]
     return new Failure(d.offset, d.kind, d.expected, context, d.hasCause, d.cause, d.message, d.needed)
   }
 
@@ -455,10 +473,7 @@ export class State<I extends Input = Input> {
 }
 
 /** @internal */
-export const mergeExpected = (
-  a: ReadonlyArray<string>,
-  b: ReadonlyArray<string>
-): ReadonlyArray<string> => {
+export const mergeExpected = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): ReadonlyArray<string> => {
   if (a.length === 0) return b
   if (b.length === 0) return a
   const out = a.slice()

@@ -12,13 +12,15 @@
  *
  * ```ts
  * Parser.parse(Compiler.jit(json), '{"a": [1, "é"]}')
- * Parser.parse(Compiler.jit(makeJson(Text.utf8)), new TextEncoder().encode('{"a": [1, "é"]}'))
+ * Parser.parse(Compiler.jit(jsonGrammar(Text.utf8)), new TextEncoder().encode('{"a": [1, "é"]}'))
  * ```
  */
 import { Ascii, Parser, Text, Token } from "@thomasfosterau/effect-parse"
 import type { Json } from "./json.js"
 
-export const makeJson = <I extends string | Uint8Array>(T: Text.TextParsers<I>): Parser.Parser<Json, never, never, I> => {
+export const jsonGrammar = <I extends string | Uint8Array>(
+  T: Text.TextParsers<I>
+): Parser.Parser<Json, never, never, I> => {
   const ws = T.takeWhile(" \t\r\n")
 
   const hex4 = T.takeWhile(Ascii.isHexDigit, 4).pipe(
@@ -30,7 +32,10 @@ export const makeJson = <I extends string | Uint8Array>(T: Text.TextParsers<I>):
 
   // \uXXXX: a high surrogate must be followed by an escaped low surrogate
   const unicodeEscape = Parser.alt(
-    hex4.pipe(Parser.filter((n) => !isHighSurrogate(n)), Parser.map((n) => String.fromCharCode(n))),
+    hex4.pipe(
+      Parser.filter((n) => !isHighSurrogate(n)),
+      Parser.map((n) => String.fromCharCode(n))
+    ),
     Parser.zipWith(
       hex4,
       Parser.cut(Parser.preceded(T.literal("\\u"), hex4.pipe(Parser.filter(isLowSurrogate)))),
@@ -39,7 +44,7 @@ export const makeJson = <I extends string | Uint8Array>(T: Text.TextParsers<I>):
   )
 
   const escapeChar = Parser.dispatch(T.any, {
-    "\"": Parser.succeed("\""),
+    '"': Parser.succeed('"'),
     "\\": Parser.succeed("\\"),
     "/": Parser.succeed("/"),
     b: Parser.succeed("\b"),
@@ -50,16 +55,11 @@ export const makeJson = <I extends string | Uint8Array>(T: Text.TextParsers<I>):
     u: unicodeEscape
   }).pipe(Parser.expected("escape sequence"))
 
-  const stringBody = T.escaped(
-    T.takeTill(["\"\\", Token.range("\u0000", "\u001f")]),
-    "\\",
-    Parser.cut(escapeChar)
-  )
+  const stringBody = T.escaped(T.takeTill(['"\\', Token.range("\u0000", "\u001f")]), "\\", Parser.cut(escapeChar))
 
-  const string = Parser.preceded(
-    T.literal("\""),
-    Parser.cut(Parser.terminated(stringBody, T.literal("\"")))
-  ).pipe(Parser.context("string"))
+  const string = Parser.preceded(T.literal('"'), Parser.cut(Parser.terminated(stringBody, T.literal('"')))).pipe(
+    Parser.context("string")
+  )
 
   const number = T.float.pipe(Parser.filter(Number.isFinite))
 
@@ -69,10 +69,15 @@ export const makeJson = <I extends string | Uint8Array>(T: Text.TextParsers<I>):
 
   const array: Parser.Parser<ReadonlyArray<Json>, never, never, I> = Parser.preceded(
     lexeme(T.literal("[")),
-    Parser.cut(Parser.terminated(
-      Parser.separated(Parser.suspend(() => value), comma),
-      T.literal("]")
-    ))
+    Parser.cut(
+      Parser.terminated(
+        Parser.separated(
+          Parser.suspend(() => value),
+          comma
+        ),
+        T.literal("]")
+      )
+    )
   ).pipe(Parser.context("array"))
 
   const member = Parser.separatedPair(
@@ -84,17 +89,14 @@ export const makeJson = <I extends string | Uint8Array>(T: Text.TextParsers<I>):
   const object: Parser.Parser<{ readonly [key: string]: Json }, never, never, I> = Parser.preceded(
     lexeme(T.literal("{")),
     Parser.cut(Parser.terminated(Parser.separated(member, comma), T.literal("}")))
-  ).pipe(
-    Parser.fromEntries,
-    Parser.context("object")
-  )
+  ).pipe(Parser.fromEntries, Parser.context("object"))
 
   const value: Parser.Parser<Json, never, never, I> = lexeme(
     Parser.dispatch(Parser.peek(T.any), {
       n: T.literal("null").pipe(Parser.as(null)),
       t: T.literal("true").pipe(Parser.as(true)),
       f: T.literal("false").pipe(Parser.as(false)),
-      "\"": string,
+      '"': string,
       "[": Parser.suspend(() => array),
       "{": Parser.suspend(() => object),
       "-": number,
@@ -115,4 +117,4 @@ export const makeJson = <I extends string | Uint8Array>(T: Text.TextParsers<I>):
 }
 
 /** A complete JSON document in a string, surrounded by optional whitespace. */
-export const json: Parser.Parser<Json> = makeJson(Text.string)
+export const json: Parser.Parser<Json> = jsonGrammar(Text.string)

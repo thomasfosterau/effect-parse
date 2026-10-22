@@ -14,8 +14,8 @@
  */
 import { Compiler, Encoding, Parser, Text } from "@thomasfosterau/effect-parse"
 import { json } from "../examples/json.ts"
-import { makeJson as makeFastJson } from "../examples/json-fast.ts"
-import { makeJson } from "../examples/json-text.ts"
+import { jsonGrammar as fastJsonGrammar } from "../examples/json-fast.ts"
+import { jsonGrammar } from "../examples/json-text.ts"
 import { parseFused } from "./json-fused.ts"
 
 const doc = JSON.stringify(
@@ -36,12 +36,12 @@ const utf16 = Encoding.utf16le.encode(doc)
 const decoder = new TextDecoder()
 
 const backends = ["interpreted", "closure", "jit"] as const
-type Backend = typeof backends[number]
+type Backend = (typeof backends)[number]
 
 /** A separate parser object per backend, since compilation is per parser. */
 const variant = <P extends Parser.Parser.Any>(p: P, backend: Backend): P => {
   const copy = Parser.named(p, p.name ?? "json") as P
-  return backend === "interpreted" ? copy : Compiler[backend](copy)
+  return backend === "interpreted" ? copy : (Compiler[backend](copy) as P)
 }
 
 interface Case {
@@ -53,11 +53,11 @@ interface Case {
 const cases: Array<Case> = []
 const grammars = [
   ["Token/Ascii, string", json, doc],
-  ["Text.string", makeJson(Text.string), doc],
-  ["Text.utf8", makeJson(Text.utf8), utf8],
-  ["Text.utf16le", makeJson(Text.utf16le), utf16],
-  ["json-fast.ts, Text.string", makeFastJson(Text.string), doc],
-  ["json-fast.ts, Text.utf8", makeFastJson(Text.utf8), utf8]
+  ["Text.string", jsonGrammar(Text.string), doc],
+  ["Text.utf8", jsonGrammar(Text.utf8), utf8],
+  ["Text.utf16le", jsonGrammar(Text.utf16le), utf16],
+  ["json-fast.ts, Text.string", fastJsonGrammar(Text.string), doc],
+  ["json-fast.ts, Text.utf8", fastJsonGrammar(Text.utf8), utf8]
 ] as const
 for (const [group, grammar, input] of grammars) {
   for (const backend of backends) {
@@ -65,8 +65,12 @@ for (const [group, grammar, input] of grammars) {
     cases.push({ group, name: backend, run: () => Parser.parseSync(p, input) })
   }
 }
-const jsonString = variant(makeJson(Text.string), "jit")
-cases.push({ group: "references", name: "TextDecoder + Text.string (jit)", run: () => Parser.parseSync(jsonString, decoder.decode(utf8)) })
+const jsonString = variant(jsonGrammar(Text.string), "jit")
+cases.push({
+  group: "references",
+  name: "TextDecoder + Text.string (jit)",
+  run: () => Parser.parseSync(jsonString, decoder.decode(utf8))
+})
 cases.push({ group: "references", name: "hand-fused, string", run: () => parseFused(doc) })
 cases.push({ group: "references", name: "JSON.parse", run: () => JSON.parse(doc) })
 
@@ -82,7 +86,7 @@ for (let round = 0; round < 40; round++) {
     const start = performance.now()
     c.run()
     const ms = performance.now() - start
-    if (ms < best.get(c)!) best.set(c, ms)
+    if (ms < (best.get(c) ?? Infinity)) best.set(c, ms)
   }
 }
 
@@ -95,9 +99,11 @@ for (const c of cases) {
     group = c.group
     console.log(group)
   }
-  const ms = best.get(c)!
+  const ms = best.get(c) ?? Infinity
   if (c.name === "interpreted") interpreted = ms
   const speedup = c.group !== "references" && c.name !== "interpreted" ? `  ${(interpreted / ms).toFixed(1)}x` : ""
   const mchars = doc.length / 1e6 / (ms / 1000)
-  console.log(`  ${c.name.padEnd(32)} ${ms.toFixed(2).padStart(7)} ms  ${mchars.toFixed(1).padStart(6)} M chars/s${speedup}`)
+  console.log(
+    `  ${c.name.padEnd(32)} ${ms.toFixed(2).padStart(7)} ms  ${mchars.toFixed(1).padStart(6)} M chars/s${speedup}`
+  )
 }

@@ -166,7 +166,7 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
   const tryOps = (state: State<any>, ops: ReadonlyArray<OperatorBase<any, any, any>>, mustConsume: boolean): number => {
     const start = state.pos
     for (let i = 0; i < ops.length; i++) {
-      const out = ops[i]!.parser.step(state)
+      const out = ops[i].parser.step(state)
       if (out !== Fail) {
         // A prefix or postfix operator matching nothing would apply forever
         if (mustConsume && state.pos === start) {
@@ -189,7 +189,7 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
     const p = tryOps(state, prefixes, true)
     if (p === -2) return Fail
     if (p >= 0) {
-      const op = prefixes[p]!
+      const op = prefixes[p]
       const opOut = matched
       const operandValue = expr(state, op.precedence * 2)
       if (operandValue === Fail) return Fail
@@ -211,7 +211,7 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
       const q = tryOps(state, postfixes, true)
       if (q === -2) return Fail
       if (q >= 0) {
-        const op = postfixes[q]!
+        const op = postfixes[q]
         if (op.precedence * 2 < minPower) {
           state.pos = start
           break
@@ -223,11 +223,16 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
       const i = tryOps(state, infixes, false)
       if (i === -2) return Fail
       if (i < 0) {
-        const f = postfixFailure === undefined ? failure : failure === undefined ? postfixFailure : mergeFailures(postfixFailure, failure)
+        const f =
+          postfixFailure === undefined
+            ? failure
+            : failure === undefined
+              ? postfixFailure
+              : mergeFailures(postfixFailure, failure)
         if (f !== undefined && f.offset === state.pos) state.setHint(f.offset, f.expected)
         break
       }
-      const op = infixes[i]!
+      const op = infixes[i]
       const leftPower = op.precedence * 2
       if (leftPower < minPower) {
         state.pos = start

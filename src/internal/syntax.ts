@@ -26,6 +26,7 @@
  * the input it looked at, plus a margin for the tokens that read a little
  * past where they stop, is unchanged.
  */
+import * as Predicate from "effect/Predicate"
 import type * as Context from "effect/Context"
 import type { Encoding } from "../Encoding.js"
 import type { ErrMode, Input, Source } from "../Input.js"
@@ -99,7 +100,7 @@ export const absolute = (f: Failure, start: number): Failure => rebase(f, -start
  * Builds a green node over `[start, end)` from the children waiting on the
  * stack.
  */
-export const build = (
+const build = (
   kind: string,
   named: boolean,
   key: object | undefined,
@@ -117,7 +118,7 @@ export const build = (
   let fields: Array<string | undefined> | undefined
   let hasError = error !== undefined
   for (let i = 0; i < n; i++) {
-    const e = entries[i]!
+    const e = entries[i]
     children[i] = e.green
     offsets[i] = e.start - start
     if (e.green.hasError) hasError = true
@@ -188,7 +189,7 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
         if (p < this.cursor) {
           // An attempt was abandoned (or a lookahead finished): drop its nodes
           const stack = this.stack
-          while (stack.length > 0 && stack[stack.length - 1]!.end > p) stack.pop()
+          while (stack.length > 0 && stack[stack.length - 1].end > p) stack.pop()
         }
         if (p > this.highWater) this.highWater = p
         this.cursor = p
@@ -198,9 +199,13 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
     })
   }
 
-  constructor(source: I | Source<I>, options: {
-    readonly context?: Context.Context<never> | undefined
-  }, previous: Previous | undefined) {
+  constructor(
+    source: I | Source<I>,
+    options: {
+      readonly context?: Context.Context<never> | undefined
+    },
+    previous: Previous | undefined
+  ) {
     super(source, { context: options.context })
     this.highWater = this.cursor
     this.stack = []
@@ -227,7 +232,7 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
     const start = this.cursor
     const stack = this.stack
     if (this.previous !== undefined) {
-      const green = this.reusable(key, start)
+      const green = this.reusable(this.previous, key, start)
       if (green !== undefined) {
         this.reused++
         const end = start + green.width
@@ -265,14 +270,19 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
     // Like Tree-sitter's rules, nodes are never empty: an empty match adds nothing to the tree
     if (end === start) return a
     const hinted = this.hintOffset !== hintOffset || this.hintExpected !== hintExpected
-    const diagnostics: Diagnostics | undefined = deepest === undefined && !hinted ? undefined : {
-      deepest,
-      base: start,
-      hintOffset: this.hintOffset - start,
-      hintExpected: hinted ? this.hintExpected : undefined
-    }
+    const diagnostics: Diagnostics | undefined =
+      deepest === undefined && !hinted
+        ? undefined
+        : {
+            deepest,
+            base: start,
+            hintOffset: this.hintOffset - start,
+            hintExpected: hinted ? this.hintExpected : undefined
+          }
     const entries = stack.splice(mark)
-    stack.push(new Child(build(kind, named, key, start, end, looked, entries, a, undefined, diagnostics), start, end, undefined))
+    stack.push(
+      new Child(build(kind, named, key, start, end, looked, entries, a, undefined, diagnostics), start, end, undefined)
+    )
     return a
   }
 
@@ -290,14 +300,14 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
     const stack = this.stack
     const mark = stack.length
     const a = step(state)
-    if (a !== Fail) for (let i = mark; i < stack.length; i++) stack[i]!.field = name
+    if (a !== Fail) for (let i = mark; i < stack.length; i++) stack[i].field = name
     return a
   }
 
   skipped(start: number, failure: Failure, mode: ErrMode): void {
     const stack = this.stack
     let i = stack.length
-    while (i > 0 && stack[i - 1]!.start >= start && stack[i - 1]!.end > start) i--
+    while (i > 0 && stack[i - 1].start >= start && stack[i - 1].end > start) i--
     const end = this.cursor
     const green = build(errorKind, true, undefined, start, end, this.highWater, stack.splice(i), undefined, {
       failure: rebase(failure, start),
@@ -315,7 +325,7 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
     const entries = this.stack.splice(0)
     const end = this.end
     if (fatal !== undefined) {
-      const last = entries.length > 0 ? entries[entries.length - 1]!.end : 0
+      const last = entries.length > 0 ? entries[entries.length - 1].end : 0
       const start = Math.max(Math.min(errorStart, end), last)
       const error = build(errorKind, true, undefined, start, end, end, [], undefined, {
         failure: rebase(fatal.failure, start),
@@ -332,8 +342,8 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
    * so the search starts from the parent of the last one found when
    * `offset` lies inside it: no ancestor of that parent can start there.
    */
-  private find(offset: number, key: object): Green | undefined {
-    let node = this.previous!.root
+  private find(root: Green, offset: number, key: object): Green | undefined {
+    let node = root
     let start = 0
     const last = this.lastParent
     if (last !== undefined && offset > this.lastParentStart && offset < this.lastParentStart + last.width) {
@@ -348,7 +358,7 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
       let found = -1
       while (lo <= hi) {
         const mid = (lo + hi) >> 1
-        if (start + offsets[mid]! <= offset) {
+        if (start + offsets[mid] <= offset) {
           found = mid
           lo = mid + 1
         } else {
@@ -356,8 +366,8 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
         }
       }
       if (found < 0) return undefined
-      const child = node.children[found]!
-      const childStart = start + offsets[found]!
+      const child = node.children[found]
+      const childStart = start + offsets[found]
       if (offset >= childStart + child.width) return undefined
       if (childStart === offset && child.key === key) {
         this.lastParent = node
@@ -370,20 +380,19 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
   }
 
   /** The node of the previous tree built by `key` at `pos` (in the new input), if it can be reused. */
-  private reusable(key: object, pos: number): Green | undefined {
-    const previous = this.previous!
+  private reusable(previous: Previous, key: object, pos: number): Green | undefined {
     const segments = previous.segments
     // The segment containing `pos`
     let lo = 0
     let hi = segments.length - 1
     while (lo <= hi) {
       const mid = (lo + hi) >> 1
-      const seg = segments[mid]!
+      const seg = segments[mid]
       if (pos < seg.newStart) hi = mid - 1
       else if (pos >= seg.newStart + seg.length) lo = mid + 1
       else {
         const old = seg.oldStart + (pos - seg.newStart)
-        const green = this.find(old, key)
+        const green = this.find(previous.root, old, key)
         if (green === undefined) return undefined
         const segEnd = seg.oldStart + seg.length
         // The input it looked at must be unchanged; past the end of both inputs counts as unchanged
@@ -404,7 +413,7 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
  * surrogate. Of bytes in an unknown encoding, up to four.
  */
 const tokenWidth = (input: Input, offset: number): number => {
-  if (typeof input === "string") {
+  if (Predicate.isString(input)) {
     const c = input.charCodeAt(offset)
     return c >= 0xd800 && c <= 0xdbff ? 2 : 1
   }

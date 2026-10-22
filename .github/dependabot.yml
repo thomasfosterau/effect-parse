@@ -1,0 +1,97 @@
+# Dependabot version updates, shaped like the owner's other Effect libraries.
+#
+# Groups are matched top to bottom and the FIRST match wins, so they run from
+# specific to general:
+#
+# - `toolchain`: vite-plus pins `oxlint`, `oxfmt` and `vitest` exactly, and
+#   `effect-tsgo patch` (the `prepare` script) matches the native `tsc`
+#   (`@typescript/native`) and that `oxlint` by gitHead / version and
+#   hard-errors (UnsupportedTargetPackageVersionError) on any pairing it has
+#   no artifact for. A PR moving one of them alone fails `pnpm install`, so
+#   they move as ONE group, with the TS6 alias (`typescript`, published as
+#   `@typescript/typescript6`) and the Effect lint plugin that loads inside
+#   oxlint. Check the `components` table in
+#   node_modules/@effect/tsgo/dist/effect-tsgo.cjs before merging.
+# - `effect`: the Effect 4 release line is a lockstep-versioned singleton set
+#   (`@effect/tsgo` is in `toolchain`, so it is excluded here).
+# - `changesets`, `fallow`: their own cadence.
+# - `minor-and-patch`: everything else, minor and patch only; a major of a
+#   remaining dependency arrives as its own PR.
+#
+# There is no benchmark-library group: the benchmarks compare against the
+# native `JSON.parse` only, and nothing else is benchmarked against.
+#
+# `cooldown` mirrors pnpm-workspace.yaml's `minimumReleaseAge` (1 day), with
+# the first-party `@thomasfosterau/*` packages exempt, as there.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    target-branch: "trunk"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 1
+      exclude:
+        - "@thomasfosterau/*"
+    groups:
+      toolchain:
+        applies-to: version-updates
+        patterns:
+          - "vite-plus"
+          - "vite"
+          - "vitest"
+          - "@vitest/*"
+          - "oxlint"
+          - "oxfmt"
+          - "oxlint-tsgolint"
+          - "@effect/tsgo"
+          - "@typescript/native"
+          - "typescript"
+          - "@typescript/typescript6"
+          - "@mpsuesser/oxlint-plugin-effect"
+        update-types: ["major", "minor", "patch"]
+      effect:
+        applies-to: version-updates
+        patterns:
+          - "effect"
+          - "@effect/*"
+        exclude-patterns:
+          - "@effect/tsgo"
+        update-types: ["major", "minor", "patch"]
+      changesets:
+        applies-to: version-updates
+        patterns:
+          - "@changesets/*"
+        update-types: ["major", "minor", "patch"]
+      fallow:
+        applies-to: version-updates
+        patterns:
+          - "fallow"
+        update-types: ["major", "minor", "patch"]
+      minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types: ["minor", "patch"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "trunk"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "src/index.ts",
+    "src/Input.ts",
+    "src/Parser.ts",
+    "src/Compiler.ts",
+    "src/ParseError.ts",
+    "src/Token.ts",
+    "src/Ascii.ts",
+    "src/Text.ts",
+    "src/Encoding.ts",
+    "src/Binary.ts",
+    "src/Bits.ts",
+    "src/Expression.ts",
+    "src/Nom.ts",
+    "src/ParserSchema.ts",
+    "src/ParserStream.ts",
+    "src/Syntax.ts",
+    "test/**/*.test.ts",
+    "test/**/*.types.ts",
+    "bench/*.bench.ts",
+    "examples/*.ts",
+    "vite.config.ts",
+    "scripts/check-dist.mjs"
+  ],
+  "ignorePatterns": ["**/dist/**", "**/coverage/**"],
+  "ignoreDependencies": [
+    "@types/node",
+    "@effect/tsgo",
+    "@effect/language-service",
+    "@typescript/native",
+    "typescript",
+    "vite",
+    "vitest",
+    "vite-plus",
+    "@changesets/cli",
+    "@changesets/changelog-github",
+    "@vitest/coverage-istanbul",
+    "fallow"
+  ],
+  "rules": {
+    "unused-files": "error",
+    "unused-exports": "error",
+    "unused-types": "error",
+    "unused-dependencies": "error",
+    "unused-dev-dependencies": "warn",
+    "unused-enum-members": "error",
+    "unused-class-members": "warn",
+    "unresolved-imports": "error",
+    "unlisted-dependencies": "error",
+    "duplicate-exports": "error",
+    "circular-dependencies": "error",
+    "boundary-violation": "error",
+    "stale-suppressions": "warn"
+  },
+  "duplicates": {
+    "ignore": ["examples/**"]
+  },
+  "audit": {
+    "healthBaseline": "fallow-baselines/health.json",
+    "dupesBaseline": "fallow-baselines/dupes.json"
+  },
+  "health": {
+    "maxCyclomatic": 20,
+    "maxCognitive": 15,
+    "maxCrap": 30,
+    "coverage": "coverage/coverage-final.json"
+  }
+}

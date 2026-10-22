@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
 import * as Json from "../examples/json.js"
-import { makeJson } from "../examples/json-text.js"
+import { jsonGrammar } from "../examples/json-text.js"
 import { Ascii, Encoding, Parser, Text, Token } from "../src/index.js"
 import type { Node, ParserLike } from "../src/internal/node.js"
 import { children, nodeOf } from "../src/internal/node.js"
@@ -25,7 +25,7 @@ const tagOf = (p: ParserLike): Node["_tag"] => nodeOf(p)._tag
 
 describe("parser descriptions", () => {
   it("describes the JSON grammars completely", () => {
-    for (const root of [Json.json, makeJson(Text.string), makeJson(Text.utf8)]) {
+    for (const root of [Json.json, jsonGrammar(Text.string), jsonGrammar(Text.utf8)]) {
       const t = tags(root)
       expect(t.Opaque).toBeUndefined()
       expect(t.Dispatch).toBe(2)
@@ -35,9 +35,13 @@ describe("parser descriptions", () => {
 
   it("marks undescribable parsers as opaque", () => {
     expect(tagOf(Parser.make(() => 1))).toBe("Opaque")
-    expect(tagOf(Parser.gen(function*() {
-      return yield* Token.any
-    }))).toBe("Opaque")
+    expect(
+      tagOf(
+        Parser.gen(function* () {
+          return yield* Token.any
+        })
+      )
+    ).toBe("Opaque")
     expect(tags(Arithmetic.ast).Opaque).toBe(1)
   })
 

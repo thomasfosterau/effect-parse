@@ -1,5 +1,5 @@
-import { Result } from "effect"
-import { expect } from "vitest"
+import * as Result from "effect/Result"
+import { assert, expect } from "vite-plus/test"
 import type { Input, Parser, ParseError } from "../src/index.js"
 import { Parser as P } from "../src/index.js"
 
@@ -11,7 +11,7 @@ export const expectSuccess = <A, E, I extends Input.Input>(
 ): void => {
   const result = P.parse(parser, input)
   if (Result.isFailure(result)) {
-    throw new Error(`expected success, got:\n${result.failure.message}`)
+    return assert.fail(`expected success, got:\n${result.failure.message}`)
   }
   expect(result.success).toEqual(expected)
 }
@@ -23,13 +23,17 @@ export const expectFailure = <A, E, I extends Input.Input>(
 ): ParseError.ParseError<E> => {
   const result = P.parse(parser, input)
   if (Result.isSuccess(result)) {
-    throw new Error(`expected failure, got: ${JSON.stringify(result.success)}`)
+    return assert.fail(`expected failure, got: ${JSON.stringify(result.success)}`)
   }
   return result.failure
 }
 
+/** `value`, failing the test when it is `undefined`. */
+export const defined = <A>(value: A | undefined): A => {
+  if (value === undefined) return assert.fail("expected a value, got undefined")
+  return value
+}
+
 /** nom-style: returns `[remaining, output]`. */
-export const peek = <A, E, I extends Input.Input>(
-  parser: Parser.Parser<A, E, never, I>,
-  input: NoInfer<I>
-) => Result.mapError(P.parsePeek(parser, input), (e) => e.message)
+export const peek = <A, E, I extends Input.Input>(parser: Parser.Parser<A, E, never, I>, input: NoInfer<I>) =>
+  Result.mapError(P.parsePeek(parser, input), (e) => e.message)

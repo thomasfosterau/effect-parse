@@ -9,7 +9,7 @@
  */
 import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
 
-const inline = Parser.gen(function*() {
+const inline = Parser.gen(function* () {
   yield* Token.literal("(")
   const x = yield* Ascii.decInt
   yield* Token.literal(",")
@@ -21,7 +21,7 @@ const inline = Parser.gen(function*() {
 const open = Token.literal("(")
 const comma = Token.literal(",")
 const close = Token.literal(")")
-const hoisted = Parser.gen(function*() {
+const hoisted = Parser.gen(function* () {
   yield* open
   const x = yield* Ascii.decInt
   yield* comma
@@ -30,7 +30,7 @@ const hoisted = Parser.gen(function*() {
   return { x, y }
 })
 
-const inlineSets = Parser.gen(function*() {
+const inlineSets = Parser.gen(function* () {
   const sign = yield* Parser.opt(Token.oneOf("+-"))
   const digits = yield* Token.takeWhile("0123456789", { min: 1 })
   yield* Token.takeWhile(" \t")
@@ -40,14 +40,14 @@ const inlineSets = Parser.gen(function*() {
 const sign = Parser.opt(Token.oneOf("+-"))
 const digits = Token.takeWhile("0123456789", { min: 1 })
 const space = Token.takeWhile(" \t")
-const hoistedSets = Parser.gen(function*() {
+const hoistedSets = Parser.gen(function* () {
   const s = yield* sign
   const d = yield* digits
   yield* space
   return s === undefined ? d : s + d
 })
 
-const cases: Array<[string, Parser.Parser<any>, string]> = [
+const cases: Array<[string, Parser.Parser<any, any>, string]> = [
   ["literals, inline", inline, "(12,-34)"],
   ["literals, hoisted", hoisted, "(12,-34)"],
   ["sets, inline", inlineSets, "-1234 "],
@@ -60,7 +60,7 @@ for (let round = 0; round < 15; round++) {
   cases.forEach(([, p, input], i) => {
     const t = performance.now()
     for (let j = 0; j < n; j++) Parser.parse(p, input)
-    best[i] = Math.min(best[i]!, performance.now() - t)
+    best[i] = Math.min(best[i], performance.now() - t)
   })
 }
-cases.forEach(([name], i) => console.log(`${name.padEnd(18)} ${(best[i]! * 1e6 / n).toFixed(0).padStart(6)} ns/parse`))
+cases.forEach(([name], i) => console.log(`${name.padEnd(18)} ${((best[i] * 1e6) / n).toFixed(0).padStart(6)} ns/parse`))

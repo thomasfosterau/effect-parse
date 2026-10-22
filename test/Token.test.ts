@@ -1,5 +1,6 @@
-import { Option, Result } from "effect"
-import { describe, expect, it } from "vitest"
+import * as Option from "effect/Option"
+import * as Result from "effect/Result"
+import { describe, expect, it } from "vite-plus/test"
 import { Parser, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 
@@ -99,7 +100,7 @@ describe("Token", () => {
 
     it("error messages", () => {
       const err = expectFailure(Token.oneOf("abc"), "z")
-      expect(err.message).toContain("expected one of \"abc\", found \"z\"")
+      expect(err.message).toContain('expected one of "abc", found "z"')
     })
   })
 
@@ -182,8 +183,8 @@ describe("Token", () => {
     })
 
     it("names the set in errors", () => {
-      expect(expectFailure(Token.oneOf(isNameStart), "1").message).toContain("expected name start, found \"1\"")
-      expect(expectFailure(Token.oneOf([isAstral, "a"]), "1").message).toContain("expected astral or \"a\"")
+      expect(expectFailure(Token.oneOf(isNameStart), "1").message).toContain('expected name start, found "1"')
+      expect(expectFailure(Token.oneOf([isAstral, "a"]), "1").message).toContain('expected astral or "a"')
     })
 
     it("bytes", () => {
@@ -201,7 +202,11 @@ describe("Token", () => {
   describe("string predicates", () => {
     it("receive whole characters, astral ones included", () => {
       const seen: Array<string> = []
-      expectSuccess(Token.takeWhile((c: string) => (seen.push(c), true)), "aé😀\ud800", "aé😀\ud800")
+      expectSuccess(
+        Token.takeWhile((c: string) => (seen.push(c), true)),
+        "aé😀\ud800",
+        "aé😀\ud800"
+      )
       expect(seen).toEqual(["a", "é", "😀", "\ud800"])
     })
   })
@@ -245,7 +250,7 @@ describe("Token", () => {
     }
 
     it("parsers built inside Parser.gen behave like hoisted ones", () => {
-      const inline = Parser.gen(function*() {
+      const inline = Parser.gen(function* () {
         const sign = yield* Parser.opt(Token.oneOf("+-"))
         const digits = yield* Token.takeWhile("0123456789", { min: 1 })
         yield* Token.literal(";")
@@ -265,12 +270,12 @@ describe("Token", () => {
 
     it("describes literals and sets the same way each time", () => {
       for (let i = 0; i < 2; i++) {
-        expect(String(Token.literal("a\"\n"))).toBe("Parser(\"a\\\"\\n\")")
-        expect(String(Token.literal(bytes(0x47, 0x0a)))).toBe("Parser(b\"G\\n\")")
-        expect(String(Token.literal(["a", 1]))).toBe("Parser([\"a\", 1])")
-        expect(String(Token.oneOf("+-"))).toBe("Parser(one of \"+-\")")
-        expect(String(Token.noneOf("x"))).toBe("Parser(anything but \"x\")")
-        expect(message(Token.takeUntil("a\"b"), "xyz")).toMatch(/expected "a\\"b", found end of input$/)
+        expect(String(Token.literal('a"\n'))).toBe('Parser("a\\"\\n")')
+        expect(String(Token.literal(bytes(0x47, 0x0a)))).toBe('Parser(b"G\\n")')
+        expect(String(Token.literal(["a", 1]))).toBe('Parser(["a", 1])')
+        expect(String(Token.oneOf("+-"))).toBe('Parser(one of "+-")')
+        expect(String(Token.noneOf("x"))).toBe('Parser(anything but "x")')
+        expect(message(Token.takeUntil('a"b'), "xyz")).toMatch(/expected "a\\"b", found end of input$/)
       }
     })
 
@@ -284,7 +289,11 @@ describe("Token", () => {
       expectSuccess(p, "b", "b")
       expectSuccess(Token.oneOf<Uint8Array>("ab"), bytes(0x61), 0x61)
       expectSuccess(Token.literal("é"), "é", "é")
-      expectSuccess(Parser.preceded(Token.literal("é"), Token.rest), new TextEncoder().encode("éx") as any, bytes(0x78) as any)
+      expectSuccess(
+        Parser.preceded(Token.literal("é"), Token.rest),
+        new TextEncoder().encode("éx") as any,
+        bytes(0x78) as any
+      )
     })
 
     it("stays correct with many distinct literals and sets", () => {

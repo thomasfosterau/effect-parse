@@ -1,16 +1,14 @@
 {
+  "$schema": "./node_modules/@effect/tsgo/schema.json",
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
+    // Tests, examples and benchmarks import the package by name, as a
+    // consumer would; the mapping resolves that name to `src/` so the type
+    // gate never needs `dist/` first.
     "paths": {
-      "@thomasfosterau/effect-parse": [
-        "./src/index.ts"
-      ]
+      "@thomasfosterau/effect-parse": ["./src/index.ts"]
     }
   },
-  "include": [
-    "src",
-    "test",
-    "examples"
-  ]
+  "include": ["src", "test", "examples", "bench"]
 }

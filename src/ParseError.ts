@@ -19,6 +19,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import * as Data from "effect/Data"
 import * as Option from "effect/Option"
 import type { Encoding } from "./Encoding.js"
@@ -74,7 +75,7 @@ export type ErrorKind =
  * @since 0.1.0
  * @category type ids
  */
-export const TypeId: "~effect-parse/ParseError" = "~effect-parse/ParseError"
+export const TypeId = "~effect-parse/ParseError" as const
 
 /**
  * An error produced by running a parser.
@@ -82,29 +83,31 @@ export const TypeId: "~effect-parse/ParseError" = "~effect-parse/ParseError"
  * @since 0.1.0
  * @category models
  */
-export class ParseError<out E = never> extends /*#__PURE__*/ Data.TaggedError("ParseError")<{
-  /** The input that was being parsed. */
-  readonly input: Input
-  /** The offset of the failure in the input. */
-  readonly offset: number
-  /** The kind of parser that failed. */
-  readonly kind: ErrorKind
-  /** How the error propagated before parsing stopped. */
-  readonly mode: ErrMode
-  /** Descriptions of what was expected at `offset`. */
-  readonly expected: ReadonlyArray<string>
-  /** Context labels (`Parser.context`), innermost first. */
-  readonly context: ReadonlyArray<string>
-  /** The user supplied cause, if any. */
-  readonly cause: E | undefined
-  /** An optional free-form description. */
-  readonly description: string | undefined
-  /**
-   * For byte inputs parsed by `Text` parsers, the text encoding. Errors
-   * then show the input as text, with line and column numbers.
-   */
-  readonly encoding?: Encoding<Uint8Array> | undefined
-}> {
+export class ParseError<out E = never>
+  extends /*#__PURE__*/ Data.TaggedError("ParseError")<{
+    /** The input that was being parsed. */
+    readonly input: Input
+    /** The offset of the failure in the input. */
+    readonly offset: number
+    /** The kind of parser that failed. */
+    readonly kind: ErrorKind
+    /** How the error propagated before parsing stopped. */
+    readonly mode: ErrMode
+    /** Descriptions of what was expected at `offset`. */
+    readonly expected: ReadonlyArray<string>
+    /** Context labels (`Parser.context`), innermost first. */
+    readonly context: ReadonlyArray<string>
+    /** The user supplied cause, if any. */
+    readonly cause: E | undefined
+    /** An optional free-form description. */
+    readonly description: string | undefined
+    /**
+     * For byte inputs parsed by `Text` parsers, the text encoding. Errors
+     * then show the input as text, with line and column numbers.
+     */
+    readonly encoding?: Encoding<Uint8Array> | undefined
+  }>
+{
   /**
    * @since 0.1.0
    */
@@ -141,8 +144,7 @@ export class ParseError<out E = never> extends /*#__PURE__*/ Data.TaggedError("P
  * @since 0.1.0
  * @category guards
  */
-export const isParseError = (u: unknown): u is ParseError<unknown> =>
-  typeof u === "object" && u !== null && TypeId in u
+export const isParseError = (u: unknown): u is ParseError<unknown> => Predicate.isObjectOrArray(u) && TypeId in u
 
 /**
  * Builds a `ParseError` from the failure details recorded while parsing.
@@ -163,7 +165,7 @@ export const fromFailure = <E = never>(
     mode,
     expected: failure.expected,
     context: failure.context,
-    cause: failure.hasCause ? failure.cause as E : undefined,
+    cause: failure.hasCause ? (failure.cause as E) : undefined,
     description: failure.message,
     encoding: input instanceof Uint8Array ? encoding : undefined
   })
@@ -211,7 +213,7 @@ export const lineColumn = (input: Input, offset: number, encoding?: Encoding<any
     })
     return { line, column }
   }
-  if (typeof input !== "string") return { line: 1, column: offset + 1 }
+  if (!Predicate.isString(input)) return { line: 1, column: offset + 1 }
   let line = 1
   let lineStart = 0
   for (let i = 0; i < offset && i < input.length; i++) {
@@ -244,7 +246,7 @@ const codePointCount = (s: string, start: number, end: number): number => {
  */
 export const formatExpected = (expected: ReadonlyArray<string>): string => {
   if (expected.length === 0) return ""
-  if (expected.length === 1) return expected[0]!
+  if (expected.length === 1) return expected[0]
   return `${expected.slice(0, -1).join(", ")} or ${expected[expected.length - 1]}`
 }
 
@@ -261,20 +263,20 @@ const describeFound = (input: Input, offset: number, encoding: Encoding<any> | u
       ? `incomplete ${encoding.name} sequence ${hexBytes(input.subarray(offset))}`
       : `invalid ${encoding.name} ${hexBytes(bad)}`
   }
-  if (typeof input === "string") {
-    const cp = input.codePointAt(offset)!
+  if (Predicate.isString(input)) {
+    const cp = input.codePointAt(offset) ?? Number.NaN
     return JSON.stringify(String.fromCodePoint(cp))
   }
   if (input instanceof Uint8Array) {
-    return `0x${input[offset]!.toString(16).padStart(2, "0")}`
+    return `0x${input[offset].toString(16).padStart(2, "0")}`
   }
   return inspectToken(input[offset])
 }
 
 /** @internal */
 export const inspectToken = (u: unknown): string => {
-  if (typeof u === "string") return JSON.stringify(u)
-  if (typeof u === "object" && u !== null) {
+  if (Predicate.isString(u)) return JSON.stringify(u)
+  if (Predicate.isObjectOrArray(u)) {
     try {
       return JSON.stringify(u)
     } catch {
@@ -286,9 +288,9 @@ export const inspectToken = (u: unknown): string => {
 
 const causeMessage = (cause: unknown): string | undefined => {
   if (cause === undefined) return undefined
-  if (typeof cause === "string") return cause
+  if (Predicate.isString(cause)) return cause
   if (cause instanceof Error) return cause.message
-  if (typeof cause === "object" && cause !== null && "message" in cause && typeof cause.message === "string") {
+  if (Predicate.isObjectOrArray(cause) && "message" in cause && Predicate.isString(cause.message)) {
     return cause.message
   }
   return inspectToken(cause)
@@ -318,12 +320,9 @@ const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | u
     if (line.endsWith("\r")) line = line.slice(0, -1)
     const gutter = String(lineColumn(input, offset, encoding).line)
     const pad = " ".repeat(gutter.length)
-    return [
-      `${gutter} | ${line}`,
-      `${pad} | ${" ".repeat(column - 1)}^`
-    ]
+    return [`${gutter} | ${line}`, `${pad} | ${" ".repeat(column - 1)}^`]
   }
-  if (typeof input === "string") {
+  if (Predicate.isString(input)) {
     const { column, line } = lineColumn(input, offset)
     let start = offset
     while (start > 0 && input.charCodeAt(start - 1) !== 10) start--
@@ -333,21 +332,15 @@ const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | u
     if (text.endsWith("\r")) text = text.slice(0, -1)
     const gutter = String(line)
     const pad = " ".repeat(gutter.length)
-    return [
-      `${gutter} | ${text}`,
-      `${pad} | ${" ".repeat(column - 1)}^`
-    ]
+    return [`${gutter} | ${text}`, `${pad} | ${" ".repeat(column - 1)}^`]
   }
   if (input instanceof Uint8Array) {
     const start = Math.max(0, offset - 8)
     const end = Math.min(input.length, offset + 8)
     const bytes: Array<string> = []
-    for (let i = start; i < end; i++) bytes.push(input[i]!.toString(16).padStart(2, "0"))
+    for (let i = start; i < end; i++) bytes.push(input[i].toString(16).padStart(2, "0"))
     const caret = (offset - start) * 3
-    return [
-      `${start.toString(16).padStart(8, "0")} | ${bytes.join(" ")}`,
-      `${" ".repeat(8)} | ${" ".repeat(caret)}^`
-    ]
+    return [`${start.toString(16).padStart(8, "0")} | ${bytes.join(" ")}`, `${" ".repeat(8)} | ${" ".repeat(caret)}^`]
   }
   return []
 }
@@ -355,7 +348,7 @@ const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | u
 const render = (error: ParseError<unknown>): string => {
   const { encoding, input, offset } = error
   const lines: Array<string> = []
-  if (typeof input === "string") {
+  if (Predicate.isString(input)) {
     const { column, line } = lineColumn(input, offset)
     lines.push(`Parse error at line ${line}, column ${column}:`)
   } else if (encoding !== undefined) {

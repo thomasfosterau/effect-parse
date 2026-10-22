@@ -4,6 +4,8 @@
  * repetition of pairs with `Object.fromEntries` (see `Parser.fromEntries`).
  */
 
+import * as Predicate from "effect/Predicate"
+
 /** The built-in `Object.fromEntries`, which compiled parsers recognize. */
 export const fromEntries: <K extends PropertyKey, V>(entries: Iterable<readonly [K, V]>) => { [P in K]: V } =
   Object.fromEntries as any
@@ -17,7 +19,7 @@ const hasOwn = objectPrototype.hasOwnProperty
  * property): `key` is a string that `Object.prototype` has no property for,
  * so there is no setter (`__proto__`) or read-only property to run into.
  */
-export const isPlainKey = (key: unknown): key is string => typeof key === "string" && !hasOwn.call(objectPrototype, key)
+export const isPlainKey = (key: unknown): key is string => Predicate.isString(key) && !hasOwn.call(objectPrototype, key)
 
 const define = (o: object, key: unknown, value: unknown): void => {
   Object.defineProperty(o, key as PropertyKey, { value, writable: true, enumerable: true, configurable: true })
@@ -36,7 +38,7 @@ export const addEntry = (
   key: unknown,
   value: unknown
 ): Array<unknown> | undefined => {
-  if (deferred === undefined && (typeof key !== "object" || key === null) && typeof key !== "function") {
+  if (deferred === undefined && !Predicate.isObjectOrArray(key) && !Predicate.isFunction(key)) {
     define(o, key, value)
     return undefined
   }

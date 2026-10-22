@@ -21,6 +21,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import type { Encoding } from "./Encoding.js"
 import type { Input, Slice, State } from "./Input.js"
@@ -30,7 +31,6 @@ import type { Parser } from "./Parser.js"
 import * as P from "./Parser.js"
 import * as numbers from "./internal/numbers.js"
 import * as Resume from "./internal/resume.js"
-import { latin1 } from "./internal/text.js"
 import { codePointPredicate } from "./internal/tokens.js"
 import { literalImpl, range, takeWhileImpl } from "./Token.js"
 import * as Token from "./Token.js"
@@ -39,7 +39,7 @@ import * as Token from "./Token.js"
 // Character predicates
 // -----------------------------------------------------------------------------
 
-const code = (c: string | number): number => typeof c === "number" ? c : c.charCodeAt(0)
+const code = (c: string | number): number => (Predicate.isNumber(c) ? c : c.charCodeAt(0))
 
 /**
  * `[a-zA-Z]`
@@ -47,10 +47,17 @@ const code = (c: string | number): number => typeof c === "number" ? c : c.charC
  * @since 0.1.0
  * @category predicates
  */
-export const isAlpha: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isAlpha", (c: string | number): boolean => {
-  const x = code(c)
-  return (x >= 65 && x <= 90) || (x >= 97 && x <= 122)
-}, [[65, 90], [97, 122]])
+export const isAlpha: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate(
+  "isAlpha",
+  (c: string | number): boolean => {
+    const x = code(c)
+    return (x >= 65 && x <= 90) || (x >= 97 && x <= 122)
+  },
+  [
+    [65, 90],
+    [97, 122]
+  ]
+)
 
 /**
  * `[0-9]`
@@ -58,10 +65,14 @@ export const isAlpha: (c: string | number) => boolean = /*#__PURE__*/ codePointP
  * @since 0.1.0
  * @category predicates
  */
-export const isDigit: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isDigit", (c: string | number): boolean => {
-  const x = code(c)
-  return x >= 48 && x <= 57
-}, [[48, 57]])
+export const isDigit: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate(
+  "isDigit",
+  (c: string | number): boolean => {
+    const x = code(c)
+    return x >= 48 && x <= 57
+  },
+  [[48, 57]]
+)
 
 /**
  * `[0-9a-fA-F]`
@@ -69,10 +80,18 @@ export const isDigit: (c: string | number) => boolean = /*#__PURE__*/ codePointP
  * @since 0.1.0
  * @category predicates
  */
-export const isHexDigit: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isHexDigit", (c: string | number): boolean => {
-  const x = code(c)
-  return (x >= 48 && x <= 57) || (x >= 65 && x <= 70) || (x >= 97 && x <= 102)
-}, [[48, 57], [65, 70], [97, 102]])
+export const isHexDigit: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate(
+  "isHexDigit",
+  (c: string | number): boolean => {
+    const x = code(c)
+    return (x >= 48 && x <= 57) || (x >= 65 && x <= 70) || (x >= 97 && x <= 102)
+  },
+  [
+    [48, 57],
+    [65, 70],
+    [97, 102]
+  ]
+)
 
 /**
  * `[0-7]`
@@ -80,10 +99,14 @@ export const isHexDigit: (c: string | number) => boolean = /*#__PURE__*/ codePoi
  * @since 0.1.0
  * @category predicates
  */
-export const isOctDigit: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isOctDigit", (c: string | number): boolean => {
-  const x = code(c)
-  return x >= 48 && x <= 55
-}, [[48, 55]])
+export const isOctDigit: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate(
+  "isOctDigit",
+  (c: string | number): boolean => {
+    const x = code(c)
+    return x >= 48 && x <= 55
+  },
+  [[48, 55]]
+)
 
 /**
  * `[0-9a-zA-Z]`
@@ -94,7 +117,11 @@ export const isOctDigit: (c: string | number) => boolean = /*#__PURE__*/ codePoi
 export const isAlphanumeric: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate(
   "isAlphanumeric",
   (c: string | number): boolean => isAlpha(c) || isDigit(c),
-  [[48, 57], [65, 90], [97, 122]]
+  [
+    [48, 57],
+    [65, 90],
+    [97, 122]
+  ]
 )
 
 /**
@@ -103,10 +130,17 @@ export const isAlphanumeric: (c: string | number) => boolean = /*#__PURE__*/ cod
  * @since 0.1.0
  * @category predicates
  */
-export const isSpace: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isSpace", (c: string | number): boolean => {
-  const x = code(c)
-  return x === 32 || x === 9
-}, [[9, 9], [32, 32]])
+export const isSpace: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate(
+  "isSpace",
+  (c: string | number): boolean => {
+    const x = code(c)
+    return x === 32 || x === 9
+  },
+  [
+    [9, 9],
+    [32, 32]
+  ]
+)
 
 /**
  * `[ \t\r\n]`
@@ -114,10 +148,18 @@ export const isSpace: (c: string | number) => boolean = /*#__PURE__*/ codePointP
  * @since 0.1.0
  * @category predicates
  */
-export const isMultispace: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isMultispace", (c: string | number): boolean => {
-  const x = code(c)
-  return x === 32 || x === 9 || x === 10 || x === 13
-}, [[9, 10], [13, 13], [32, 32]])
+export const isMultispace: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate(
+  "isMultispace",
+  (c: string | number): boolean => {
+    const x = code(c)
+    return x === 32 || x === 9 || x === 10 || x === 13
+  },
+  [
+    [9, 10],
+    [13, 13],
+    [32, 32]
+  ]
+)
 
 /**
  * `\n`
@@ -125,7 +167,11 @@ export const isMultispace: (c: string | number) => boolean = /*#__PURE__*/ codeP
  * @since 0.1.0
  * @category predicates
  */
-export const isNewline: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate("isNewline", (c: string | number): boolean => code(c) === 10, [[10, 10]])
+export const isNewline: (c: string | number) => boolean = /*#__PURE__*/ codePointPredicate(
+  "isNewline",
+  (c: string | number): boolean => code(c) === 10,
+  [[10, 10]]
+)
 
 // Token sets usable for both string and byte input
 const alphaSet = [/*#__PURE__*/ range("a", "z"), /*#__PURE__*/ range("A", "Z")]
@@ -291,7 +337,9 @@ export const tab: Parser<"\t"> = /*#__PURE__*/ Token.literal("\t")
  * @since 0.1.0
  * @category line endings
  */
-export const lineEnding: Parser<"\n" | "\r\n"> = /*#__PURE__*/ P.alt(newline, crlf).pipe(/*#__PURE__*/ P.expected("line ending"))
+export const lineEnding: Parser<"\n" | "\r\n"> = /*#__PURE__*/ P.alt(newline, crlf).pipe(
+  /*#__PURE__*/ P.expected("line ending")
+)
 
 const expectedLineEnding = ["line ending"]
 
@@ -303,39 +351,39 @@ const expectedLineEnding = ["line ending"]
  * @since 0.1.0
  * @category line endings
  */
-export const tillLineEnding: Parser<string> = /*#__PURE__*/ P.described<string>((state: State<any>) => {
-  const start = state.pos
-  const input = state.input
-  const isString = state.inputKind === 0
-  let i = start
-  while (i < state.end) {
-    const c = isString ? (input as string).charCodeAt(i) : (input as Uint8Array)[i]
-    if (c === 10) break
-    if (c === 13) {
-      // The line feed after it is read, not consumed
-      state.syntax?.read(i + 2)
-      if (i + 1 >= state.end) {
-        if (state.partial) return state.incomplete(1, expectedLineEnding)
+export const tillLineEnding: Parser<string> = /*#__PURE__*/ P.described<string>(
+  (state: State<any>) => {
+    const start = state.pos
+    const input = state.input
+    const isString = state.inputKind === 0
+    let i = start
+    while (i < state.end) {
+      const c = isString ? (input as string).charCodeAt(i) : (input as Uint8Array)[i]
+      if (c === 10) break
+      if (c === 13) {
+        // The line feed after it is read, not consumed
+        state.syntax?.read(i + 2)
+        if (i + 1 >= state.end) {
+          if (state.partial) return state.incomplete(1, expectedLineEnding)
+          return state.backtrack("LineEnding", expectedLineEnding, i)
+        }
+        const d = isString ? (input as string).charCodeAt(i + 1) : (input as Uint8Array)[i + 1]
+        if (d === 10) break
         return state.backtrack("LineEnding", expectedLineEnding, i)
       }
-      const d = isString ? (input as string).charCodeAt(i + 1) : (input as Uint8Array)[i + 1]
-      if (d === 10) break
-      return state.backtrack("LineEnding", expectedLineEnding, i)
+      i++
     }
-    i++
-  }
-  if (i >= state.end && state.partial) return state.incomplete(1, expectedLineEnding)
-  state.pos = i
-  return state.slice(start, i) as string
-}, "tillLineEnding", { _tag: "TillLineEnding", encoding: undefined })
+    if (i >= state.end && state.partial) return state.incomplete(1, expectedLineEnding)
+    state.pos = i
+    return state.slice(start, i) as string
+  },
+  "tillLineEnding",
+  { _tag: "TillLineEnding", encoding: undefined }
+)
 
 // -----------------------------------------------------------------------------
 // Numbers
 // -----------------------------------------------------------------------------
-
-const toText = (s: Input): string =>
-  typeof s === "string" ? s : s instanceof Uint8Array ? latin1.text(s, 0, s.length) : s.join("")
-
 
 /** @internal */
 export const overflow = (value: number): Result.Result<number, string> =>
@@ -349,7 +397,7 @@ export const overflow = (value: number): Result.Result<number, string> =>
  * @category numbers
  */
 export const decUint: Parser<number, string> = /*#__PURE__*/ digit1.pipe(
-  /*#__PURE__*/ P.tryMap((s) => overflow(Number(toText(s)))),
+  /*#__PURE__*/ P.tryMap((s) => overflow(Number(numbers.toText(s)))),
   /*#__PURE__*/ P.named("decUint")
 )
 
@@ -361,8 +409,10 @@ export const decUint: Parser<number, string> = /*#__PURE__*/ digit1.pipe(
  * @since 0.1.0
  * @category numbers
  */
-export const decInt: Parser<number, string> = /*#__PURE__*/ P.taken(/*#__PURE__*/ P.seq(/*#__PURE__*/ P.opt(/*#__PURE__*/ Token.oneOf("+-")), digit1)).pipe(
-  /*#__PURE__*/ P.tryMap((s) => overflow(Number(toText(s)))),
+export const decInt: Parser<number, string> = /*#__PURE__*/ P.taken(
+  /*#__PURE__*/ P.seq(/*#__PURE__*/ P.opt(/*#__PURE__*/ Token.oneOf("+-")), digit1)
+).pipe(
+  /*#__PURE__*/ P.tryMap((s) => overflow(Number(numbers.toText(s)))),
   /*#__PURE__*/ P.named("decInt")
 )
 
@@ -372,7 +422,9 @@ export const decInt: Parser<number, string> = /*#__PURE__*/ P.taken(/*#__PURE__*
  * @since 0.1.0
  * @category numbers
  */
-export const decBigUint: Parser<bigint> = /*#__PURE__*/ digit1.pipe(/*#__PURE__*/ P.map((s) => BigInt(toText(s))))
+export const decBigUint: Parser<bigint> = /*#__PURE__*/ digit1.pipe(
+  /*#__PURE__*/ P.map((s) => BigInt(numbers.toText(s)))
+)
 
 /**
  * A signed decimal integer as a `bigint`, of any size.
@@ -380,9 +432,11 @@ export const decBigUint: Parser<bigint> = /*#__PURE__*/ digit1.pipe(/*#__PURE__*
  * @since 0.1.0
  * @category numbers
  */
-export const decBigInt: Parser<bigint> = /*#__PURE__*/ P.taken(/*#__PURE__*/ P.seq(/*#__PURE__*/ P.opt(/*#__PURE__*/ Token.oneOf("+-")), digit1)).pipe(
+export const decBigInt: Parser<bigint> = /*#__PURE__*/ P.taken(
+  /*#__PURE__*/ P.seq(/*#__PURE__*/ P.opt(/*#__PURE__*/ Token.oneOf("+-")), digit1)
+).pipe(
   /*#__PURE__*/ P.map((s) => {
-    const t = toText(s)
+    const t = numbers.toText(s)
     return BigInt(t.startsWith("+") ? t.slice(1) : t)
   })
 )
@@ -395,21 +449,29 @@ export const decBigInt: Parser<bigint> = /*#__PURE__*/ P.taken(/*#__PURE__*/ P.s
  * @category numbers
  */
 export const hexUint: Parser<number, string> = /*#__PURE__*/ hexDigit1.pipe(
-  /*#__PURE__*/ P.tryMap((s) => overflow(parseInt(toText(s), 16))),
+  /*#__PURE__*/ P.tryMap((s) => overflow(parseInt(numbers.toText(s), 16))),
   /*#__PURE__*/ P.named("hexUint")
 )
 
 const sign = /*#__PURE__*/ P.opt(/*#__PURE__*/ Token.oneOf("+-"))
 const exponent = /*#__PURE__*/ P.opt(/*#__PURE__*/ P.seq(/*#__PURE__*/ Token.oneOf("eE"), sign, digit1))
 const unsignedFloat = /*#__PURE__*/ P.alt(
-  /*#__PURE__*/ P.seq(/*#__PURE__*/ literalImpl("inf", true), /*#__PURE__*/ P.opt(/*#__PURE__*/ literalImpl("inity", true))),
+  /*#__PURE__*/ P.seq(
+    /*#__PURE__*/ literalImpl("inf", true),
+    /*#__PURE__*/ P.opt(/*#__PURE__*/ literalImpl("inity", true))
+  ),
   /*#__PURE__*/ P.seq(/*#__PURE__*/ Token.literal("."), digit1, exponent),
-  /*#__PURE__*/ P.seq(digit1, /*#__PURE__*/ P.opt(/*#__PURE__*/ P.seq(/*#__PURE__*/ Token.literal("."), /*#__PURE__*/ P.opt(digit1))), exponent)
+  /*#__PURE__*/ P.seq(
+    digit1,
+    /*#__PURE__*/ P.opt(/*#__PURE__*/ P.seq(/*#__PURE__*/ Token.literal("."), /*#__PURE__*/ P.opt(digit1))),
+    exponent
+  )
 )
-const floatText = /*#__PURE__*/ numbers.floatText(/*#__PURE__*/ P.taken(/*#__PURE__*/ P.alt(
-  /*#__PURE__*/ literalImpl("nan", true),
-  /*#__PURE__*/ P.seq(sign, unsignedFloat)
-)).pipe(/*#__PURE__*/ P.expected("number")) as Parser<string>)
+const floatText = /*#__PURE__*/ numbers.floatText(
+  /*#__PURE__*/ P.taken(
+    /*#__PURE__*/ P.alt(/*#__PURE__*/ literalImpl("nan", true), /*#__PURE__*/ P.seq(sign, unsignedFloat))
+  ).pipe(/*#__PURE__*/ P.expected("number")) as Parser<string>
+)
 
 /** @internal */
 export const toFloat: (s: Input) => number = numbers.toFloat
@@ -429,7 +491,10 @@ export const toFloat: (s: Input) => number = numbers.toFloat
  * @since 0.1.0
  * @category numbers
  */
-export const float: Parser<number> = /*#__PURE__*/ floatText.pipe(/*#__PURE__*/ P.map(toFloat), /*#__PURE__*/ P.named("float"))
+export const float: Parser<number> = /*#__PURE__*/ floatText.pipe(
+  /*#__PURE__*/ P.map(toFloat),
+  /*#__PURE__*/ P.named("float")
+)
 
 // -----------------------------------------------------------------------------
 // Literals
@@ -451,7 +516,7 @@ export const caseless: {
 // Escapes
 // -----------------------------------------------------------------------------
 
-const controlCode = (c: string | number): number => typeof c === "number" ? c : c.charCodeAt(0)
+const controlCode = (c: string | number): number => (Predicate.isNumber(c) ? c : c.charCodeAt(0))
 
 const atControl = (state: State<Input>, control: number): boolean => {
   if (state.pos >= state.end) return false
@@ -485,11 +550,18 @@ export const takeEscaped = <A, E, R, I extends Input, B, E2, R2, I2 extends Inpu
   escapable: Parser<B, E2, R2, I2>
 ): Parser<Slice<I & I2>, E | E2, R | R2, I & I2> => {
   const ctrl = controlCode(control)
-  return takeEscapedImpl(normal, (state) => {
-    if (!atControl(state, ctrl)) return false
-    state.pos++
-    return true
-  }, escapable, (state, start) => state.slice(start, state.pos) as Slice<I & I2>, ctrl, undefined)
+  return takeEscapedImpl(
+    normal,
+    (state) => {
+      if (!atControl(state, ctrl)) return false
+      state.pos++
+      return true
+    },
+    escapable,
+    (state, start) => state.slice(start, state.pos) as Slice<I & I2>,
+    ctrl,
+    undefined
+  )
 }
 
 const isIncomplete = (state: State<any>): boolean => state.mode === "Incomplete"
@@ -515,42 +587,47 @@ export const takeEscapedImpl = <A, E, R, I extends Input, B, E2, R2, I2 extends 
   const normalStep = normal.step
   const escStep = escapable.step
   const key = {}
-  return P.described((state: State<any>) => {
-    const start = state.pos
-    let resumed = false
-    if (state.resume !== undefined) {
-      const checkpoint = Resume.take(state, key, start) as number | Resume.Done | undefined
-      if (checkpoint instanceof Resume.Done) {
-        state.pos = checkpoint.pos
-        return checkpoint.value as S
+  return P.described(
+    (state: State<any>) => {
+      const start = state.pos
+      let resumed = false
+      if (state.resume !== undefined) {
+        const checkpoint = Resume.take(state, key, start) as number | Resume.Done | undefined
+        if (checkpoint instanceof Resume.Done) {
+          state.pos = checkpoint.pos
+          return checkpoint.value as S
+        }
+        if (checkpoint !== undefined) {
+          state.pos = checkpoint
+          resumed = true
+        }
       }
-      if (checkpoint !== undefined) {
-        state.pos = checkpoint
-        resumed = true
+      while (state.pos < state.end) {
+        const before = state.pos
+        const a = normalStep(state)
+        if (a !== Fail) {
+          if (state.pos === before)
+            return state.failMessage("Cut", "Assert", "`takeEscaped` parsers must always consume")
+          continue
+        }
+        if (state.mode === "Incomplete") return suspendAt(state, key, start, before)
+        if (state.mode !== "Backtrack") return Fail
+        state.pos = before
+        if (matchControl(state)) {
+          if (escStep(state) === Fail) return isIncomplete(state) ? suspendAt(state, key, start, before) : Fail
+        } else {
+          return Resume.done(state, key, start, resumed, slice(state, start))
+        }
       }
-    }
-    while (state.pos < state.end) {
-      const before = state.pos
-      const a = normalStep(state)
-      if (a !== Fail) {
-        if (state.pos === before) return state.failMessage("Cut", "Assert", "`takeEscaped` parsers must always consume")
-        continue
+      if (state.partial) {
+        state.incomplete(0)
+        return suspendAt(state, key, start, state.pos)
       }
-      if (state.mode === "Incomplete") return suspendAt(state, key, start, before)
-      if (state.mode !== "Backtrack") return Fail
-      state.pos = before
-      if (matchControl(state)) {
-        if (escStep(state) === Fail) return isIncomplete(state) ? suspendAt(state, key, start, before) : Fail
-      } else {
-        return Resume.done(state, key, start, resumed, slice(state, start))
-      }
-    }
-    if (state.partial) {
-      state.incomplete(0)
-      return suspendAt(state, key, start, state.pos)
-    }
-    return Resume.done(state, key, start, resumed, slice(state, start))
-  }, "takeEscaped", { _tag: "Escaped", normal, control, escape: escapable, raw: true, encoding })
+      return Resume.done(state, key, start, resumed, slice(state, start))
+    },
+    "takeEscaped",
+    { _tag: "Escaped", normal, control, escape: escapable, raw: true, encoding }
+  )
 }
 
 /**
@@ -587,11 +664,17 @@ export const escaped = <E, R, I extends Input, E2, R2, I2 extends Input>(
   escape: Parser<string, E2, R2, I2>
 ): Parser<string, E | E2, R | R2, I & I2> => {
   const ctrl = controlCode(control)
-  return escapedImpl(normal, (state) => {
-    if (!atControl(state, ctrl)) return false
-    state.pos++
-    return true
-  }, escape, ctrl, undefined)
+  return escapedImpl(
+    normal,
+    (state) => {
+      if (!atControl(state, ctrl)) return false
+      state.pos++
+      return true
+    },
+    escape,
+    ctrl,
+    undefined
+  )
 }
 
 /** How far `escaped` got: the text so far, and where to carry on. */
@@ -611,58 +694,64 @@ export const escapedImpl = <E, R, I extends Input, E2, R2, I2 extends Input>(
   const normalStep = normal.step
   const escStep = escape.step
   const key = {}
-  return P.described((state: State<any>) => {
-    const start = state.pos
-    let out = ""
-    let resumed = false
-    if (state.resume !== undefined) {
-      const checkpoint = Resume.take(state, key, start) as EscapedCheckpoint | Resume.Done | undefined
-      if (checkpoint instanceof Resume.Done) {
-        state.pos = checkpoint.pos
-        return checkpoint.value as string
-      }
-      if (checkpoint !== undefined) {
-        out = checkpoint.out
-        state.pos = checkpoint.pos
-        resumed = true
-      }
-    }
-    while (state.pos < state.end) {
-      const before = state.pos
-      const a = normalStep(state)
-      if (a !== Fail) {
-        if (state.pos !== before) {
-          out += a
-          continue
+  return P.described(
+    (state: State<any>) => {
+      const start = state.pos
+      let out = ""
+      let resumed = false
+      if (state.resume !== undefined) {
+        const checkpoint = Resume.take(state, key, start) as EscapedCheckpoint | Resume.Done | undefined
+        if (checkpoint instanceof Resume.Done) {
+          state.pos = checkpoint.pos
+          return checkpoint.value as string
         }
-        // `normal` matched nothing: fall through to the control character
-      } else {
-        if (state.mode === "Incomplete") return suspendAt(state, key, start, { out, pos: before })
-        if (state.mode !== "Backtrack") return Fail
-        state.pos = before
+        if (checkpoint !== undefined) {
+          out = checkpoint.out
+          state.pos = checkpoint.pos
+          resumed = true
+        }
       }
-      if (matchControl(state)) {
-        const b = escStep(state)
-        if (b === Fail) return isIncomplete(state) ? suspendAt(state, key, start, { out, pos: before }) : Fail
-        out += b
-      } else {
-        return Resume.done(state, key, start, resumed, out)
+      while (state.pos < state.end) {
+        const before = state.pos
+        const a = normalStep(state)
+        if (a !== Fail) {
+          if (state.pos !== before) {
+            out += a
+            continue
+          }
+          // `normal` matched nothing: fall through to the control character
+        } else {
+          if (state.mode === "Incomplete") return suspendAt(state, key, start, { out, pos: before })
+          if (state.mode !== "Backtrack") return Fail
+          state.pos = before
+        }
+        if (matchControl(state)) {
+          const b = escStep(state)
+          if (b === Fail) return isIncomplete(state) ? suspendAt(state, key, start, { out, pos: before }) : Fail
+          out += b
+        } else {
+          return Resume.done(state, key, start, resumed, out)
+        }
       }
-    }
-    if (state.partial) {
-      state.incomplete(0)
-      return suspendAt(state, key, start, { out, pos: state.pos })
-    }
-    return Resume.done(state, key, start, resumed, out)
-  }, "escaped", { _tag: "Escaped", normal, control, escape, raw: false, encoding })
+      if (state.partial) {
+        state.incomplete(0)
+        return suspendAt(state, key, start, { out, pos: state.pos })
+      }
+      return Resume.done(state, key, start, resumed, out)
+    },
+    "escaped",
+    { _tag: "Escaped", normal, control, escape, raw: false, encoding }
+  )
 }
 
 // -----------------------------------------------------------------------------
 // Byte views
 // -----------------------------------------------------------------------------
 
-type Bytes<P> = P extends Parser<infer A, infer E, infer R, infer _I> ? Parser<A extends string ? Uint8Array : A, E, R, Uint8Array>
-  : never
+type Bytes<P> =
+  P extends Parser<infer A, infer E, infer R, infer _I>
+    ? Parser<A extends string ? Uint8Array : A, E, R, Uint8Array>
+    : never
 
 /**
  * The parsers of this module, typed for `Uint8Array` input. Slices are
