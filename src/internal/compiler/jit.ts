@@ -25,6 +25,7 @@ import type { Node, NodeOf, ParserLike } from "../node.js"
 import { addEntry, flushEntries, fromEntries, isPlainKey } from "../entries.js"
 import { children, nodeOf } from "../node.js"
 import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from "../numbers.js"
+import { compileAny } from "../tokens.js"
 import * as Resume from "../resume.js"
 import { charOf, fastLimit, latin1, string, utf16be, utf16le, utf8, validate } from "../text.js"
 import type { ClosureCompiler, Fallback, Step } from "./closure.js"
@@ -365,6 +366,65 @@ class Emitter {
     )
   }
 
+  /**
+   * Token code for string and byte input, or the parser's step for input
+   * the code can't read. In a resumable build, code that read within
+   * `lookahead` units of the end of a partial input re-runs interpreted.
+   */
+  private leaf(
+    p: ParserLike,
+    node: NodeOf<"Any" | "Literal" | "OneOf" | "TakeWhile">,
+    used: boolean,
+    out: string | null,
+    fail: string,
+    fn: Fn,
+    lookahead: number = Margin
+  ): string {
+    if (!this.native(node.encoding)) return this.delegate(p, used, out, fail, fn)
+    if (!this.resumable) return this.token(node, out, fail, fn) ?? this.delegate(p, used, out, fail, fn)
+    const bad = this.label()
+    const code = this.token(node, out, `break ${bad};`, fn)
+    if (code === undefined) return this.delegate(p, used, out, fail, fn)
+    return this.partialSafe(p, code, bad, lookahead, out, fail, fn)
+  }
+
+  /** Whether a token parser reads array input as such (`Token`'s, on an array). */
+  private array(enc: Encoding<any> | undefined): boolean {
+    return this.kind === 2 && enc === undefined
+  }
+
+  /**
+   * Token code for array input, built by `code` with its failure code. Its
+   * set's predicate (or membership test) is called on the element, as the
+   * interpreter calls it. In a resumable build, code that read the last
+   * element of a partial input re-runs interpreted.
+   */
+  private arrayLeaf(p: ParserLike, code: (fail: string) => string, out: string | null, fail: string, fn: Fn): string {
+    if (!this.resumable) return code(fail)
+    const bad = this.label()
+    return this.partialSafe(p, code(`break ${bad};`), bad, 1, out, fail, fn)
+  }
+
+  private arrayAny(out: string | null, fail: string): string {
+    return `if(p>=E){${BT}${fail}}${out === null ? "" : `${out}=I[p];`}p++;`
+  }
+
+  private arrayOneOf(node: NodeOf<"OneOf">, out: string | null, fail: string): string {
+    const m = this.const(compileAny(node.set).forCode.token)
+    return `if(p>=E||${m}(I[p])===${node.negate}){${BT}${fail}}${out === null ? "" : `${out}=I[p];`}p++;`
+  }
+
+  private arrayTakeWhile(node: NodeOf<"TakeWhile">, out: string | null, fail: string, fn: Fn): string {
+    const m = this.const(compileAny(node.set).forCode.token)
+    const st = this.v(fn)
+    const max = node.max === Infinity ? "" : `&&p-${st}<${node.max}`
+    return (
+      `${st}=p;while(p<E${max}&&${m}(I[p])!==${node.negate})p++;` +
+      (node.min > 0 ? `if(p-${st}<${node.min}){${BT}${fail}}` : "") +
+      (out === null ? "" : `${out}=I.slice(${st},p);`)
+    )
+  }
+
   call(name: string, out: string | null, fail: string): string {
     if (out === null) return `if(${name}(p)===F){${fail}}p=P;`
     return `${out}=${name}(p);if(${out}===F){${fail}}p=P;`
@@ -405,16 +465,17 @@ class Emitter {
       case "Suspend":
         return this.call(this.rule(node.resolve(), used), out, fail)
       case "Any":
-      case "Literal":
+        if (this.array(node.encoding)) return this.arrayLeaf(p, (f) => this.arrayAny(out, f), out, fail, fn)
+        return this.leaf(p, node, used, out, fail, fn)
       case "OneOf":
-      case "TakeWhile": {
-        if (!this.native(node.encoding)) return this.delegate(p, used, out, fail, fn)
-        if (!this.resumable) return this.token(node, out, fail, fn) ?? this.delegate(p, used, out, fail, fn)
-        const bad = this.label()
-        const code = this.token(node, out, `break ${bad};`, fn)
-        if (code === undefined) return this.delegate(p, used, out, fail, fn)
-        return this.partialSafe(p, code, bad, node._tag === "Literal" ? node.literal.length * 4 : Margin, out, fail, fn)
-      }
+        if (this.array(node.encoding)) return this.arrayLeaf(p, (f) => this.arrayOneOf(node, out, f), out, fail, fn)
+        return this.leaf(p, node, used, out, fail, fn)
+      case "TakeWhile":
+        if (this.array(node.encoding))
+          return this.arrayLeaf(p, (f) => this.arrayTakeWhile(node, out, f, fn), out, fail, fn)
+        return this.leaf(p, node, used, out, fail, fn)
+      case "Literal":
+        return this.leaf(p, node, used, out, fail, fn, node.literal.length * 4)
       case "Escaped": {
         // Streaming builds use the closure compiler's escapes, which keep checkpoints
         if (!this.native(node.encoding) || this.resumable) return this.delegate(p, used, out, fail, fn)
@@ -654,42 +715,54 @@ class Emitter {
     d: number
   ): string {
     const choose = this.const(node.choose)
-    // The general path: run the selector, choose, then run the case's compiled step
-    const cases = new Map<ParserLike, Step>()
-    const caseStep = (q: ParserLike) => {
-      let s = cases.get(q)
-      if (s === undefined) cases.set(q, (s = this.closure.compile(q, used)))
-      return s
-    }
-    if (node.cases !== undefined) {
-      for (const key of Reflect.ownKeys(node.cases)) caseStep(node.cases[key as any])
-      if (node.otherwise !== undefined) caseStep(node.otherwise)
-    }
-    const table = this.const(cases)
-    const general = (): string => {
+    if (node.cases === undefined) {
+      // The general path: run the selector, choose, then run the case's step
+      this.closure.note(p, node, "the parser returned by the function of cases runs interpreted")
       const st = this.v(fn)
       const k = this.v(fn)
       const q = this.v(fn)
       const r = out ?? this.v(fn)
       return (
         `${st}=p;${this.gen(node.selector, true, k, fail, fn, d)}${q}=${choose}(${k});` +
-        `if(${q}===void 0){p=${st};${BT}${fail}}$S.pos=p;${r}=(${table}.get(${q})??${q}.step)($S);` +
+        `if(${q}===void 0){p=${st};${BT}${fail}}$S.pos=p;${r}=${q}.step($S);` +
         `if(${r}===F){${fail}}p=$S.pos;`
       )
     }
-    if (node.cases === undefined) {
-      this.closure.note(p, node, "the parser returned by the function of cases runs interpreted")
-      return general()
+    // The cases are known: number them, and run the chosen one inline
+    const cases = new Map<ParserLike, number>()
+    for (const key of Reflect.ownKeys(node.cases)) {
+      const q = node.cases[key as any]
+      if (!cases.has(q)) cases.set(q, cases.size)
+    }
+    if (node.otherwise !== undefined && !cases.has(node.otherwise)) cases.set(node.otherwise, cases.size)
+    const index = this.const(cases)
+    // `inline`: the cases' code goes here; otherwise (a fallback next to the
+    // switch on units below, which inlines them already) they are called as rules
+    const general = (inline: boolean): string => {
+      const st = this.v(fn)
+      const k = this.v(fn)
+      const q = this.v(fn)
+      const sw = this.label()
+      let code =
+        `${st}=p;${this.gen(node.selector, true, k, fail, fn, d)}${q}=${choose}(${k});` +
+        `if(${q}===void 0){p=${st};${BT}${fail}}${sw}:switch(${index}.get(${q})){`
+      for (const [c, i] of cases) {
+        const body = inline ? this.gen(c, used, out, fail, fn, d) : this.call(this.rule(c, used), out, fail)
+        code += `case ${i}:{${body}break ${sw};}`
+      }
+      // Unreachable unless the record of cases changed after `dispatch` read it
+      const r = out ?? this.v(fn)
+      return code + `default:{$S.pos=p;${r}=${q}.step($S);if(${r}===F){${fail}}p=$S.pos;}}`
     }
     let sel = nodeOf(node.selector)
     const peek = sel._tag === "Peek"
     if (peek) sel = nodeOf((sel as NodeOf<"Peek">).self)
-    if (sel._tag !== "Any" || !this.native(sel.encoding)) return general()
+    if (sel._tag !== "Any" || !this.native(sel.encoding)) return general(true)
     const enc = sel.encoding
     const r = enc === undefined ? undefined : this.reader(enc)
     const limit = r === undefined ? (this.kind === 0 ? 0xd800 : TableSize) : Math.min(r.fast, 0xd800)
     const size = Math.min(limit, TableSize)
-    if (size === 0) return general()
+    if (size === 0) return general(true)
     // Group the units by the case they select
     const groups = new Map<ParserLike, Array<number>>()
     for (let unit = 0; unit < size; unit++) {
@@ -711,7 +784,7 @@ class Emitter {
         units.map((x) => `case ${x}:`).join("") +
         `{${peek ? "" : `p+=${r?.width ?? 1};`}${this.gen(q, used, out, fail, fn, d)}break ${sw};}`
     }
-    code += `case -1:{${BT}${fail}}default:{if(${u}<${size}){${BT}${fail}}${general()}}}`
+    code += `case -1:{${BT}${fail}}default:{if(${u}<${size}){${BT}${fail}}${general(false)}}}`
     return code
   }
 

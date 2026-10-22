@@ -257,7 +257,7 @@ There are two compilers, one function each:
 
 A bundle contains only the compilers it calls. A program that compiles nothing bundles neither, and one that uses only `Compiler.closure` contains no `new Function`. esbuild keeps every member of a namespace imported from the root entry, so with esbuild import from the subpaths instead (`import * as Compiler from "@thomasfosterau/effect-parse/Compiler"`). Rolldown and Rollup drop unused members either way.
 
-Both return the same parser. The code is built on the first run, for each kind of input, and cached. `parse`, `parseSync`, `parsePeek`, `parsePartial`, `parseEffect` and `ParserStream.parseAll` use it, from any `offset`; `ParserStream.parseMany`, `parseRecoverable` and tracing stay interpreted.
+Both return the same parser. The code is built on the first run, for each kind of input, and cached. `parse`, `parseSync`, `parsePeek`, `parsePartial`, `parseEffect`, `ParserStream.parseMany` and `ParserStream.parseAll` use it, from any `offset`; `parseRecoverable` and tracing stay interpreted. A driver that keeps its own `Input.State` (a lexer reading one token at a time, say) runs the compiled code with `Parser.run(p, state)`; calling `p.step(state)` directly always runs interpreted.
 
 Compiled code records no diagnostics. When it fails, the parser runs again interpreted, so errors are exactly the same, byte for byte. Callbacks should therefore be pure: on failing input they may run twice, and those whose results are unused may be skipped. Parsers built with `Parser.make` or `Parser.gen` run interpreted inside compiled code. See the [design notes](docs/DESIGN.md#6-compiled-parsers) for details.
 
@@ -275,6 +275,10 @@ Some ways of writing a grammar compile to faster code than others:
   ```
 
 - Avoid `flatMap` on hot paths: the parser it returns runs interpreted.
+- Give `Parser.dispatch` a record of cases, not a function. With a record, compiled code switches on the key and runs the chosen case compiled, and on `Token.any` or `Parser.peek(Token.any)` it switches on the next unit without building the key. The parser a function returns runs interpreted, and if the function builds it (`(c) => Parser.cut(p)`), it is built again on every run.
+- Build parsers once, outside callbacks and `Parser.gen` bodies. A parser built while parsing costs an allocation per combinator, every time, and is never compiled.
+- On token arrays (the output of a lexer), match tokens with `Token.oneOf`, `Token.noneOf`, `Token.takeWhile` and `Token.anyToken`, with a predicate or a list of tokens: the JIT calls the predicate inline. A `Parser.make` that reads `state.input[state.pos]` runs interpreted, and records a failure, with its expected list, every time it doesn't match.
+- Drive a lexer with `Parser.run` on one `Input.State` that you `reset` before each token: no run allocates a state, a `Result` or a slice, and the token parser runs compiled.
 - `Ascii.float` and `Text.float` convert numbers as they match them.
 
 [`json-fast.ts`](examples/json-fast.ts) is the JSON example written this way; it runs records-heavy documents about 1.5 times as fast as [`json-text.ts`](examples/json-text.ts).

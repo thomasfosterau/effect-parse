@@ -5,7 +5,9 @@
 import * as Predicate from "effect/Predicate"
 import * as Context from "effect/Context"
 import * as Option from "effect/Option"
+import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
+import * as Stream from "effect/Stream"
 import { assert, describe, expect, it } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
 import * as Http from "../examples/http.js"
@@ -15,7 +17,7 @@ import * as JsonFast from "../examples/json-fast.js"
 import { jsonGrammar } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
 import type { Input } from "../src/index.js"
-import { Ascii, Binary, Compiler, Encoding, Expression, Parser, Text, Token } from "../src/index.js"
+import { Ascii, Binary, Compiler, Encoding, Expression, Parser, ParserStream, Text, Token } from "../src/index.js"
 import { State } from "../src/Input.js"
 import { Fail } from "../src/Input.js"
 import * as Registry from "../src/internal/compiler/registry.js"
@@ -390,6 +392,23 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
   ],
   ["dispatch on peek", Parser.dispatch(Parser.peek(Token.any), { a: ab, b: Parser.taken(Parser.repeat(b)) })],
   ["dispatch with a function", Parser.dispatch(digit, (d) => (d === "0" ? undefined : Token.take(Number(d))))],
+  [
+    // The selector is not a single token, so the cases are chosen by key, then run inline
+    "dispatch on a slice",
+    Parser.dispatch(
+      Parser.taken(Parser.repeat(Token.oneOf("ab"), { min: 1, max: 2 })),
+      { a: Parser.repeat(digit, { min: 1 }), ab: Parser.succeed("ab"), ba: Parser.cut(Token.literal(":")) },
+      Parser.preceded(Parser.not(Parser.eof), Token.any)
+    )
+  ],
+  [
+    "dispatch on peek, nested",
+    Parser.dispatch(
+      Parser.peek(Token.any),
+      { a: Parser.dispatch(Parser.peek(Parser.preceded(a, Token.any)), { b: ab, "1": Parser.seq(a, digit) }, a) },
+      Parser.taken(Parser.repeat(b))
+    )
+  ],
   ["flatMap", digit.pipe(Parser.flatMap((d) => Token.take(Number(d))))],
   [
     "eof, location, rest",
@@ -883,6 +902,26 @@ describe("compiled combinators", () => {
     for (const input of allStrings(["x", "y", "+", "z"], 5)) same(p as any, Array.from(input))
   })
 
+  it("token parsers on array inputs", () => {
+    type Tok = { readonly kind: string }
+    const isX = (t: Tok) => t.kind === "x"
+    const kindOf = Parser.map(Parser.peek(Token.anyToken<ReadonlyArray<Tok>>()), (t) => t.kind)
+    const p = Parser.alt(
+      Parser.seq(Token.oneOf<ReadonlyArray<Tok>>(isX), Token.takeWhile<ReadonlyArray<Tok>>(isX, { min: 1, max: 2 })),
+      Parser.dispatch(kindOf, {
+        y: Parser.preceded(Token.anyToken<ReadonlyArray<Tok>>(), Token.takeTill<ReadonlyArray<Tok>>(isX)),
+        z: Parser.seq(Token.noneOf<ReadonlyArray<Tok>>(isX), Token.takeWhile<ReadonlyArray<Tok>>(isX, 2))
+      }),
+      Parser.taken(Parser.repeat(Token.noneOf<ReadonlyArray<Tok>>(isX), { min: 1 }))
+    )
+    allStrings(["x", "y", "z"], 5).forEach((input) =>
+      same(
+        p,
+        Array.from(input, (kind) => ({ kind }))
+      )
+    )
+  })
+
   it("services", () => {
     class Limit extends Context.Service<Limit, number>()("Limit") {}
     const p = Parser.service(Limit).pipe(Parser.flatMap((n) => Parser.repeat(a, { max: n })))
@@ -1057,6 +1096,106 @@ const sameAtOffset = (
     }
   }
 }
+
+/** Runs a parser on a fresh state with `run`: its value and position, or its failure. */
+const stateOutcome = (run: (state: State<any>) => unknown, input: Input.Input, partial: boolean) => {
+  const state = new State(input, { partial })
+  const a = run(state)
+  return a === Fail ? { mode: state.mode, failure: state.reportedFailure() } : { value: a, pos: state.pos }
+}
+
+describe("Parser.run", () => {
+  it("agrees with the step, compiled or not, in complete and partial mode", () => {
+    const check = (name: string, g: Parser.Parser.Any, input: string, partial: boolean) => {
+      const expected = stateOutcome(g.step, input, partial)
+      const label = `${name} on "${input}", partial: ${partial}`
+      expect(
+        stateOutcome((s) => Parser.run(g, s), input, partial),
+        `${label}, interpreted`
+      ).toEqual(expected)
+      backends.forEach((backend) => {
+        const c = twin(g, backend)
+        expect(
+          stateOutcome((s) => Parser.run(c, s), input, partial),
+          `${label}, ${backend}`
+        ).toEqual(expected)
+      })
+    }
+    const inputs = allStrings(alphabet, 2)
+    grammars.forEach(([name, g]) =>
+      inputs.forEach((input) => [false, true].forEach((partial) => check(name, g, input, partial)))
+    )
+  }, 30_000)
+
+  it.each(backends)("runs compiled with the %s backend, interpreting only failures", (backend) => {
+    const token = Parser.preceded(Ascii.multispace0, Parser.alt(Ascii.alpha1, Ascii.digit1, Token.literal("=")))
+    const w = watched(token, backend)
+    const state = new State("let x = 10;")
+    const next = (): ReadonlyArray<string> => {
+      const t = Parser.run(w.parser, state.reset(state.pos, { partial: true }))
+      return t === Fail ? [] : [t, ...next()]
+    }
+    expect(next()).toEqual(["let", "x", "=", "10"])
+    // Only the failure at ";" ran interpreted, and left the interpreter's failure
+    expect(w.interpreted).toBe(1)
+    expect(state.pos).toBe(10)
+    expect(state.mode).toBe("Backtrack")
+    expect(state.reportedFailure().offset).toBe(10)
+    // At the end of a partial input, the step reports `Incomplete`
+    w.interpreted = 0
+    expect(Parser.run(w.parser, new State("let x", { partial: true, offset: 3 }))).toBe(Fail)
+    expect(w.interpreted).toBe(1)
+    expect(Parser.run(w.parser, new State("let x", { offset: 3 }))).toBe("x")
+    expect(w.interpreted).toBe(1)
+  })
+
+  it("runs interpreted under a tracer or with recovery on", () => {
+    const w = watched(Ascii.alpha1, "jit")
+    const traced = new State("abc")
+    traced.tracer = () => {}
+    expect(Parser.run(w.parser, traced)).toBe("abc")
+    const recovering = new State("abc")
+    recovering.recovered = []
+    expect(Parser.run(w.parser, recovering)).toBe("abc")
+    expect(w.interpreted).toBe(2)
+  })
+
+  it("reports deep nesting as a TooDeep failure", () => {
+    const nested: Parser.Parser<unknown> = Parser.alt(
+      Parser.delimited(
+        Token.literal("["),
+        Parser.suspend(() => nested),
+        Token.literal("]")
+      ),
+      Token.literal("x")
+    )
+    const c = Compiler.jit(nested)
+    const state = new State("[".repeat(200_000))
+    expect(Parser.run(c, state)).toBe(Fail)
+    expect(state.mode).toBe("Cut")
+    expect(state.failure.kind).toBe("TooDeep")
+  })
+})
+
+describe("ParserStream.parseMany", () => {
+  it.each(backends)("runs compiled with the %s backend, interpreting only where a chunk ends", (backend) => {
+    const line = Parser.terminated(Ascii.decInt, Token.literal("\n"))
+    const w = watched(line, backend)
+    const collect = (p: typeof line, chunks: ReadonlyArray<string>) =>
+      Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseMany(p), Stream.runCollect))
+    const chunks = ["1\n2", "3\n-4\n5", "\n6\n"]
+    expect(collect(w.parser, chunks)).toEqual(collect(line, chunks))
+    expect(collect(w.parser, chunks)).toEqual([1, 23, -4, 5, 6])
+    // Once per run of `collect`: "2" and "5" are cut short by their chunk
+    expect(w.interpreted).toBe(4)
+    const failed = Effect.runSync(
+      Effect.flip(Stream.fromIterable(["1\nx\n"]).pipe(ParserStream.parseMany(w.parser), Stream.runCollect))
+    )
+    // The interpreter's error, with offsets in the buffer of unconsumed input
+    expect(failed.offset).toBe(2)
+    expect(failed.input).toBe("1\nx\n")
+  })
+})
 
 describe("running from an offset", () => {
   it("json (Token/Ascii)", () => {
