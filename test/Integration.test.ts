@@ -6,13 +6,19 @@ import { expectFailure, expectSuccess, peek } from "./utils.js"
 describe("Expression", () => {
   const ws = <A, E>(p: Parser.Parser<A, E>) => Parser.delimited(Ascii.space0, p, Ascii.space0)
   const op = (s: string) => ws(Token.literal(s))
-  const factorial = (n: number): number => n <= 1 ? 1 : n * factorial(n - 1)
+  const factorial = (n: number): number => (n <= 1 ? 1 : n * factorial(n - 1))
 
   const arithmetic: Parser.Parser<number, string> = Expression.make({
-    operand: ws(Parser.alt(
-      Ascii.decUint,
-      Parser.delimited(op("("), Parser.suspend(() => arithmetic), op(")"))
-    )),
+    operand: ws(
+      Parser.alt(
+        Ascii.decUint,
+        Parser.delimited(
+          op("("),
+          Parser.suspend(() => arithmetic),
+          op(")")
+        )
+      )
+    ),
     operators: [
       Expression.prefix(op("-"), 4, (_, x: number) => -x),
       Expression.postfix(op("!"), 5, (x: number) => factorial(x)),
@@ -50,7 +56,7 @@ describe("Expression", () => {
     expect(err.offset).toBe(4)
     const trailing = expectFailure(arithmetic, "1 + 2 3")
     expect(trailing.offset).toBe(6)
-    expect(trailing.expected).toContain("\"+\"")
+    expect(trailing.expected).toContain('"+"')
     expect(trailing.expected).toContain("end of input")
   })
 
@@ -74,10 +80,7 @@ describe("ParserStream", () => {
   const line = Parser.terminated(Ascii.decInt, Token.literal("\n"))
 
   it("parseMany across chunk boundaries", () => {
-    const program = Stream.make("1\n2", "3\n", "4", "5\n-6\n").pipe(
-      ParserStream.parseMany(line),
-      Stream.runCollect
-    )
+    const program = Stream.make("1\n2", "3\n", "4", "5\n-6\n").pipe(ParserStream.parseMany(line), Stream.runCollect)
     expect(Effect.runSync(program)).toEqual([1, 23, 45, -6])
   })
 
@@ -113,9 +116,7 @@ describe("ParserStream", () => {
 
   it("parseMany uses services from the stream context", () => {
     class Sep extends Context.Service<Sep, string>()("Sep") {}
-    const item = Parser.service(Sep).pipe(
-      Parser.flatMap((sep) => Parser.terminated(Ascii.alpha1, Token.literal(sep)))
-    )
+    const item = Parser.service(Sep).pipe(Parser.flatMap((sep) => Parser.terminated(Ascii.alpha1, Token.literal(sep))))
     const program = Stream.make("a;b", ";").pipe(
       ParserStream.parseMany(item),
       Stream.runCollect,
@@ -184,21 +185,59 @@ describe("Nom", () => {
     expectSuccess(Nom.separatedList1(Nom.char(","), abc), "abc,abc", ["abc", "abc"])
     expectSuccess(Nom.separatedList0(Nom.char(","), abc), "", [])
     expectSuccess(Nom.manyTill(abc, Nom.tag("end")), "abcend", [["abc"], "end"])
-    expectSuccess(Nom.foldMany0(abc, () => 0, (n) => n + 1), "abcabcabc", 3)
-    expectSuccess(Nom.foldMany1(abc, () => 0, (n) => n + 1), "abc", 1)
-    expectSuccess(Nom.foldManyMN(1, 2, abc, () => 0, (n) => n + 1), "abcabc", 2)
+    expectSuccess(
+      Nom.foldMany0(
+        abc,
+        () => 0,
+        (n) => n + 1
+      ),
+      "abcabcabc",
+      3
+    )
+    expectSuccess(
+      Nom.foldMany1(
+        abc,
+        () => 0,
+        (n) => n + 1
+      ),
+      "abc",
+      1
+    )
+    expectSuccess(
+      Nom.foldManyMN(
+        1,
+        2,
+        abc,
+        () => 0,
+        (n) => n + 1
+      ),
+      "abcabc",
+      2
+    )
   })
 
   it("combinators", () => {
     expectSuccess(Nom.value(42, Nom.tag("x")), "x", 42)
     expectSuccess(Nom.recognize(Nom.pair(Nom.alpha1, Nom.digit1)), "ab12", "ab12")
     expectSuccess(Nom.consumed(Nom.map(Nom.digit1, Number)), "12", ["12", 12])
-    expectSuccess(Nom.verify(Nom.alpha1, (s) => s.length === 2), "ab", "ab")
-    expectSuccess(Nom.mapOpt(Nom.digit1, (s) => s === "1" ? Option.some(1) : Option.none()), "1", 1)
+    expectSuccess(
+      Nom.verify(Nom.alpha1, (s) => s.length === 2),
+      "ab",
+      "ab"
+    )
+    expectSuccess(
+      Nom.mapOpt(Nom.digit1, (s) => (s === "1" ? Option.some(1) : Option.none())),
+      "1",
+      1
+    )
     expectSuccess(Nom.isA("ab"), "abba", "abba")
     expectSuccess(Nom.isNot(";"), "abc", "abc")
     expectSuccess(Nom.takeWhile1(Ascii.isAlpha), "abc", "abc")
-    expectSuccess(Nom.takeTill1((c: string) => c === ";"), "abc", "abc")
+    expectSuccess(
+      Nom.takeTill1((c: string) => c === ";"),
+      "abc",
+      "abc"
+    )
     expectSuccess(Nom.tagNoCase("hello"), "HELLO", "HELLO")
     expectSuccess(Nom.double, "1e2", 100)
     expectSuccess(Nom.recognizeFloat, "-1.5", "-1.5")

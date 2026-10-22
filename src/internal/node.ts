@@ -53,15 +53,15 @@ export type Node =
   | { readonly _tag: "Identifier"; readonly encoding: Enc }
   | { readonly _tag: "Bom"; readonly encoding: Enc }
   | {
-    readonly _tag: "Escaped"
-    readonly normal: P
-    /** The control character, as a code point (or a byte / unit for `Ascii`). */
-    readonly control: number
-    readonly escape: P
-    /** `takeEscaped`: return the raw slice instead of the unescaped text. */
-    readonly raw: boolean
-    readonly encoding: Enc
-  }
+      readonly _tag: "Escaped"
+      readonly normal: P
+      /** The control character, as a code point (or a byte / unit for `Ascii`). */
+      readonly control: number
+      readonly escape: P
+      /** `takeEscaped`: return the raw slice instead of the unescaped text. */
+      readonly raw: boolean
+      readonly encoding: Enc
+    }
   // Mapping
   | { readonly _tag: "Map"; readonly self: P; readonly f: (a: any) => unknown }
   | { readonly _tag: "As"; readonly self: P; readonly value: unknown }
@@ -88,43 +88,43 @@ export type Node =
   | { readonly _tag: "Not"; readonly self: P }
   // Sequencing
   | {
-    readonly _tag: "Seq"
-    readonly parsers: ReadonlyArray<P>
-    /** Which outputs are kept: all (a tuple), one index, or a pair of indices. */
-    readonly output: "tuple" | number | readonly [number, number]
-  }
+      readonly _tag: "Seq"
+      readonly parsers: ReadonlyArray<P>
+      /** Which outputs are kept: all (a tuple), one index, or a pair of indices. */
+      readonly output: "tuple" | number | readonly [number, number]
+    }
   | { readonly _tag: "Struct"; readonly keys: ReadonlyArray<string>; readonly parsers: ReadonlyArray<P> }
   | { readonly _tag: "ZipWith"; readonly self: P; readonly that: P; readonly f: (a: any, b: any) => unknown }
   // Choice
   | { readonly _tag: "Alt"; readonly parsers: ReadonlyArray<P> }
   | {
-    readonly _tag: "Dispatch"
-    readonly selector: P
-    /** A record of cases, when `dispatch` was given one. */
-    readonly cases: Readonly<Record<PropertyKey, P>> | undefined
-    readonly otherwise: P | undefined
-    readonly choose: (key: any) => P | undefined
-  }
+      readonly _tag: "Dispatch"
+      readonly selector: P
+      /** A record of cases, when `dispatch` was given one. */
+      readonly cases: Readonly<Record<PropertyKey, P>> | undefined
+      readonly otherwise: P | undefined
+      readonly choose: (key: any) => P | undefined
+    }
   // Repetition
   | ({ readonly _tag: "Repeat"; readonly self: P } & Bounds)
   | ({
-    readonly _tag: "Fold"
-    readonly self: P
-    readonly init: () => unknown
-    readonly f: (acc: any, a: any) => unknown
-    /** Stops the repetition once false of the accumulator (after `min` elements). */
-    readonly while: ((acc: any) => boolean) | undefined
-    readonly name: string
-  } & Bounds)
+      readonly _tag: "Fold"
+      readonly self: P
+      readonly init: () => unknown
+      readonly f: (acc: any, a: any) => unknown
+      /** Stops the repetition once false of the accumulator (after `min` elements). */
+      readonly while: ((acc: any) => boolean) | undefined
+      readonly name: string
+    } & Bounds)
   | ({ readonly _tag: "RepeatTill"; readonly self: P; readonly end: P } & Bounds)
   | ({ readonly _tag: "Separated"; readonly self: P; readonly separator: P } & Bounds)
   | {
-    readonly _tag: "SeparatedFold"
-    readonly self: P
-    readonly separator: P
-    readonly op: (l: any, s: any, r: any) => unknown
-    readonly right: boolean
-  }
+      readonly _tag: "SeparatedFold"
+      readonly self: P
+      readonly separator: P
+      readonly op: (l: any, s: any, r: any) => unknown
+      readonly right: boolean
+    }
   // Services, recovery, debugging
   | { readonly _tag: "Service" }
   | { readonly _tag: "Provide"; readonly self: P }
@@ -133,12 +133,12 @@ export type Node =
   | { readonly _tag: "Trace"; readonly self: P; readonly name: string }
   /** `Syntax.node`, `Syntax.token` and `Syntax.field`: identities outside `Syntax` parses. */
   | {
-    readonly _tag: "Syntax"
-    readonly self: P
-    /** The node kind, or `undefined` for a field. */
-    readonly kind: string | undefined
-    readonly named: boolean
-  }
+      readonly _tag: "Syntax"
+      readonly self: P
+      /** The node kind, or `undefined` for a field. */
+      readonly kind: string | undefined
+      readonly named: boolean
+    }
 
 export type Tag = Node["_tag"]
 
@@ -151,7 +151,9 @@ export const NodeId: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/Pars
 export const nodeOf = (p: ParserLike): Node => (p as any)[NodeId] ?? { _tag: "Opaque", step: p.step }
 
 /** Normalizes a range, as `repeat`, `takeWhile`, ... do. */
-export const bounds = (range: number | { readonly min?: number | undefined; readonly max?: number | undefined } | undefined): Bounds => {
+export const bounds = (
+  range: number | { readonly min?: number | undefined; readonly max?: number | undefined } | undefined
+): Bounds => {
   if (range === undefined) return { min: 0, max: Infinity }
   if (typeof range === "number") return { min: range, max: range }
   return { min: range.min ?? 0, max: range.max ?? Infinity }

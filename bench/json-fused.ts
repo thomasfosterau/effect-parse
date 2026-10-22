@@ -44,7 +44,7 @@ const string = (): string | undefined => {
     const e = s.charCodeAt(p++)
     switch (e) {
       case 34:
-        out += "\""
+        out += '"'
         break
       case 92:
         out += "\\"

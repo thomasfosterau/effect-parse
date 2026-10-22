@@ -68,10 +68,14 @@ describe("binary inputs", () => {
   it("streams of binary chunks", () => {
     const chunks = [encode("αβ").buffer, new DataView(encode("γ\nδ").buffer), encode("\n")]
     const line = Parser.terminated(Text.utf8.alpha1, Text.utf8.newline)
-    expect(Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseMany(line), Stream.runCollect)))
-      .toEqual(["αβγ", "δ"])
-    expect(Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(Parser.repeat(line)))))
-      .toEqual(["αβγ", "δ"])
+    expect(Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseMany(line), Stream.runCollect))).toEqual([
+      "αβγ",
+      "δ"
+    ])
+    expect(Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(Parser.repeat(line))))).toEqual([
+      "αβγ",
+      "δ"
+    ])
   })
 })
 
@@ -128,7 +132,7 @@ describe("State.reset", () => {
     const outcomes = runs.map((run) =>
       observe(new Input.State(input, { partial: run.partial ?? false, offset: run.offset }), run.parser.step)
     )
-    expect(outcomes.map((o) => "mode" in o ? o.mode : "Ok")).toEqual(
+    expect(outcomes.map((o) => ("mode" in o ? o.mode : "Ok"))).toEqual(
       expect.arrayContaining(["Ok", "Backtrack", "Cut", "Incomplete"])
     )
   })
@@ -163,7 +167,10 @@ describe("State.reset", () => {
 
   it("returns the same results as the runners", () => {
     const state = new Input.State(input)
-    for (const [offset, expected] of [[4, 123], [24, 99]] as const) {
+    for (const [offset, expected] of [
+      [4, 123],
+      [24, 99]
+    ] as const) {
       expect(Ascii.decUint.step(state.reset(offset))).toBe(expected)
       expect(Parser.parsePeek(Ascii.decUint, input.slice(offset))).toEqual(
         Result.succeed([input.slice(state.pos), expected])

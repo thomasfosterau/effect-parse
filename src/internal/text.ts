@@ -52,7 +52,7 @@ export const string: Encoding<string> = {
   unit: 1,
   asciiCompatible: true,
   decode: decodeString,
-  width: (cp) => cp > 0xffff ? 2 : 1,
+  width: (cp) => (cp > 0xffff ? 2 : 1),
   encode: (text) => text,
   text: (s, start, end) => s.slice(start, end),
   [FastLimit]: 0xd800
@@ -113,7 +113,7 @@ export const utf8: Encoding<Uint8Array> = {
   unit: 1,
   asciiCompatible: true,
   decode: decodeUtf8,
-  width: (cp) => cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4,
+  width: (cp) => (cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4),
   encode: (text) => utf8Encoder.encode(text),
   text: (b, start, end) => {
     if (end - start > SHORT) return decodeRange(utf8Decoder, b, start, end)
@@ -150,7 +150,7 @@ const makeUtf16 = (littleEndian: boolean): Encoding<Uint8Array> => {
       const d = b[i + 2 + lo]! | (b[i + 2 + hi]! << 8)
       return (d & 0xfc00) === 0xdc00 ? ((c - 0xd800) << 10) + (d - 0xdc00) + 0x10000 : Invalid
     },
-    width: (cp) => cp > 0xffff ? 4 : 2,
+    width: (cp) => (cp > 0xffff ? 4 : 2),
     encode: (text) => {
       const out = new Uint8Array(text.length * 2)
       for (let i = 0; i < text.length; i++) {

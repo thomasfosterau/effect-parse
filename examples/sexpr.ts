@@ -25,15 +25,13 @@ export class EvalError extends Data.TaggedError("EvalError")<{ readonly message:
 
 const ws = Ascii.multispace0
 
-const builtin = Parser.alt(
-  Token.literal("not"),
-  Token.oneOf("+-*/=")
-).pipe(Parser.map((op): Atom => ({ _tag: "BuiltIn", op: op as "+" })))
+const builtin = Parser.alt(Token.literal("not"), Token.oneOf("+-*/=")).pipe(
+  Parser.map((op): Atom => ({ _tag: "BuiltIn", op: op as "+" }))
+)
 
-const bool = Parser.alt(
-  Token.literal("#t").pipe(Parser.as(true)),
-  Token.literal("#f").pipe(Parser.as(false))
-).pipe(Parser.map((value): Atom => ({ _tag: "Bool", value })))
+const bool = Parser.alt(Token.literal("#t").pipe(Parser.as(true)), Token.literal("#f").pipe(Parser.as(false))).pipe(
+  Parser.map((value): Atom => ({ _tag: "Bool", value }))
+)
 
 const keyword = Parser.preceded(Token.literal(":"), Parser.cut(Ascii.alpha1)).pipe(
   Parser.map((name): Atom => ({ _tag: "Keyword", name }))
@@ -41,9 +39,7 @@ const keyword = Parser.preceded(Token.literal(":"), Parser.cut(Ascii.alpha1)).pi
 
 const num = Ascii.decInt.pipe(Parser.map((value): Atom => ({ _tag: "Num", value })))
 
-const atom = Parser.alt(num, bool, builtin, keyword).pipe(
-  Parser.map((atom): Expr => ({ _tag: "Constant", atom }))
-)
+const atom = Parser.alt(num, bool, builtin, keyword).pipe(Parser.map((atom): Expr => ({ _tag: "Constant", atom })))
 
 const sExp = <A, E>(inner: Parser.Parser<A, E>) =>
   Parser.delimited(
@@ -54,30 +50,28 @@ const sExp = <A, E>(inner: Parser.Parser<A, E>) =>
 
 const exprRef: Parser.Parser<Expr, string> = Parser.suspend(() => expr)
 
-const application = sExp(
-  Parser.seq(exprRef, Parser.repeat(Parser.preceded(ws, exprRef)))
-).pipe(Parser.map(([head, args]): Expr => ({ _tag: "Application", head, args })))
-
-const ifExpr = sExp(Parser.gen(function*() {
-  yield* Token.literal("if")
-  yield* Ascii.multispace1
-  const cond = yield* exprRef
-  yield* ws
-  const then = yield* exprRef
-  yield* ws
-  const otherwise = yield* Parser.optional(exprRef)
-  return { _tag: "If", cond, then, else: otherwise } satisfies Expr as Expr
-}))
-
-const quote = Parser.preceded(
-  Token.literal("'"),
-  Parser.cut(sExp(Parser.repeat(Parser.terminated(exprRef, ws))))
-).pipe(Parser.map((exprs): Expr => ({ _tag: "Quote", exprs })))
-
-export const expr: Parser.Parser<Expr, string> = Parser.preceded(
-  ws,
-  Parser.alt(atom, ifExpr, application, quote)
+const application = sExp(Parser.seq(exprRef, Parser.repeat(Parser.preceded(ws, exprRef)))).pipe(
+  Parser.map(([head, args]): Expr => ({ _tag: "Application", head, args }))
 )
+
+const ifExpr = sExp(
+  Parser.gen(function* () {
+    yield* Token.literal("if")
+    yield* Ascii.multispace1
+    const cond = yield* exprRef
+    yield* ws
+    const then = yield* exprRef
+    yield* ws
+    const otherwise = yield* Parser.optional(exprRef)
+    return { _tag: "If", cond, then, else: otherwise } satisfies Expr as Expr
+  })
+)
+
+const quote = Parser.preceded(Token.literal("'"), Parser.cut(sExp(Parser.repeat(Parser.terminated(exprRef, ws))))).pipe(
+  Parser.map((exprs): Expr => ({ _tag: "Quote", exprs }))
+)
+
+export const expr: Parser.Parser<Expr, string> = Parser.preceded(ws, Parser.alt(atom, ifExpr, application, quote))
 
 const fail = (message: string) => Result.fail(new EvalError({ message }))
 
@@ -106,7 +100,7 @@ export const evaluate = (e: Expr): Result.Result<Atom, EvalError> => {
         if (r.success._tag !== "Num" && r.success._tag !== "Bool") return fail("invalid argument")
         args.push(r.success.value)
       }
-      const nums = () => args.every((a) => typeof a === "number") ? args as Array<number> : undefined
+      const nums = () => (args.every((a) => typeof a === "number") ? (args as Array<number>) : undefined)
       const op = head.success.op
       switch (op) {
         case "+":
@@ -122,9 +116,12 @@ export const evaluate = (e: Expr): Result.Result<Atom, EvalError> => {
           if (ns === undefined || ns.length === 0) return fail("arithmetic on non-numbers")
           const [first, ...rest] = ns as [number, ...Array<number>]
           if (op === "/" && rest.includes(0)) return fail("division by zero")
-          const value = rest.length === 0
-            ? (op === "-" ? -first : 1 / first)
-            : rest.reduce((a, b) => op === "-" ? a - b : Math.trunc(a / b), first)
+          const value =
+            rest.length === 0
+              ? op === "-"
+                ? -first
+                : 1 / first
+              : rest.reduce((a, b) => (op === "-" ? a - b : Math.trunc(a / b)), first)
           return Result.succeed({ _tag: "Num", value })
         }
         case "=":

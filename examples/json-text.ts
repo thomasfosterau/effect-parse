@@ -11,7 +11,9 @@
 import { Ascii, Parser, Text, Token } from "@thomasfosterau/effect-parse"
 import type { Json } from "./json.js"
 
-export const makeJson = <I extends string | Uint8Array>(T: Text.TextParsers<I>): Parser.Parser<Json, never, never, I> => {
+export const makeJson = <I extends string | Uint8Array>(
+  T: Text.TextParsers<I>
+): Parser.Parser<Json, never, never, I> => {
   const ws = T.takeWhile(" \t\r\n")
 
   const hex4 = T.takeWhile(Ascii.isHexDigit, 4).pipe(
@@ -24,15 +26,15 @@ export const makeJson = <I extends string | Uint8Array>(T: Text.TextParsers<I>):
     Parser.flatMap((hi) =>
       hi >= 0xd800 && hi <= 0xdbff
         ? Parser.preceded(T.literal("\\u"), hex4).pipe(
-          Parser.filter((lo) => lo >= 0xdc00 && lo <= 0xdfff),
-          Parser.map((lo) => String.fromCharCode(hi, lo))
-        )
+            Parser.filter((lo) => lo >= 0xdc00 && lo <= 0xdfff),
+            Parser.map((lo) => String.fromCharCode(hi, lo))
+          )
         : Parser.succeed(String.fromCharCode(hi))
     )
   )
 
   const escapeChar = Parser.dispatch(T.any, {
-    "\"": Parser.succeed("\""),
+    '"': Parser.succeed('"'),
     "\\": Parser.succeed("\\"),
     "/": Parser.succeed("/"),
     b: Parser.succeed("\b"),
@@ -44,16 +46,11 @@ export const makeJson = <I extends string | Uint8Array>(T: Text.TextParsers<I>):
   }).pipe(Parser.expected("escape sequence"))
 
   // A token set rather than a predicate: it is compiled to a lookup table
-  const stringBody = T.escaped(
-    T.takeTill(["\"\\", Token.range("\u0000", "\u001f")]),
-    "\\",
-    Parser.cut(escapeChar)
-  )
+  const stringBody = T.escaped(T.takeTill(['"\\', Token.range("\u0000", "\u001f")]), "\\", Parser.cut(escapeChar))
 
-  const string = Parser.preceded(
-    T.literal("\""),
-    Parser.cut(Parser.terminated(stringBody, T.literal("\"")))
-  ).pipe(Parser.context("string"))
+  const string = Parser.preceded(T.literal('"'), Parser.cut(Parser.terminated(stringBody, T.literal('"')))).pipe(
+    Parser.context("string")
+  )
 
   const number = T.float.pipe(Parser.filter(Number.isFinite))
 
@@ -63,10 +60,15 @@ export const makeJson = <I extends string | Uint8Array>(T: Text.TextParsers<I>):
 
   const array: Parser.Parser<ReadonlyArray<Json>, never, never, I> = Parser.preceded(
     lexeme(T.literal("[")),
-    Parser.cut(Parser.terminated(
-      Parser.separated(Parser.suspend(() => value), comma),
-      T.literal("]")
-    ))
+    Parser.cut(
+      Parser.terminated(
+        Parser.separated(
+          Parser.suspend(() => value),
+          comma
+        ),
+        T.literal("]")
+      )
+    )
   ).pipe(Parser.context("array"))
 
   const member = Parser.separatedPair(
@@ -88,7 +90,7 @@ export const makeJson = <I extends string | Uint8Array>(T: Text.TextParsers<I>):
       n: T.literal("null").pipe(Parser.as(null)),
       t: T.literal("true").pipe(Parser.as(true)),
       f: T.literal("false").pipe(Parser.as(false)),
-      "\"": string,
+      '"': string,
       "[": Parser.suspend(() => array),
       "{": Parser.suspend(() => object),
       "-": number,

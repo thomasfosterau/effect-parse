@@ -134,16 +134,28 @@ describe("Syntax", () => {
       expect(tree.lineColumn(4)).toEqual({ line: 3, column: 3 })
       expect(tree.lineColumn(9)).toEqual({ line: 4, column: 2 })
       const text = "a\n😀b"
-      const t2 = Syntax.parse(Parser.preceded(Token.takeWhile((c: string) => c !== "b"), Syntax.node(Token.literal("b"), "b")), text)
+      const t2 = Syntax.parse(
+        Parser.preceded(
+          Token.takeWhile((c: string) => c !== "b"),
+          Syntax.node(Token.literal("b"), "b")
+        ),
+        text
+      )
       expect(t2.lineColumn(4)).toEqual({ line: 2, column: 2 })
     })
 
     it("parses byte and array inputs", () => {
       const bytes = Syntax.node(Text.utf8.literal("é"), "e")
       const tree = Syntax.parse(Parser.repeat(bytes), new TextEncoder().encode("éé"))
-      expect(tree.root.children.map((c) => [c.start, c.end])).toEqual([[0, 2], [2, 4]])
+      expect(tree.root.children.map((c) => [c.start, c.end])).toEqual([
+        [0, 2],
+        [2, 4]
+      ])
       expect(tree.root.child(0)?.text).toEqual(new Uint8Array([0xc3, 0xa9]))
-      const tokens = Syntax.node(Token.any as unknown as Parser.Parser<number, never, never, ReadonlyArray<number>>, "t")
+      const tokens = Syntax.node(
+        Token.any as unknown as Parser.Parser<number, never, never, ReadonlyArray<number>>,
+        "t"
+      )
       expect(Syntax.parse(Parser.repeat(tokens), [1, 2, 3]).root.namedChildren.map((n) => n.value)).toEqual([1, 2, 3])
     })
   })
@@ -179,8 +191,10 @@ describe("Syntax", () => {
 
   describe("errors", () => {
     it("turns recovered failures into ERROR nodes", () => {
-      const tree = Syntax.parse(Json.json, "[1, tru, 3, {\"a\" 1, \"b\": 2}]")
-      expect(String(tree)).toBe("(document (array (number) (ERROR) (number) (object (ERROR) (pair key: (string) value: (number)))))")
+      const tree = Syntax.parse(Json.json, '[1, tru, 3, {"a" 1, "b": 2}]')
+      expect(String(tree)).toBe(
+        "(document (array (number) (ERROR) (number) (object (ERROR) (pair key: (string) value: (number)))))"
+      )
       expect(tree.value).toEqual(Option.some([1, 3, { b: 2 }]))
       expect(tree.errors.map((e) => e.offset)).toEqual([4, 17])
       const errorNode = tree.root.descendantAt(5)
@@ -211,7 +225,7 @@ describe("Syntax", () => {
 
   describe("annotations outside Syntax", () => {
     it("change nothing, interpreted or compiled", () => {
-      const docs = ["[1, tru, 3]", "{\"a\": [1, {\"b\": null}], \"c\": \"x\"}", "[1,,2]", "[", " 12 "]
+      const docs = ["[1, tru, 3]", '{"a": [1, {"b": null}], "c": "x"}', "[1,,2]", "[", " 12 "]
       for (const backend of ["closure", "jit"] as const) {
         const compiled = Compiler[backend](Parser.named(Json.json, "json"))
         for (const doc of docs) {
@@ -246,8 +260,8 @@ describe("Syntax", () => {
     })
 
     it("keeps the values of reused nodes", () => {
-      const tree = Syntax.parse(Json.json, "[{\"a\": 1}, {\"b\": 2}]")
-      const edited = Syntax.reparse(tree, "[{\"a\": 1}, {\"b\": 3}]")
+      const tree = Syntax.parse(Json.json, '[{"a": 1}, {"b": 2}]')
+      const edited = Syntax.reparse(tree, '[{"a": 1}, {"b": 3}]')
       expect(edited.root.child(0)?.child(1)?.value).toBe(tree.root.child(0)?.child(1)?.value)
       expect(edited.root.child(0)?.child(3)?.value).toEqual({ b: 3 })
     })
@@ -282,7 +296,9 @@ describe("Syntax", () => {
       for (const [p, input, at, text] of cases) {
         const grammar = Parser.seq(Syntax.node(p, "x"), Token.rest)
         const edited = Syntax.replace(Syntax.parse(grammar, input), at, at + 1, text)
-        expect(snapshot(edited), `${p.name} on ${JSON.stringify(input)}`).toEqual(snapshot(Syntax.parse(grammar, edited.input)))
+        expect(snapshot(edited), `${p.name} on ${JSON.stringify(input)}`).toEqual(
+          snapshot(Syntax.parse(grammar, edited.input))
+        )
         expect(edited.reused).toBe(0)
       }
     })
@@ -354,9 +370,10 @@ describe("Syntax", () => {
             () => alphabet[Math.floor(random() * alphabet.length)]
           ).join("")
           // Alternate between explicit edits and edits found by comparing the inputs
-          const next = i % 2 === 0
-            ? Syntax.replace(tree, start, end, insert)
-            : Syntax.reparse(tree, text.slice(0, start) + insert + text.slice(end))
+          const next =
+            i % 2 === 0
+              ? Syntax.replace(tree, start, end, insert)
+              : Syntax.reparse(tree, text.slice(0, start) + insert + text.slice(end))
           const fresh = Syntax.parse(grammar, next.input)
           expect(snapshot(next), JSON.stringify({ before: text, after: next.input })).toEqual(snapshot(fresh))
           // Parse the old text again from the edited tree, too
@@ -371,15 +388,24 @@ describe("Syntax", () => {
     it("agrees with fresh parses: JSON", () => {
       const random = rng(7)
       const docs = Array.from({ length: 60 }, () => randomJson(random))
-      const reused = differential(Json.json, docs, ["[", "]", "{", "}", ",", ":", "\"", "1", "a", " ", "\n", "t", "-", "e", "."], 11)
+      const reused = differential(
+        Json.json,
+        docs,
+        ["[", "]", "{", "}", ",", ":", '"', "1", "a", " ", "\n", "t", "-", "e", "."],
+        11
+      )
       expect(reused).toBeGreaterThan(500)
     })
 
     it("agrees with fresh parses: lookahead", () => {
       // Keywords need a boundary, comments end at a delimiter, and literals share prefixes
       const sp = Token.takeWhile(" ")
-      const keyword = (k: string) => Syntax.token(Parser.terminated(Token.literal(k), Parser.not(Ascii.alphanumeric1)), k)
-      const ident = Syntax.node(Parser.preceded(Parser.not(Parser.alt(keyword("let"), keyword("fn"))), Ascii.alpha1), "ident")
+      const keyword = (k: string) =>
+        Syntax.token(Parser.terminated(Token.literal(k), Parser.not(Ascii.alphanumeric1)), k)
+      const ident = Syntax.node(
+        Parser.preceded(Parser.not(Parser.alt(keyword("let"), keyword("fn"))), Ascii.alpha1),
+        "ident"
+      )
       const comment = Syntax.node(
         Parser.alt(
           Parser.delimited(Token.literal("/*"), Token.takeUntil("*/"), Token.literal("*/")),
@@ -404,13 +430,20 @@ describe("Syntax", () => {
     })
 
     it("re-parses little of a large document", () => {
-      const records = Array.from({ length: 300 }, (_, i) => ({ id: i, name: `n${i}`, tags: ["a", "b"], ok: i % 2 === 0 }))
+      const records = Array.from({ length: 300 }, (_, i) => ({
+        id: i,
+        name: `n${i}`,
+        tags: ["a", "b"],
+        ok: i % 2 === 0
+      }))
       const text = JSON.stringify(records, null, 2)
       const tree = Syntax.parse(Json.json, text)
       const total = [...tree.root.descendants()].length
-      const at = text.indexOf("\"n150\"")
+      const at = text.indexOf('"n150"')
       const edited = Syntax.replace(tree, at + 1, at + 5, "renamed")
-      expect(Option.getOrThrow(edited.value)).toEqual(records.map((r) => r.id === 150 ? { ...r, name: "renamed" } : r))
+      expect(Option.getOrThrow(edited.value)).toEqual(
+        records.map((r) => (r.id === 150 ? { ...r, name: "renamed" } : r))
+      )
       // Every record but the edited one is reused whole, as one node
       expect(edited.reused).toBeGreaterThan(299)
       // The nodes built again: those not shared with the old tree
@@ -424,14 +457,23 @@ describe("Syntax", () => {
       const num = Syntax.node(Ascii.decInt, "number")
       const atom: Parser.Parser<number, unknown> = Parser.alt(
         num,
-        Syntax.node(Parser.delimited(Token.literal("("), Parser.suspend(() => sum), Token.literal(")")), "group")
+        Syntax.node(
+          Parser.delimited(
+            Token.literal("("),
+            Parser.suspend(() => sum),
+            Token.literal(")")
+          ),
+          "group"
+        )
       )
       const product = Syntax.node(
-        Parser.separatedFoldl1(atom, Syntax.token(Token.oneOf("*/"), "op"), (l, op, r) => op === "*" ? l * r : l / r),
+        Parser.separatedFoldl1(atom, Syntax.token(Token.oneOf("*/"), "op"), (l, op, r) => (op === "*" ? l * r : l / r)),
         "product"
       )
       const sum: Parser.Parser<number, unknown> = Syntax.node(
-        Parser.separatedFoldl1(product, Syntax.token(Token.oneOf("+-"), "op"), (l, op, r) => op === "+" ? l + r : l - r),
+        Parser.separatedFoldl1(product, Syntax.token(Token.oneOf("+-"), "op"), (l, op, r) =>
+          op === "+" ? l + r : l - r
+        ),
         "sum"
       )
       const docs = ["1+2*3", "(1+2)*(3-4)/5", "((((1))))+2", "10*20*30-40", "1"]
@@ -440,7 +482,14 @@ describe("Syntax", () => {
       const pratt: Parser.Parser<number, unknown> = Expression.make({
         operand: Parser.alt(
           Syntax.node(Parser.delimited(Ascii.space0, Ascii.decInt, Ascii.space0), "number"),
-          Syntax.node(Parser.delimited(Token.literal("("), Parser.suspend(() => pratt), Token.literal(")")), "group")
+          Syntax.node(
+            Parser.delimited(
+              Token.literal("("),
+              Parser.suspend(() => pratt),
+              Token.literal(")")
+            ),
+            "group"
+          )
         ),
         operators: [
           Expression.prefix(Token.literal("-"), 3, (_, x) => -x),

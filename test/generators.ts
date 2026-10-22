@@ -56,8 +56,8 @@ export const randomJson = (random: () => number, depth = 0): string => {
       () => "true",
       () => "false",
       () => "null",
-      () => JSON.stringify(["abc", "é", "😀 x", "\"q\"", "\\", "\n\t", "\u0001", ""][Math.floor(random() * 8)]),
-      () => "\"\\u00e9\\ud83d\\ude00\\/\\b\""
+      () => JSON.stringify(["abc", "é", "😀 x", '"q"', "\\", "\n\t", "\u0001", ""][Math.floor(random() * 8)]),
+      () => '"\\u00e9\\ud83d\\ude00\\/\\b"'
     ]
     return atoms[Math.floor(random() * atoms.length)]!()
   }
@@ -65,6 +65,9 @@ export const randomJson = (random: () => number, depth = 0): string => {
   if (pick < 0.75) {
     return `[${ws()}${Array.from({ length: n }, () => randomJson(random, depth + 1)).join(`${ws()},${ws()}`)}${ws()}]`
   }
-  const members = Array.from({ length: n }, (_, i) => `${JSON.stringify(`k${i}é`)}${ws()}:${ws()}${randomJson(random, depth + 1)}`)
+  const members = Array.from(
+    { length: n },
+    (_, i) => `${JSON.stringify(`k${i}é`)}${ws()}:${ws()}${randomJson(random, depth + 1)}`
+  )
   return `{${ws()}${members.join(`${ws()},${ws()}`)}${ws()}}`
 }

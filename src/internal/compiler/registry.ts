@@ -52,7 +52,7 @@ export const compiled = (p: ParserLike, kind: 0 | 1 | 2, resumable = false): Com
   const entry = registry.get(p)
   if (entry === undefined) return undefined
   const index = resumable ? kind + 3 : kind
-  return entry.byKind[index] ??= entry.backend.build(p, kind, resumable)
+  return (entry.byKind[index] ??= entry.backend.build(p, kind, resumable))
 }
 
 /** The compiled step for running `p` on `state`, if it is registered. */

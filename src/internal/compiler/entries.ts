@@ -6,7 +6,9 @@ import type { Node, NodeOf, ParserLike } from "../node.js"
 import { nodeOf } from "../node.js"
 
 /** A repeated pair for `Object.fromEntries`: the sequence and the indices of its key and value. */
-export const pairOf = (p: ParserLike): { readonly parsers: ReadonlyArray<ParserLike>; readonly key: number; readonly value: number } | undefined => {
+export const pairOf = (
+  p: ParserLike
+): { readonly parsers: ReadonlyArray<ParserLike>; readonly key: number; readonly value: number } | undefined => {
   let node = nodeOf(p)
   while (isDiagnostic(node)) node = nodeOf(node.self)
   if (node._tag !== "Seq") return undefined
@@ -19,8 +21,13 @@ export const pairOf = (p: ParserLike): { readonly parsers: ReadonlyArray<ParserL
 const isDiagnostic = (
   node: Node
 ): node is NodeOf<"Context" | "Expected" | "MapError" | "OrFail" | "Trace" | "Syntax" | "RetryAfter"> =>
-  node._tag === "Context" || node._tag === "Expected" || node._tag === "MapError" || node._tag === "OrFail" ||
-  node._tag === "Trace" || node._tag === "Syntax" || node._tag === "RetryAfter"
+  node._tag === "Context" ||
+  node._tag === "Expected" ||
+  node._tag === "MapError" ||
+  node._tag === "OrFail" ||
+  node._tag === "Trace" ||
+  node._tag === "Syntax" ||
+  node._tag === "RetryAfter"
 
 /**
  * Whether `map(p, Object.fromEntries)` can build its object directly: `p`

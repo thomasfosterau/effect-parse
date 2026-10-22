@@ -73,18 +73,15 @@ describe("Binary", () => {
   })
 
   it("lengthTake (winnow length_take tests)", () => {
-    expect(peek(Binary.lengthTake(Binary.u8), b(2, 0xaa, 0xbb, 0xcc))).toEqual(
-      Result.succeed([b(0xcc), b(0xaa, 0xbb)])
-    )
+    expect(peek(Binary.lengthTake(Binary.u8), b(2, 0xaa, 0xbb, 0xcc))).toEqual(Result.succeed([b(0xcc), b(0xaa, 0xbb)]))
     expectFailure(Binary.lengthTake(Binary.u8), b(3, 1))
     expectSuccess(Binary.lengthTake(Binary.beU64), b(0, 0, 0, 0, 0, 0, 0, 1, 7), b(7))
   })
 
   it("lengthTake works for text", () => {
-    const counted = Binary.lengthTake(Parser.terminated(
-      Token.takeWhile("0123456789", { min: 1 }).pipe(Parser.map(Number)),
-      Token.literal(":")
-    ))
+    const counted = Binary.lengthTake(
+      Parser.terminated(Token.takeWhile("0123456789", { min: 1 }).pipe(Parser.map(Number)), Token.literal(":"))
+    )
     expectSuccess(counted, "5:hello", "hello")
   })
 
@@ -125,11 +122,9 @@ describe("Bits", () => {
   })
 
   it("alternatives backtrack at bit granularity", () => {
-    const p = Bits.bits(Parser.seq(
-      Bits.take(1),
-      Parser.alt(Bits.pattern(0b11, 2), Bits.pattern(0b10, 2)),
-      Bits.take(5)
-    ))
+    const p = Bits.bits(
+      Parser.seq(Bits.take(1), Parser.alt(Bits.pattern(0b11, 2), Bits.pattern(0b10, 2)), Bits.take(5))
+    )
     expectSuccess(p, b(0b01011111), [0, 0b10, 0b11111])
   })
 

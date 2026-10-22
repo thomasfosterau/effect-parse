@@ -32,6 +32,7 @@ Never version or publish by hand once the bootstrap below is done.
    ```
 
    Then do step 5 and merge the version PR: `release.sh` finds `0.1.0` already on npm, skips the publish and only tags the release.
+
 5. **Configure the trusted publisher.** On npmjs.com, open the package → **Settings → Trusted publishing** → **GitHub Actions**:
    - Organization or user: `thomasfosterau`
    - Repository: `effect-parse`
@@ -39,4 +40,5 @@ Never version or publish by hand once the bootstrap below is done.
    - Environment: `release`
 
    Then, under **Publishing access**, choose **Require two-factor authentication and disallow tokens**, and revoke any token used for the bootstrap.
+
 6. **Protect `main`.** Require pull requests and the `CI` check before merging, so a release can only come from merging the reviewed version PR.

@@ -46,21 +46,24 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const body = (mbPerSecond: number) => {
   const start = performance.now()
   let last = 0
-  const stream = new ReadableStream<Uint8Array>({
-    start: async (controller) => {
-      for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-        const end = Math.min(bytes.length, offset + chunkSize)
-        if (mbPerSecond !== Infinity) {
-          const wait = start + (end / 1e6 / mbPerSecond) * 1000 - performance.now()
-          if (wait > 0) await sleep(wait)
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      start: async (controller) => {
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+          const end = Math.min(bytes.length, offset + chunkSize)
+          if (mbPerSecond !== Infinity) {
+            const wait = start + (end / 1e6 / mbPerSecond) * 1000 - performance.now()
+            if (wait > 0) await sleep(wait)
+          }
+          // A copy, as a network stream would deliver
+          controller.enqueue(bytes.slice(offset, end))
         }
-        // A copy, as a network stream would deliver
-        controller.enqueue(bytes.slice(offset, end))
+        last = performance.now()
+        controller.close()
       }
-      last = performance.now()
-      controller.close()
-    }
-  }, { highWaterMark: Infinity })
+    },
+    { highWaterMark: Infinity }
+  )
   return { stream, start, lastByte: () => last }
 }
 
@@ -72,7 +75,9 @@ const cases: ReadonlyArray<readonly [string, (response: Response) => Promise<unk
 ]
 
 const expected = JSON.stringify(JSON.parse(doc))
-console.log(`document: ${(bytes.length / 1e6).toFixed(2)} MB of UTF-8 JSON, ${chunkSize / 1024} KiB chunks; best of 5 runs\n`)
+console.log(
+  `document: ${(bytes.length / 1e6).toFixed(2)} MB of UTF-8 JSON, ${chunkSize / 1024} KiB chunks; best of 5 runs\n`
+)
 for (const bandwidth of [10, 25, 100, Infinity]) {
   console.log(bandwidth === Infinity ? "in memory (no throttling)" : `${bandwidth} MB/s (${bandwidth * 8} Mbit/s)`)
   for (const [name, run] of cases) {
@@ -88,7 +93,9 @@ for (const bandwidth of [10, 25, 100, Infinity]) {
       bestTotal = Math.min(bestTotal, end - b.start)
       bestAfter = Math.min(bestAfter, Math.max(0, end - b.lastByte()))
     }
-    console.log(`  ${name.padEnd(36)} ${bestTotal.toFixed(1).padStart(7)} ms total  ${bestAfter.toFixed(1).padStart(6)} ms after the last byte`)
+    console.log(
+      `  ${name.padEnd(36)} ${bestTotal.toFixed(1).padStart(7)} ms total  ${bestAfter.toFixed(1).padStart(6)} ms after the last byte`
+    )
   }
   console.log()
 }

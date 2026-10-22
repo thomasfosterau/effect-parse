@@ -29,7 +29,5 @@ export const expectFailure = <A, E, I extends Input.Input>(
 }
 
 /** nom-style: returns `[remaining, output]`. */
-export const peek = <A, E, I extends Input.Input>(
-  parser: Parser.Parser<A, E, never, I>,
-  input: NoInfer<I>
-) => Result.mapError(P.parsePeek(parser, input), (e) => e.message)
+export const peek = <A, E, I extends Input.Input>(parser: Parser.Parser<A, E, never, I>, input: NoInfer<I>) =>
+  Result.mapError(P.parsePeek(parser, input), (e) => e.message)

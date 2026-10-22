@@ -223,7 +223,12 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
       const i = tryOps(state, infixes, false)
       if (i === -2) return Fail
       if (i < 0) {
-        const f = postfixFailure === undefined ? failure : failure === undefined ? postfixFailure : mergeFailures(postfixFailure, failure)
+        const f =
+          postfixFailure === undefined
+            ? failure
+            : failure === undefined
+              ? postfixFailure
+              : mergeFailures(postfixFailure, failure)
         if (f !== undefined && f.offset === state.pos) state.setHint(f.offset, f.expected)
         break
       }

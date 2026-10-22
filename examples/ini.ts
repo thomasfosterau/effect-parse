@@ -7,10 +7,9 @@ import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
 
 export type Ini = ReadonlyMap<string, ReadonlyMap<string, string>>
 
-const blank = Parser.repeat(Parser.alt(
-  Ascii.multispace1,
-  Parser.taken(Parser.seq(Token.literal(";"), Ascii.tillLineEnding))
-)).pipe(Parser.asVoid)
+const blank = Parser.repeat(
+  Parser.alt(Ascii.multispace1, Parser.taken(Parser.seq(Token.literal(";"), Ascii.tillLineEnding)))
+).pipe(Parser.asVoid)
 
 const category = Parser.delimited(
   Token.literal("["),
@@ -18,7 +17,7 @@ const category = Parser.delimited(
   Parser.cut(Token.literal("]"))
 ).pipe(Parser.context("category"))
 
-const keyValue = Parser.gen(function*() {
+const keyValue = Parser.gen(function* () {
   const key = yield* Ascii.alphanumeric1
   yield* Ascii.space0
   yield* Parser.cut(Token.literal("="))

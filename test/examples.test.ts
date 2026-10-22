@@ -24,35 +24,37 @@ describe("examples/json", () => {
       b: ["x", "y", 12],
       c: { hello: "world" },
       d: [true, false, null, -150],
-      e: "esc\"aped é 😀 \n"
+      e: 'esc"aped é 😀 \n'
     })
   })
 
   it("agrees with JSON.parse", () => {
-    const docs = ["[]", "{}", "[1,[2,[3]]]", "\"\"", "0", "{\"k\":{\"k\":[{}]}}", " [ 1 , 2 ] "]
+    const docs = ["[]", "{}", "[1,[2,[3]]]", '""', "0", '{"k":{"k":[{}]}}', " [ 1 , 2 ] "]
     for (const doc of docs) expectSuccess(Json.json, doc, JSON.parse(doc))
   })
 
   it("reports precise errors", () => {
     const err = expectFailure(Json.json, "[1,,2]")
     expect(err.offset).toBe(3)
-    expect(err.message).toBe([
-      "Parse error at line 1, column 4:",
-      "1 | [1,,2]",
-      "  |    ^",
-      "while parsing array",
-      "expected value, found \",\""
-    ].join("\n"))
+    expect(err.message).toBe(
+      [
+        "Parse error at line 1, column 4:",
+        "1 | [1,,2]",
+        "  |    ^",
+        "while parsing array",
+        'expected value, found ","'
+      ].join("\n")
+    )
   })
 
   it("commits to strings with cut", () => {
-    const err = expectFailure(Json.json, "{\"a\": \"unterminated}")
+    const err = expectFailure(Json.json, '{"a": "unterminated}')
     expect(err.mode).toBe("Cut")
     expect(err.context).toEqual(["string", "object"])
   })
 
   it("rejects bad escapes", () => {
-    const err = expectFailure(Json.json, "\"\\x\"")
+    const err = expectFailure(Json.json, '"\\x"')
     expect(err.expected).toEqual(["escape sequence"])
   })
 })
@@ -69,18 +71,20 @@ describe("examples/json-text", () => {
   ] as const)("parses %s input with one grammar", (_, T, encode) => {
     const json = makeJson<any>(T)
     expectSuccess(json, encode(doc), expected)
-    const err = expectFailure(json, encode("{\"é\": [1,,2]}"))
+    const err = expectFailure(json, encode('{"é": [1,,2]}'))
     expect(err.position).toEqual({ line: 1, column: 10 })
-    expect(err.message).toContain("expected value, found \",\"")
+    expect(err.message).toContain('expected value, found ","')
   })
 })
 
 describe("examples/json-fast", () => {
   it("agrees with JSON.parse, compiled or not", () => {
     const docs = [
-      "{\"a\": [1, -2.5e3, true, null], \"b\": {\"c\": \"x\\n\\u00e9\\ud83d\\ude00\"}}",
-      "{\"__proto__\": {\"toString\": 1}, \"a\": 1, \"a\": 2}",
-      "[]", "{}", " [ {} , [ ] ] "
+      '{"a": [1, -2.5e3, true, null], "b": {"c": "x\\n\\u00e9\\ud83d\\ude00"}}',
+      '{"__proto__": {"toString": 1}, "a": 1, "a": 2}',
+      "[]",
+      "{}",
+      " [ {} , [ ] ] "
     ]
     const compiled = Compiler.jit(Parser.named(JsonFast.json, "json-fast"))
     for (const doc of docs) {
@@ -90,8 +94,8 @@ describe("examples/json-fast", () => {
   })
 
   it("requires a low surrogate after a high one", () => {
-    expectSuccess(JsonFast.json, "\"\\udc00\"", "\udc00")
-    const err = expectFailure(JsonFast.json, "\"\\ud83d\\u0041\"")
+    expectSuccess(JsonFast.json, '"\\udc00"', "\udc00")
+    const err = expectFailure(JsonFast.json, '"\\ud83d\\u0041"')
     expect(err.mode).toBe("Cut")
   })
 })
@@ -158,16 +162,31 @@ port = 143
 file = payroll.dat
 `
     const result = Parser.parseSync(Ini.ini, input)
-    expect(result).toEqual(new Map([
-      ["owner", new Map([["name", "John Doe"], ["organization", "Acme Widgets Inc."]])],
-      ["database", new Map([["server", "192.0.2.62"], ["port", "143"], ["file", "payroll.dat"]])]
-    ]))
+    expect(result).toEqual(
+      new Map([
+        [
+          "owner",
+          new Map([
+            ["name", "John Doe"],
+            ["organization", "Acme Widgets Inc."]
+          ])
+        ],
+        [
+          "database",
+          new Map([
+            ["server", "192.0.2.62"],
+            ["port", "143"],
+            ["file", "payroll.dat"]
+          ])
+        ]
+      ])
+    )
   })
 
   it("errors inside key-value pairs", () => {
     const err = expectFailure(Ini.ini, "[a]\nkey value\n")
     expect(err.context).toEqual(["key-value pair"])
-    expect(err.expected).toContain("\"=\"")
+    expect(err.expected).toContain('"="')
   })
 })
 
@@ -182,7 +201,10 @@ describe("examples/http", () => {
 
   const expected = [
     { method: "GET", uri: "/pub/WWW/TheProject.html", version: "1.1" },
-    [{ name: "Host", value: ["www.w3.org"] }, { name: "Accept", value: ["text/html"] }]
+    [
+      { name: "Host", value: ["www.w3.org"] },
+      { name: "Accept", value: ["text/html"] }
+    ]
   ]
 
   it("parses a request", () => {
@@ -207,9 +229,7 @@ describe("examples/sexpr", () => {
   const run = (input: string) => Parser.parse(Sexpr.program, input)
 
   it("evaluates (winnow s_expression tests)", () => {
-    expect(run("((if (= (+ 3 (/ 9 3)) (* 2 3)) * /) 456 123)")).toEqual(
-      Result.succeed({ _tag: "Num", value: 56088 })
-    )
+    expect(run("((if (= (+ 3 (/ 9 3)) (* 2 3)) * /) 456 123)")).toEqual(Result.succeed({ _tag: "Num", value: 56088 }))
     expect(run("(+ 1 2 3)")).toEqual(Result.succeed({ _tag: "Num", value: 6 }))
     expect(run("(not #f)")).toEqual(Result.succeed({ _tag: "Bool", value: true }))
     expect(run("(if #f 1 2)")).toEqual(Result.succeed({ _tag: "Num", value: 2 }))
@@ -229,7 +249,7 @@ describe("examples/sexpr", () => {
   it("reports unbalanced parentheses", () => {
     const err = expectFailure(Sexpr.program, "(+ 1 2")
     expect(err.mode).toBe("Cut")
-    expect(err.expected).toContain("\")\"")
+    expect(err.expected).toContain('")"')
     expect(Option.isNone(Option.fromNullishOr(err.cause))).toBe(true)
   })
 })

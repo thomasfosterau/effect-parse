@@ -20,7 +20,7 @@ export interface CharSet {
 const isRange = (u: unknown): u is { readonly from: string | number; readonly to: string | number } =>
   typeof u === "object" && u !== null && (u as any)._tag === "TokenRange"
 
-const toCode = (u: string | number): number => typeof u === "number" ? u : u.codePointAt(0)!
+const toCode = (u: string | number): number => (typeof u === "number" ? u : u.codePointAt(0)!)
 
 /** The code point ranges of a token set, or `undefined` if it has an unknown predicate. */
 export const rangesOf = (set: unknown): Array<[number, number]> | undefined => {
@@ -93,7 +93,7 @@ export const reachesAbove = (s: CharSet, limit: number): boolean =>
 /** The input kind a `Text` encoding reads: 0 for strings, 1 for bytes. */
 export const kindOfEncoding = (enc: Encoding<any>): 0 | 1 => {
   let k = kinds.get(enc)
-  if (k === undefined) kinds.set(enc, k = typeof enc.encode("") === "string" ? 0 : 1)
+  if (k === undefined) kinds.set(enc, (k = typeof enc.encode("") === "string" ? 0 : 1))
   return k
 }
 

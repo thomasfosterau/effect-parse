@@ -7,13 +7,7 @@
  */
 import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
 
-export type Json =
-  | null
-  | boolean
-  | number
-  | string
-  | ReadonlyArray<Json>
-  | { readonly [key: string]: Json }
+export type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
 
 const ws = Token.takeWhile(" \t\r\n")
 
@@ -29,15 +23,15 @@ const unicodeEscape = hex4.pipe(
   Parser.flatMap((hi) =>
     hi >= 0xd800 && hi <= 0xdbff
       ? Parser.preceded(literal("\\u"), hex4).pipe(
-        Parser.filter((lo) => lo >= 0xdc00 && lo <= 0xdfff),
-        Parser.map((lo) => String.fromCharCode(hi, lo))
-      )
+          Parser.filter((lo) => lo >= 0xdc00 && lo <= 0xdfff),
+          Parser.map((lo) => String.fromCharCode(hi, lo))
+        )
       : Parser.succeed(String.fromCharCode(hi))
   )
 )
 
 const escapeChar = Parser.dispatch(Token.any, {
-  "\"": Parser.succeed("\""),
+  '"': Parser.succeed('"'),
   "\\": Parser.succeed("\\"),
   "/": Parser.succeed("/"),
   b: Parser.succeed("\b"),
@@ -49,14 +43,14 @@ const escapeChar = Parser.dispatch(Token.any, {
 }).pipe(Parser.expected("escape sequence"))
 
 const stringBody = Ascii.escaped(
-  Token.takeTill((c: string) => c === "\"" || c === "\\" || c < " "),
+  Token.takeTill((c: string) => c === '"' || c === "\\" || c < " "),
   "\\",
   Parser.cut(escapeChar)
 )
 
 export const string: Parser.Parser<string> = Parser.preceded(
-  literal("\""),
-  Parser.cut(Parser.terminated(stringBody, literal("\"")))
+  literal('"'),
+  Parser.cut(Parser.terminated(stringBody, literal('"')))
 ).pipe(Parser.context("string"))
 
 const number: Parser.Parser<number> = Ascii.float.pipe(Parser.filter(Number.isFinite))
@@ -67,10 +61,15 @@ const comma = lexeme(literal(","))
 
 const array: Parser.Parser<ReadonlyArray<Json>> = Parser.preceded(
   lexeme(literal("[")),
-  Parser.cut(Parser.terminated(
-    Parser.separated(Parser.suspend(() => value), comma),
-    literal("]")
-  ))
+  Parser.cut(
+    Parser.terminated(
+      Parser.separated(
+        Parser.suspend(() => value),
+        comma
+      ),
+      literal("]")
+    )
+  )
 ).pipe(Parser.context("array"))
 
 const member = Parser.separatedPair(
@@ -92,7 +91,7 @@ export const value: Parser.Parser<Json> = lexeme(
     n: literal("null").pipe(Parser.as(null)),
     t: literal("true").pipe(Parser.as(true)),
     f: literal("false").pipe(Parser.as(false)),
-    "\"": string,
+    '"': string,
     "[": Parser.suspend(() => array),
     "{": Parser.suspend(() => object),
     "-": number,

@@ -198,9 +198,13 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
     })
   }
 
-  constructor(source: I | Source<I>, options: {
-    readonly context?: Context.Context<never> | undefined
-  }, previous: Previous | undefined) {
+  constructor(
+    source: I | Source<I>,
+    options: {
+      readonly context?: Context.Context<never> | undefined
+    },
+    previous: Previous | undefined
+  ) {
     super(source, { context: options.context })
     this.highWater = this.cursor
     this.stack = []
@@ -265,14 +269,19 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
     // Like Tree-sitter's rules, nodes are never empty: an empty match adds nothing to the tree
     if (end === start) return a
     const hinted = this.hintOffset !== hintOffset || this.hintExpected !== hintExpected
-    const diagnostics: Diagnostics | undefined = deepest === undefined && !hinted ? undefined : {
-      deepest,
-      base: start,
-      hintOffset: this.hintOffset - start,
-      hintExpected: hinted ? this.hintExpected : undefined
-    }
+    const diagnostics: Diagnostics | undefined =
+      deepest === undefined && !hinted
+        ? undefined
+        : {
+            deepest,
+            base: start,
+            hintOffset: this.hintOffset - start,
+            hintExpected: hinted ? this.hintExpected : undefined
+          }
     const entries = stack.splice(mark)
-    stack.push(new Child(build(kind, named, key, start, end, looked, entries, a, undefined, diagnostics), start, end, undefined))
+    stack.push(
+      new Child(build(kind, named, key, start, end, looked, entries, a, undefined, diagnostics), start, end, undefined)
+    )
     return a
   }
 

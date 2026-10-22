@@ -36,7 +36,7 @@ const utf16 = Encoding.utf16le.encode(doc)
 const decoder = new TextDecoder()
 
 const backends = ["interpreted", "closure", "jit"] as const
-type Backend = typeof backends[number]
+type Backend = (typeof backends)[number]
 
 /** A separate parser object per backend, since compilation is per parser. */
 const variant = <P extends Parser.Parser.Any>(p: P, backend: Backend): P => {
@@ -66,7 +66,11 @@ for (const [group, grammar, input] of grammars) {
   }
 }
 const jsonString = variant(makeJson(Text.string), "jit")
-cases.push({ group: "references", name: "TextDecoder + Text.string (jit)", run: () => Parser.parseSync(jsonString, decoder.decode(utf8)) })
+cases.push({
+  group: "references",
+  name: "TextDecoder + Text.string (jit)",
+  run: () => Parser.parseSync(jsonString, decoder.decode(utf8))
+})
 cases.push({ group: "references", name: "hand-fused, string", run: () => parseFused(doc) })
 cases.push({ group: "references", name: "JSON.parse", run: () => JSON.parse(doc) })
 
@@ -99,5 +103,7 @@ for (const c of cases) {
   if (c.name === "interpreted") interpreted = ms
   const speedup = c.group !== "references" && c.name !== "interpreted" ? `  ${(interpreted / ms).toFixed(1)}x` : ""
   const mchars = doc.length / 1e6 / (ms / 1000)
-  console.log(`  ${c.name.padEnd(32)} ${ms.toFixed(2).padStart(7)} ms  ${mchars.toFixed(1).padStart(6)} M chars/s${speedup}`)
+  console.log(
+    `  ${c.name.padEnd(32)} ${ms.toFixed(2).padStart(7)} ms  ${mchars.toFixed(1).padStart(6)} M chars/s${speedup}`
+  )
 }

@@ -21,7 +21,7 @@ export interface TokenRangeLike {
 const isRange = (u: unknown): u is TokenRangeLike =>
   typeof u === "object" && u !== null && (u as any)._tag === "TokenRange"
 
-const toCode = (u: string | number): number => typeof u === "number" ? u : u.codePointAt(0)!
+const toCode = (u: string | number): number => (typeof u === "number" ? u : u.codePointAt(0)!)
 
 /** @internal */
 export const describeChar = (s: string): string => JSON.stringify(s)
@@ -41,9 +41,9 @@ const describeSet = (u: unknown): string => {
 
 /** Renders bytes as a Rust-style byte string literal: b"GET\r\n". */
 export const describeBytes = (bytes: Uint8Array): string => {
-  let out = "b\""
+  let out = 'b"'
   for (const b of bytes) {
-    if (b === 0x22) out += "\\\""
+    if (b === 0x22) out += '\\"'
     else if (b === 0x5c) out += "\\\\"
     else if (b === 0x0a) out += "\\n"
     else if (b === 0x0d) out += "\\r"
@@ -51,10 +51,10 @@ export const describeBytes = (bytes: Uint8Array): string => {
     else if (b >= 0x20 && b < 0x7f) out += String.fromCharCode(b)
     else out += `\\x${b.toString(16).padStart(2, "0")}`
   }
-  return out + "\""
+  return out + '"'
 }
 
-const compileCode = (u: unknown): (code: number) => boolean => {
+const compileCode = (u: unknown): ((code: number) => boolean) => {
   if (typeof u === "string") {
     const codes = Array.from(u, (c) => c.codePointAt(0)!)
     if (codes.length === 1) {
@@ -82,7 +82,7 @@ const compileCode = (u: unknown): (code: number) => boolean => {
   throw new TypeError(`invalid token set: ${String(u)}`)
 }
 
-const bitmap = (codes: ReadonlyArray<number>): (code: number) => boolean => {
+const bitmap = (codes: ReadonlyArray<number>): ((code: number) => boolean) => {
   const ascii = new Uint8Array(256)
   let other: Set<number> | undefined
   for (const c of codes) {
@@ -91,10 +91,10 @@ const bitmap = (codes: ReadonlyArray<number>): (code: number) => boolean => {
   }
   if (other === undefined) return (x) => x < 256 && ascii[x] === 1
   const set = other
-  return (x) => x < 256 ? ascii[x] === 1 : set.has(x)
+  return (x) => (x < 256 ? ascii[x] === 1 : set.has(x))
 }
 
-const compileToken = (u: unknown): (token: unknown) => boolean => {
+const compileToken = (u: unknown): ((token: unknown) => boolean) => {
   if (typeof u === "function") return u as (token: unknown) => boolean
   if (Array.isArray(u)) {
     const set = new Set(u)
@@ -149,7 +149,7 @@ export const compile = (set: unknown, kind: "string" | "code" = "code"): Matcher
   return { code, token: compileToken(set), description }
 }
 
-const compileCodeSafe = (set: unknown, kind: "string" | "code"): (code: number) => boolean => {
+const compileCodeSafe = (set: unknown, kind: "string" | "code"): ((code: number) => boolean) => {
   if (Array.isArray(set) && kind === "string") {
     // Predicates nested in arrays also take strings
     const tests = set.map((s) => compile(s, kind).code)
@@ -199,8 +199,8 @@ export const describeLiteral = (lit: Input): string =>
   typeof lit === "string"
     ? cached(literalDescriptions, lit, describeChar)
     : lit instanceof Uint8Array
-    ? describeBytes(lit)
-    : `[${lit.map((t) => JSON.stringify(t)).join(", ")}]`
+      ? describeBytes(lit)
+      : `[${lit.map((t) => JSON.stringify(t)).join(", ")}]`
 
 const stringMatchers = /*#__PURE__*/ new Map<string, AnyMatcher>()
 
@@ -246,11 +246,7 @@ export const codePointAt = (s: string, i: number): number => {
 export const NoMatch: unique symbol = /*#__PURE__*/ Symbol("NoMatch")
 export const End: unique symbol = /*#__PURE__*/ Symbol("End")
 
-export const nextIf = (
-  state: State<Input>,
-  m: AnyMatcher,
-  negate: boolean
-): unknown => {
+export const nextIf = (state: State<Input>, m: AnyMatcher, negate: boolean): unknown => {
   const pos = state.pos
   if (pos >= state.end) return End
   switch (state.inputKind) {
@@ -453,4 +449,4 @@ const match = (state: State<Input>, lit: Input, caseless: boolean): number => {
   }
 }
 
-const lowerAscii = (c: number): number => c >= 65 && c <= 90 ? c + 32 : c
+const lowerAscii = (c: number): number => (c >= 65 && c <= 90 ? c + 32 : c)

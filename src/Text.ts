@@ -63,7 +63,7 @@ import type { StringTokenSet } from "./Token.js"
  */
 export type CharPredicate = (char: string | number) => boolean
 
-const toCodePoint = (c: string | number): number => typeof c === "number" ? c : c.codePointAt(0) ?? -1
+const toCodePoint = (c: string | number): number => (typeof c === "number" ? c : (c.codePointAt(0) ?? -1))
 
 const makePredicate = (name: string, re: RegExp): CharPredicate => {
   // Results for the Basic Multilingual Plane are cached: a table lookup is
@@ -358,11 +358,17 @@ const normalize = (r: Range | undefined): [number, number] => {
   return [r.min ?? 0, r.max ?? Infinity]
 }
 
-const isAsciiDigit = /*#__PURE__*/ codePointPredicate("isAsciiDigit", (c: number): boolean => c >= 48 && c <= 57, [[48, 57]])
+const isAsciiDigit = /*#__PURE__*/ codePointPredicate("isAsciiDigit", (c: number): boolean => c >= 48 && c <= 57, [
+  [48, 57]
+])
 const isAsciiHexDigit = /*#__PURE__*/ codePointPredicate(
   "isAsciiHexDigit",
   (c: number): boolean => (c >= 48 && c <= 57) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102),
-  [[48, 57], [65, 70], [97, 102]]
+  [
+    [48, 57],
+    [65, 70],
+    [97, 102]
+  ]
 )
 const isLineBreak = (c: number): boolean => c === 10 || c === 13
 
@@ -417,29 +423,38 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
     set: unknown = test
   ): Parser<string, never, never, I> => {
     const [min, max] = normalize(r)
-    return P.described<string, never, never, I>((state: State<any>) => {
-      if (state.inputKind === 1) state.encoding = enc
-      const start = state.pos
-      internal.scan(enc, state, test, negate, max, state.pos, fast)
-      const offset = internal.scanOffset
-      const count = internal.scanCount
-      const stop = internal.scanStop
-      if (state.partial && (stop === internal.End || stop === internal.Truncated)) return state.incomplete(1, expected)
-      if (count < min) return backtrack(state, kind, expected, offset)
-      // More matching characters would have been accepted where we stopped
-      if (hint && count < max) state.setHint(offset, expected)
-      state.pos = offset
-      return enc.text(state.input, start, offset)
-    }, name, { _tag: "TakeWhile", set, negate, min, max, encoding: enc })
+    return P.described<string, never, never, I>(
+      (state: State<any>) => {
+        if (state.inputKind === 1) state.encoding = enc
+        const start = state.pos
+        internal.scan(enc, state, test, negate, max, state.pos, fast)
+        const offset = internal.scanOffset
+        const count = internal.scanCount
+        const stop = internal.scanStop
+        if (state.partial && (stop === internal.End || stop === internal.Truncated))
+          return state.incomplete(1, expected)
+        if (count < min) return backtrack(state, kind, expected, offset)
+        // More matching characters would have been accepted where we stopped
+        if (hint && count < max) state.setHint(offset, expected)
+        state.pos = offset
+        return enc.text(state.input, start, offset)
+      },
+      name,
+      { _tag: "TakeWhile", set, negate, min, max, encoding: enc }
+    )
   }
 
-  const any: Parser<string, never, never, I> = P.described<string, never, never, I>((state: State<any>) => {
-    if (state.inputKind === 1) state.encoding = enc
-    const cp = internal.next(enc, state)
-    if (cp < 0) return internal.failAt(state, cp, "Token", expectedAny)
-    state.pos += internal.width
-    return internal.charOf(cp)
-  }, "any", { _tag: "Any", encoding: enc })
+  const any: Parser<string, never, never, I> = P.described<string, never, never, I>(
+    (state: State<any>) => {
+      if (state.inputKind === 1) state.encoding = enc
+      const cp = internal.next(enc, state)
+      if (cp < 0) return internal.failAt(state, cp, "Token", expectedAny)
+      state.pos += internal.width
+      return internal.charOf(cp)
+    },
+    "any",
+    { _tag: "Any", encoding: enc }
+  )
 
   const literal = <const L extends string>(lit: L): Parser<L, never, never, I> => {
     const encoded = enc.encode(lit)
@@ -449,52 +464,64 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
     if (len === 1) {
       // Single unit literals (punctuation, mostly) are compared directly
       const unit = typeof encoded === "string" ? encoded.charCodeAt(0) : encoded[0]!
-      return P.described<L, never, never, I>((state: State<any>) => {
-        const pos = state.pos
+      return P.described<L, never, never, I>(
+        (state: State<any>) => {
+          const pos = state.pos
+          if (state.inputKind === 1) state.encoding = enc
+          if (pos >= state.end) return state.eoi("Literal", expected, 1)
+          const input = state.input
+          if ((state.inputKind === 0 ? (input as string).charCodeAt(pos) : (input as Uint8Array)[pos]) !== unit) {
+            return backtrack(state, "Literal", expected)
+          }
+          state.pos = pos + 1
+          return lit
+        },
+        expected[0],
+        node
+      )
+    }
+    return P.described<L, never, never, I>(
+      (state: State<any>) => {
         if (state.inputKind === 1) state.encoding = enc
-        if (pos >= state.end) return state.eoi("Literal", expected, 1)
-        const input = state.input
-        if ((state.inputKind === 0 ? (input as string).charCodeAt(pos) : (input as Uint8Array)[pos]) !== unit) {
+        const r = matchLiteral(state, encoded, false)
+        if (r === -1) return backtrack(state, "Literal", expected)
+        if (r === -2) {
+          if (state.partial) return state.incomplete(len - (state.end - state.pos), expected)
           return backtrack(state, "Literal", expected)
         }
-        state.pos = pos + 1
+        state.pos += len
         return lit
-      }, expected[0], node)
-    }
-    return P.described<L, never, never, I>((state: State<any>) => {
-      if (state.inputKind === 1) state.encoding = enc
-      const r = matchLiteral(state, encoded, false)
-      if (r === -1) return backtrack(state, "Literal", expected)
-      if (r === -2) {
-        if (state.partial) return state.incomplete(len - (state.end - state.pos), expected)
-        return backtrack(state, "Literal", expected)
-      }
-      state.pos += len
-      return lit
-    }, expected[0], node)
+      },
+      expected[0],
+      node
+    )
   }
 
   const caseless = (lit: string): Parser<string, never, never, I> => {
     const folded = Array.from(lit, (c) => internal.fold(c.codePointAt(0)!))
     const expected = [`${JSON.stringify(lit)} (case insensitive)`]
-    return P.described<string, never, never, I>((state: State<any>) => {
-      if (state.inputKind === 1) state.encoding = enc
-      const start = state.pos
-      let pos = start
-      for (let i = 0; i < folded.length; i++) {
-        const cp = internal.next(enc, state, pos)
-        if (cp === internal.End || cp === internal.Truncated) {
-          return state.partial ? state.incomplete(1, expected) : backtrack(state, "Literal", expected)
+    return P.described<string, never, never, I>(
+      (state: State<any>) => {
+        if (state.inputKind === 1) state.encoding = enc
+        const start = state.pos
+        let pos = start
+        for (let i = 0; i < folded.length; i++) {
+          const cp = internal.next(enc, state, pos)
+          if (cp === internal.End || cp === internal.Truncated) {
+            return state.partial ? state.incomplete(1, expected) : backtrack(state, "Literal", expected)
+          }
+          if (cp < 0 || internal.fold(cp) !== folded[i]) {
+            state.syntax?.read(pos + Math.max(internal.width, 1))
+            return backtrack(state, "Literal", expected)
+          }
+          pos += internal.width
         }
-        if (cp < 0 || internal.fold(cp) !== folded[i]) {
-          state.syntax?.read(pos + Math.max(internal.width, 1))
-          return backtrack(state, "Literal", expected)
-        }
-        pos += internal.width
-      }
-      state.pos = pos
-      return enc.text(state.input, start, pos)
-    }, expected[0], { _tag: "Literal", literal: lit, caseless: true, encoding: enc })
+        state.pos = pos
+        return enc.text(state.input, start, pos)
+      },
+      expected[0],
+      { _tag: "Literal", literal: lit, caseless: true, encoding: enc }
+    )
   }
 
   const oneOfImpl = (set: StringTokenSet, negate: boolean): Parser<string, never, never, I> => {
@@ -502,32 +529,40 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
     const test = m.code
     const expected = [negate ? `anything but ${m.description}` : m.description]
     const kind: ErrorKind = negate ? "NoneOf" : "OneOf"
-    return P.described<string, never, never, I>((state: State<any>) => {
-      if (state.inputKind === 1) state.encoding = enc
-      const cp = internal.next(enc, state)
-      if (cp < 0) return internal.failAt(state, cp, kind, expected)
-      const w = internal.width
-      if (test(cp) === negate) return state.backtrack(kind, expected)
-      state.pos += w
-      return internal.charOf(cp)
-    }, expected[0], { _tag: "OneOf", set, negate, encoding: enc })
+    return P.described<string, never, never, I>(
+      (state: State<any>) => {
+        if (state.inputKind === 1) state.encoding = enc
+        const cp = internal.next(enc, state)
+        if (cp < 0) return internal.failAt(state, cp, kind, expected)
+        const w = internal.width
+        if (test(cp) === negate) return state.backtrack(kind, expected)
+        state.pos += w
+        return internal.charOf(cp)
+      },
+      expected[0],
+      { _tag: "OneOf", set, negate, encoding: enc }
+    )
   }
 
   const take = (count: number): Parser<string, never, never, I> => {
     const expected = [count === 1 ? "1 character" : `${count} characters`]
-    return P.described<string, never, never, I>((state: State<any>) => {
-      if (state.inputKind === 1) state.encoding = enc
-      const start = state.pos
-      let pos = start
-      for (let got = 0; got < count; got++) {
-        const cp = internal.next(enc, state, pos)
-        if (cp === internal.End) return state.eoi("Take", expected, count - got)
-        if (cp < 0) return internal.failAt(state, cp, "Take", expected, pos)
-        pos += internal.width
-      }
-      state.pos = pos
-      return enc.text(state.input, start, pos)
-    }, "take", { _tag: "Take", count, encoding: enc })
+    return P.described<string, never, never, I>(
+      (state: State<any>) => {
+        if (state.inputKind === 1) state.encoding = enc
+        const start = state.pos
+        let pos = start
+        for (let got = 0; got < count; got++) {
+          const cp = internal.next(enc, state, pos)
+          if (cp === internal.End) return state.eoi("Take", expected, count - got)
+          if (cp < 0) return internal.failAt(state, cp, "Take", expected, pos)
+          pos += internal.width
+        }
+        state.pos = pos
+        return enc.text(state.input, start, pos)
+      },
+      "take",
+      { _tag: "Take", count, encoding: enc }
+    )
   }
 
   const takeUntil = (lit: string, r?: Range): Parser<string, never, never, I> => {
@@ -535,110 +570,142 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
     const needle = enc.encode(lit)
     const unit = enc.unit
     const expected = [JSON.stringify(lit)]
-    return P.described<string, never, never, I>((state: State<any>) => {
-      if (state.inputKind === 1) state.encoding = enc
-      const start = state.pos
-      let idx = indexOf(state, needle as Input, start)
-      // Multi-unit encodings: only accept matches on a character boundary
-      while (unit > 1 && idx >= 0 && (idx - start) % unit !== 0) idx = indexOf(state, needle as Input, idx + 1)
-      if (idx < 0) {
-        if (state.partial) return state.incomplete(0, expected)
-        return backtrack(state, "TakeUntil", expected, state.end)
-      }
-      // The literal was read but is not consumed
-      state.syntax?.read(idx + needle.length)
-      const count = internal.validate(enc, state, start, idx)
-      if (count < 0) return backtrack(state, "TakeUntil", expected, -1 - count)
-      // As in winnow, the first occurrence must lie within the range
-      if (count < min) return backtrack(state, "TakeUntil", expected, idx)
-      if (count > max) return backtrack(state, "TakeUntil", expected)
-      state.pos = idx
-      return enc.text(state.input, start, idx)
-    }, "takeUntil", { _tag: "TakeUntil", literal: lit, min, max, encoding: enc })
+    return P.described<string, never, never, I>(
+      (state: State<any>) => {
+        if (state.inputKind === 1) state.encoding = enc
+        const start = state.pos
+        let idx = indexOf(state, needle as Input, start)
+        // Multi-unit encodings: only accept matches on a character boundary
+        while (unit > 1 && idx >= 0 && (idx - start) % unit !== 0) idx = indexOf(state, needle as Input, idx + 1)
+        if (idx < 0) {
+          if (state.partial) return state.incomplete(0, expected)
+          return backtrack(state, "TakeUntil", expected, state.end)
+        }
+        // The literal was read but is not consumed
+        state.syntax?.read(idx + needle.length)
+        const count = internal.validate(enc, state, start, idx)
+        if (count < 0) return backtrack(state, "TakeUntil", expected, -1 - count)
+        // As in winnow, the first occurrence must lie within the range
+        if (count < min) return backtrack(state, "TakeUntil", expected, idx)
+        if (count > max) return backtrack(state, "TakeUntil", expected)
+        state.pos = idx
+        return enc.text(state.input, start, idx)
+      },
+      "takeUntil",
+      { _tag: "TakeUntil", literal: lit, min, max, encoding: enc }
+    )
   }
 
   const always = () => true
-  const rest: Parser<string, never, never, I> = P.described<string, never, never, I>((state: State<any>) => {
-    if (state.inputKind === 1) state.encoding = enc
-    const start = state.pos
-    internal.scan(enc, state, always, false, Infinity, state.pos, fast)
-    const offset = internal.scanOffset
-    if (internal.scanStop === internal.Truncated) return state.incomplete(1, expectedAny)
-    if (internal.scanStop === internal.Invalid) return backtrack(state, "Token", expectedAny, offset)
-    state.pos = offset
-    return enc.text(state.input, start, offset)
-  }, "rest", { _tag: "Rest", encoding: enc })
+  const rest: Parser<string, never, never, I> = P.described<string, never, never, I>(
+    (state: State<any>) => {
+      if (state.inputKind === 1) state.encoding = enc
+      const start = state.pos
+      internal.scan(enc, state, always, false, Infinity, state.pos, fast)
+      const offset = internal.scanOffset
+      if (internal.scanStop === internal.Truncated) return state.incomplete(1, expectedAny)
+      if (internal.scanStop === internal.Invalid) return backtrack(state, "Token", expectedAny, offset)
+      state.pos = offset
+      return enc.text(state.input, start, offset)
+    },
+    "rest",
+    { _tag: "Rest", encoding: enc }
+  )
 
   const taken = <A, E, R>(self: Parser<A, E, R, I>): Parser<string, E, R, I> => {
     const step = self.step
-    return P.described<string, E, R, I>((state: State<any>) => {
-      if (state.inputKind === 1) state.encoding = enc
-      const start = state.pos
-      if (step(state) === Fail) return Fail
-      return textOf(state, start, state.pos, "Slice", expectedAny)
-    }, self.name, { _tag: "Taken", self, encoding: enc })
+    return P.described<string, E, R, I>(
+      (state: State<any>) => {
+        if (state.inputKind === 1) state.encoding = enc
+        const start = state.pos
+        if (step(state) === Fail) return Fail
+        return textOf(state, start, state.pos, "Slice", expectedAny)
+      },
+      self.name,
+      { _tag: "Taken", self, encoding: enc }
+    )
   }
 
   const cls = (test: CharPredicate, min: 0 | 1, description: string, kind: ErrorKind, hint = true) =>
     takeWhileText(test as any, { min }, false, `${kind.toLowerCase()}${min}`, [description], kind, hint)
 
   const identifierStart = (cp: number) => cp === 95 || isIdStart(cp)
-  const identifier: Parser<string, never, never, I> = P.described<string, never, never, I>((state: State<any>) => {
-    if (state.inputKind === 1) state.encoding = enc
-    const start = state.pos
-    const cp = internal.next(enc, state)
-    if (cp < 0) return internal.failAt(state, cp, "TakeWhile", expectedIdentifier)
-    if (!identifierStart(cp)) return state.backtrack("TakeWhile", expectedIdentifier)
-    internal.scan(enc, state, isIdContinue as any, false, Infinity, start + internal.width, fast)
-    const stop = internal.scanStop
-    if (state.partial && (stop === internal.End || stop === internal.Truncated)) {
-      return state.incomplete(1, expectedIdentifier)
-    }
-    state.pos = internal.scanOffset
-    return enc.text(state.input, start, state.pos)
-  }, "identifier", { _tag: "Identifier", encoding: enc })
+  const identifier: Parser<string, never, never, I> = P.described<string, never, never, I>(
+    (state: State<any>) => {
+      if (state.inputKind === 1) state.encoding = enc
+      const start = state.pos
+      const cp = internal.next(enc, state)
+      if (cp < 0) return internal.failAt(state, cp, "TakeWhile", expectedIdentifier)
+      if (!identifierStart(cp)) return state.backtrack("TakeWhile", expectedIdentifier)
+      internal.scan(enc, state, isIdContinue as any, false, Infinity, start + internal.width, fast)
+      const stop = internal.scanStop
+      if (state.partial && (stop === internal.End || stop === internal.Truncated)) {
+        return state.incomplete(1, expectedIdentifier)
+      }
+      state.pos = internal.scanOffset
+      return enc.text(state.input, start, state.pos)
+    },
+    "identifier",
+    { _tag: "Identifier", encoding: enc }
+  )
 
   // Decoded rather than matched as a literal, as not every encoding can encode it
-  const bom: Parser<boolean, never, never, I> = P.described<boolean, never, never, I>((state: State<any>) => {
-    if (state.inputKind === 1) state.encoding = enc
-    const cp = internal.next(enc, state)
-    if (cp === 0xfeff) {
-      state.pos += internal.width
-      return true
-    }
-    if (cp === internal.Truncated || (cp === internal.End && state.partial)) {
-      return state.incomplete(1, ["byte order mark"])
-    }
-    return false
-  }, "bom", { _tag: "Bom", encoding: enc })
+  const bom: Parser<boolean, never, never, I> = P.described<boolean, never, never, I>(
+    (state: State<any>) => {
+      if (state.inputKind === 1) state.encoding = enc
+      const cp = internal.next(enc, state)
+      if (cp === 0xfeff) {
+        state.pos += internal.width
+        return true
+      }
+      if (cp === internal.Truncated || (cp === internal.End && state.partial)) {
+        return state.incomplete(1, ["byte order mark"])
+      }
+      return false
+    },
+    "bom",
+    { _tag: "Bom", encoding: enc }
+  )
 
   const newline = literal("\n")
   const crlf = literal("\r\n")
 
-  const tillLineEnding: Parser<string, never, never, I> = P.described<string, never, never, I>((state: State<any>) => {
-    if (state.inputKind === 1) state.encoding = enc
-    const start = state.pos
-    internal.scan(enc, state, isLineBreak, true, Infinity, state.pos, fast)
-    const offset = internal.scanOffset
-    const stop = internal.scanStop
-    if (stop === internal.Truncated || (stop === internal.End && state.partial)) {
-      return state.incomplete(1, expectedLineEnding)
-    }
-    if (stop === internal.Invalid) return backtrack(state, "LineEnding", expectedLineEnding, offset)
-    if (stop === 0 && internal.next(enc, state, offset) === 13) {
-      const cr = internal.width
-      // The line feed after it is read, not consumed
-      state.syntax?.read(offset + 2 * cr)
-      const after = internal.next(enc, state, offset + cr)
-      if (after === internal.End && state.partial) return state.incomplete(1, expectedLineEnding)
-      if (after !== 10) return backtrack(state, "LineEnding", expectedLineEnding, offset)
-    }
-    state.pos = offset
-    return enc.text(state.input, start, offset)
-  }, "tillLineEnding", { _tag: "TillLineEnding", encoding: enc })
+  const tillLineEnding: Parser<string, never, never, I> = P.described<string, never, never, I>(
+    (state: State<any>) => {
+      if (state.inputKind === 1) state.encoding = enc
+      const start = state.pos
+      internal.scan(enc, state, isLineBreak, true, Infinity, state.pos, fast)
+      const offset = internal.scanOffset
+      const stop = internal.scanStop
+      if (stop === internal.Truncated || (stop === internal.End && state.partial)) {
+        return state.incomplete(1, expectedLineEnding)
+      }
+      if (stop === internal.Invalid) return backtrack(state, "LineEnding", expectedLineEnding, offset)
+      if (stop === 0 && internal.next(enc, state, offset) === 13) {
+        const cr = internal.width
+        // The line feed after it is read, not consumed
+        state.syntax?.read(offset + 2 * cr)
+        const after = internal.next(enc, state, offset + cr)
+        if (after === internal.End && state.partial) return state.incomplete(1, expectedLineEnding)
+        if (after !== 10) return backtrack(state, "LineEnding", expectedLineEnding, offset)
+      }
+      state.pos = offset
+      return enc.text(state.input, start, offset)
+    },
+    "tillLineEnding",
+    { _tag: "TillLineEnding", encoding: enc }
+  )
 
   const asciiDigits = takeWhileText(isAsciiDigit, { min: 1 }, false, "digit1", ["digit"], "Digit", true)
-  const hexDigits = takeWhileText(isAsciiHexDigit, { min: 1 }, false, "hexDigit1", ["hexadecimal digit"], "HexDigit", true)
+  const hexDigits = takeWhileText(
+    isAsciiHexDigit,
+    { min: 1 },
+    false,
+    "hexDigit1",
+    ["hexadecimal digit"],
+    "HexDigit",
+    true
+  )
   const sign = P.opt(oneOfImpl("+-", false))
   const signed = taken(P.seq(sign, asciiDigits))
 
@@ -695,11 +762,20 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
     tab: literal("\t"),
     lineEnding: P.alt(newline, crlf).pipe(P.expected("line ending")),
     tillLineEnding,
-    decUint: asciiDigits.pipe(P.tryMap((s) => overflow(Number(s))), P.named("decUint")),
-    decInt: signed.pipe(P.tryMap((s) => overflow(Number(s))), P.named("decInt")),
+    decUint: asciiDigits.pipe(
+      P.tryMap((s) => overflow(Number(s))),
+      P.named("decUint")
+    ),
+    decInt: signed.pipe(
+      P.tryMap((s) => overflow(Number(s))),
+      P.named("decInt")
+    ),
     decBigUint: asciiDigits.pipe(P.map((s) => BigInt(s))),
     decBigInt: signed.pipe(P.map((s) => BigInt(s.startsWith("+") ? s.slice(1) : s))),
-    hexUint: hexDigits.pipe(P.tryMap((s) => overflow(parseInt(s, 16))), P.named("hexUint")),
+    hexUint: hexDigits.pipe(
+      P.tryMap((s) => overflow(parseInt(s, 16))),
+      P.named("hexUint")
+    ),
     float: floatText.pipe(P.map(toFloat), P.named("float")),
     takeEscaped: (normal, control, escapable) =>
       takeEscapedImpl(

@@ -49,7 +49,7 @@ const INC: ErrMode = "Incomplete"
  */
 const Margin = 4
 
-const lowerAscii = (c: number): number => c >= 65 && c <= 90 ? c + 32 : c
+const lowerAscii = (c: number): number => (c >= 65 && c <= 90 ? c + 32 : c)
 
 const isSuccess = (r: any): boolean => r._tag === "Success"
 const isSome = (o: any): boolean => o._tag === "Some"
@@ -70,7 +70,10 @@ class Compiler {
    * `resumable`: compile for streaming parses, which may be partial (see
    * `state.partial`) and keep checkpoints (see `internal/resume.ts`).
    */
-  constructor(readonly kind: 0 | 1 | 2, readonly resumable = false) {
+  constructor(
+    readonly kind: 0 | 1 | 2,
+    readonly resumable = false
+  ) {
     this.firsts = new FirstSets(kind)
   }
 
@@ -205,7 +208,7 @@ class Compiler {
         const c = this.compile(node.self, false)
         if (!used) return c
         const value = node.value
-        return (s) => c(s) === Fail ? Fail : value
+        return (s) => (c(s) === Fail ? Fail : value)
       }
       case "Tap": {
         const c = this.compile(node.self, true)
@@ -409,7 +412,7 @@ class Compiler {
     if (n === 1) return steps[0]!
     if (n === 2) {
       const [a, b] = steps as [Step, Step]
-      return (s) => a(s) === Fail ? Fail : b(s)
+      return (s) => (a(s) === Fail ? Fail : b(s))
     }
     return (s) => {
       for (let i = 0; i < n; i++) if (steps[i]!(s) === Fail) return Fail
@@ -440,11 +443,11 @@ class Compiler {
         const [a, b] = steps as [Step, Step]
         return output === 0
           ? (s) => {
-            const x = a(s)
-            if (x === Fail) return Fail
-            return b(s) === Fail ? Fail : x
-          }
-          : (s) => a(s) === Fail ? Fail : b(s)
+              const x = a(s)
+              if (x === Fail) return Fail
+              return b(s) === Fail ? Fail : x
+            }
+          : (s) => (a(s) === Fail ? Fail : b(s))
       }
       return (s) => {
         let out: unknown
@@ -473,8 +476,8 @@ class Compiler {
   /** The unit at the cursor, or -1 at the end of the input. */
   private unitReader(): (s: State<any>) => number {
     return this.kind === 0
-      ? (s) => s.pos < s.end ? (s.input as string).charCodeAt(s.pos) : -1
-      : (s) => s.pos < s.end ? (s.input as Uint8Array)[s.pos]! : -1
+      ? (s) => (s.pos < s.end ? (s.input as string).charCodeAt(s.pos) : -1)
+      : (s) => (s.pos < s.end ? (s.input as Uint8Array)[s.pos]! : -1)
   }
 
   alt(node: NodeOf<"Alt">, used: boolean): Step {
@@ -487,9 +490,7 @@ class Compiler {
       }
     }
     if (n === 1) return steps[0]!
-    const plan: AltPlan | undefined = this.kind === 2
-      ? undefined
-      : planAlt(node.parsers.map((q) => this.firsts.of(q)))
+    const plan: AltPlan | undefined = this.kind === 2 ? undefined : planAlt(node.parsers.map((q) => this.firsts.of(q)))
     if (plan === undefined) {
       return (s) => {
         const start = s.pos
@@ -566,7 +567,7 @@ class Compiler {
     for (let u = 0; u < size; u++) {
       const key = enc === undefined && this.kind === 1 ? u : charOf(u)
       const q = choose(key)
-      table.push(q === undefined ? null : compiled.get(q) ?? q.step)
+      table.push(q === undefined ? null : (compiled.get(q) ?? q.step))
     }
     const unit = this.unitReader()
     const advance = peek ? 0 : 1
@@ -603,11 +604,11 @@ class Compiler {
     const add: (acc: any, a: unknown) => unknown = !tracked
       ? (acc) => acc
       : isFold
-      ? (node as NodeOf<"Fold">).f
-      : (acc, a) => {
-        acc.push(a)
-        return acc
-      }
+        ? (node as NodeOf<"Fold">).f
+        : (acc, a) => {
+            acc.push(a)
+            return acc
+          }
     return (s) => {
       const entry = s.pos
       let acc: unknown
@@ -666,7 +667,7 @@ class Compiler {
       }
       case "Seq": {
         const i = node.output as number
-        const steps = node.parsers.map((q, j) => j === i ? this.entries(q) : this.compile(q, false))
+        const steps = node.parsers.map((q, j) => (j === i ? this.entries(q) : this.compile(q, false)))
         return (s) => {
           let out: unknown
           for (let j = 0; j < steps.length; j++) {
@@ -808,7 +809,10 @@ class Compiler {
       let count = 0
       let resumed = false
       if (resumable && s.resume !== undefined) {
-        const cp = Resume.take(s, key, entry) as Resume.Done | { acc: Array<unknown>; count: number; pos: number } | undefined
+        const cp = Resume.take(s, key, entry) as
+          | Resume.Done
+          | { acc: Array<unknown>; count: number; pos: number }
+          | undefined
         if (cp instanceof Resume.Done) {
           s.pos = cp.pos
           return cp.value
@@ -1083,7 +1087,7 @@ class Compiler {
       return stringLiteral(str, str)
     }
     if (literalKind === 2) return this.fallback(p, node, "array literal on byte input")
-    const bytes = literalKind === 0 ? new TextEncoder().encode(lit as string) : lit as Uint8Array
+    const bytes = literalKind === 0 ? new TextEncoder().encode(lit as string) : (lit as Uint8Array)
     const len = bytes.length
     const sameKind = literalKind === 1 && !node.caseless
     const expect = node.caseless ? Array.from(bytes, lowerAscii) : Array.from(bytes)
@@ -1160,9 +1164,8 @@ class Compiler {
     const decode = enc.decode
     const width = enc.width
     const toText = enc.text
-    const unitAt: (input: any, i: number) => number = kind === 0
-      ? (input: string, i) => input.charCodeAt(i)
-      : (input: Uint8Array, i) => input[i]!
+    const unitAt: (input: any, i: number) => number =
+      kind === 0 ? (input: string, i) => input.charCodeAt(i) : (input: Uint8Array, i) => input[i]!
     switch (node._tag) {
       case "Any":
         return (s) => {
@@ -1330,9 +1333,8 @@ class Compiler {
     // `Text.taken` checks that the text is well formed, then decodes it
     const fast = fastLimit(enc)
     const toText = enc.text
-    const unitAt: (input: any, i: number) => number = this.kind === 0
-      ? (input: string, i) => input.charCodeAt(i)
-      : (input: Uint8Array, i) => input[i]!
+    const unitAt: (input: any, i: number) => number =
+      this.kind === 0 ? (input: string, i) => input.charCodeAt(i) : (input: Uint8Array, i) => input[i]!
     return (s) => {
       const start = s.pos
       if (c(s) === Fail) return Fail
@@ -1358,7 +1360,11 @@ class Compiler {
     const enc = taken.encoding
     if (enc !== undefined && !(this.native(enc) && enc.unit === 1 && enc.asciiCompatible)) return undefined
     const c = this.compile(node.self, true)
-    const scan = (this.kind === 0 ? scanFloatString : scanFloatBytes) as (input: unknown, i: number, end: number) => unknown
+    const scan = (this.kind === 0 ? scanFloatString : scanFloatBytes) as (
+      input: unknown,
+      i: number,
+      end: number
+    ) => unknown
     const resumable = this.resumable
     return (s) => {
       const v = scan(s.input, s.pos, s.end)
@@ -1383,21 +1389,22 @@ class Compiler {
     // Matches the control character, advancing past it
     let control: (s: State<any>) => boolean
     if (enc === undefined || (ctrl < fastLimit(enc) && ctrl < TableSize)) {
-      control = kind === 0
-        ? (s) => {
-          if (s.pos < s.end && (s.input as string).charCodeAt(s.pos) === ctrl) {
-            s.pos++
-            return true
-          }
-          return false
-        }
-        : (s) => {
-          if (s.pos < s.end && (s.input as Uint8Array)[s.pos] === ctrl) {
-            s.pos++
-            return true
-          }
-          return false
-        }
+      control =
+        kind === 0
+          ? (s) => {
+              if (s.pos < s.end && (s.input as string).charCodeAt(s.pos) === ctrl) {
+                s.pos++
+                return true
+              }
+              return false
+            }
+          : (s) => {
+              if (s.pos < s.end && (s.input as Uint8Array)[s.pos] === ctrl) {
+                s.pos++
+                return true
+              }
+              return false
+            }
     } else {
       control = (s) => {
         if (s.pos >= s.end) return false
@@ -1416,9 +1423,8 @@ class Compiler {
       return Fail
     }
     if (raw) {
-      const slice: (s: State<any>, start: number) => unknown = enc === undefined
-        ? (s, start) => s.slice(start, s.pos)
-        : (s, start) => enc.text(s.input, start, s.pos)
+      const slice: (s: State<any>, start: number) => unknown =
+        enc === undefined ? (s, start) => s.slice(start, s.pos) : (s, start) => enc.text(s.input, start, s.pos)
       return (s) => {
         const start = s.pos
         let resumed = false

@@ -65,11 +65,13 @@ const docs: Array<Doc> = [
   },
   {
     name: "deep nesting, 100 KB",
-    text: JSON.stringify(Array.from({ length: 200 }, () => {
-      let v: unknown = 1
-      for (let d = 0; d < 100; d++) v = d % 2 === 0 ? [v, d] : { k: v }
-      return v
-    })),
+    text: JSON.stringify(
+      Array.from({ length: 200 }, () => {
+        let v: unknown = 1
+        for (let d = 0; d < 100; d++) v = d % 2 === 0 ? [v, d] : { k: v }
+        return v
+      })
+    ),
     batch: 1
   }
 ]

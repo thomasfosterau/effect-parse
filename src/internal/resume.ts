@@ -34,7 +34,10 @@ export const take = (state: State<any>, key: object, offset: number): unknown =>
 
 /** The result of a repetition that completed, and where it ended. */
 export class Done {
-  constructor(readonly value: unknown, readonly pos: number) {}
+  constructor(
+    readonly value: unknown,
+    readonly pos: number
+  ) {}
 }
 
 /**
@@ -50,6 +53,6 @@ export const done = <A>(state: State<any>, key: object, entry: number, resumed: 
 export const save = (state: State<any>, key: object, offset: number, checkpoint: unknown): void => {
   const resume = state.resume!
   let byKey = resume.get(key)
-  if (byKey === undefined) resume.set(key, byKey = new Map())
+  if (byKey === undefined) resume.set(key, (byKey = new Map()))
   byKey.set(offset, checkpoint)
 }

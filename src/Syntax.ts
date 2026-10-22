@@ -63,18 +63,18 @@ import { described, isParser } from "./Parser.js"
 // Grammar annotations
 // -----------------------------------------------------------------------------
 
-const syntaxNode = (
-  self: Parser.Any,
-  kind: string,
-  named: boolean
-): Parser.Any => {
+const syntaxNode = (self: Parser.Any, kind: string, named: boolean): Parser.Any => {
   const step = self.step
   // Identifies the nodes this parser builds, so a reparse can reuse them
   const key = {}
-  return described<unknown, unknown, unknown, Input>((state) => {
-    const builder = state.syntax
-    return builder === undefined ? step(state) : builder.node(state, step, key, kind, named)
-  }, self.name, { _tag: "Syntax", self, kind, named })
+  return described<unknown, unknown, unknown, Input>(
+    (state) => {
+      const builder = state.syntax
+      return builder === undefined ? step(state) : builder.node(state, step, key, kind, named)
+    },
+    self.name,
+    { _tag: "Syntax", self, kind, named }
+  )
 }
 
 /**
@@ -162,10 +162,14 @@ export const field: {
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I>
 } = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I> => {
   const step = self.step
-  return described<A, E, R, I>((state) => {
-    const builder = state.syntax
-    return (builder === undefined ? step(state) : builder.field(state, step, name)) as A | typeof Fail
-  }, self.name, { _tag: "Syntax", self, kind: undefined, named: false })
+  return described<A, E, R, I>(
+    (state) => {
+      const builder = state.syntax
+      return (builder === undefined ? step(state) : builder.field(state, step, name)) as A | typeof Fail
+    },
+    self.name,
+    { _tag: "Syntax", self, kind: undefined, named: false }
+  )
 })
 
 // -----------------------------------------------------------------------------
@@ -397,7 +401,9 @@ export class SyntaxNode<I extends Input = string> {
   /** The input the node spans. */
   get text(): Slice<I> {
     const input = this.tree.input as any
-    return input instanceof Uint8Array ? input.subarray(this.start, this.end) as any : input.slice(this.start, this.end)
+    return input instanceof Uint8Array
+      ? (input.subarray(this.start, this.end) as any)
+      : input.slice(this.start, this.end)
   }
 
   /** Whether this is an `ERROR` node. */
@@ -693,11 +699,7 @@ export class TreeCursor<I extends Input = string> {
 
 const expectedEof = ["end of input"]
 
-const run = <A, E, I extends Input>(
-  config: Config,
-  input: I,
-  previous: Previous | undefined
-): Tree<A, E, I> => {
+const run = <A, E, I extends Input>(config: Config, input: I, previous: Previous | undefined): Tree<A, E, I> => {
   const state = new SyntaxState<I>(input, { context: config.context }, previous)
   const a = Stack.run(config.inner.step, state)
   // Text parsers record the encoding when they fail, which they may have done inside reused nodes
@@ -748,8 +750,8 @@ export const parse: {
   const n = nodeOf(grammar)
   const isRoot = n._tag === "Syntax" && n.kind !== undefined && n.named
   const config: Config = {
-    kind: isRoot ? n.kind! : options?.kind ?? "document",
-    inner: isRoot ? n.self as Parser.Any : grammar,
+    kind: isRoot ? n.kind! : (options?.kind ?? "document"),
+    inner: isRoot ? (n.self as Parser.Any) : grammar,
     lookahead: options?.lookahead ?? 0,
     context: options?.context as Context.Context<never> | undefined
   }
@@ -791,7 +793,12 @@ export const reparse = <A, E, I extends Input>(
   edits?: Edit | ReadonlyArray<Edit>
 ): Tree<A, E, I> => {
   const next = fromSource(input as Input) as I
-  const list = edits === undefined ? diffList(tree.input, next) : "start" in edits ? [edits as Edit] : edits as ReadonlyArray<Edit>
+  const list =
+    edits === undefined
+      ? diffList(tree.input, next)
+      : "start" in edits
+        ? [edits as Edit]
+        : (edits as ReadonlyArray<Edit>)
   const previous: Previous = {
     root: tree.green,
     oldLength: tree.input.length,
@@ -811,12 +818,21 @@ export const reparse = <A, E, I extends Input>(
  * @since 0.2.0
  * @category parsing
  */
-export const replace = <A, E>(tree: Tree<A, E, string>, start: number, end: number, text: string): Tree<A, E, string> => {
+export const replace = <A, E>(
+  tree: Tree<A, E, string>,
+  start: number,
+  end: number,
+  text: string
+): Tree<A, E, string> => {
   const input = tree.input
   if (start < 0 || end < start || end > input.length) {
     throw new RangeError(`invalid range [${start}, ${end}) of an input of length ${input.length}`)
   }
-  return reparse(tree, input.slice(0, start) + text + input.slice(end), { start, oldEnd: end, newEnd: start + text.length })
+  return reparse(tree, input.slice(0, start) + text + input.slice(end), {
+    start,
+    oldEnd: end,
+    newEnd: start + text.length
+  })
 }
 
 /**
@@ -850,7 +866,9 @@ const segmentsOf = (oldLength: number, newLength: number, edits: ReadonlyArray<E
   let length = oldLength
   for (const { newEnd, oldEnd, start } of edits) {
     if (!(start >= 0 && oldEnd >= start && oldEnd <= length && newEnd >= start)) {
-      throw new RangeError(`invalid edit { start: ${start}, oldEnd: ${oldEnd}, newEnd: ${newEnd} } of an input of length ${length}`)
+      throw new RangeError(
+        `invalid edit { start: ${start}, oldEnd: ${oldEnd}, newEnd: ${newEnd} } of an input of length ${length}`
+      )
     }
     const delta = newEnd - oldEnd
     const out: Array<Segment> = []

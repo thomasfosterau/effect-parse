@@ -135,9 +135,11 @@ export declare namespace Parser {
    *
    * @since 0.1.0
    */
-  export type InputOf<P> = [P] extends [never] ? Input
-    : [P] extends [Parser<infer _A, infer _E, infer _R, infer I>] ? I
-    : never
+  export type InputOf<P> = [P] extends [never]
+    ? Input
+    : [P] extends [Parser<infer _A, infer _E, infer _R, infer I>]
+      ? I
+      : never
 }
 
 /**
@@ -159,10 +161,19 @@ export type Range = number | { readonly min?: number | undefined; readonly max?:
  * @since 0.1.0
  * @category models
  */
-export type Repeated<A, Rg> = Rg extends number ? number extends Rg ? Array<A> : Rg extends 0 ? Array<A> : NonEmpty<A>
-  : Rg extends { readonly min: infer M extends number } ? number extends M ? Array<A> : M extends 0 ? Array<A>
-    : NonEmpty<A>
-  : Array<A>
+export type Repeated<A, Rg> = Rg extends number
+  ? number extends Rg
+    ? Array<A>
+    : Rg extends 0
+      ? Array<A>
+      : NonEmpty<A>
+  : Rg extends { readonly min: infer M extends number }
+    ? number extends M
+      ? Array<A>
+      : M extends 0
+        ? Array<A>
+        : NonEmpty<A>
+    : Array<A>
 
 type NonEmpty<A> = [A, ...Array<A>]
 
@@ -307,8 +318,11 @@ const nodeOfParser = (p: Parser.Any): Node | undefined => (p as any)[NodeId]
 export const named: {
   (name: string): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E, R, I>
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I> =>
-  new ParserImpl(self.step, name, nodeOfParser(self)))
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I> =>
+    new ParserImpl(self.step, name, nodeOfParser(self))
+)
 
 /**
  * A parser that consumes nothing and succeeds with the given value.
@@ -437,7 +451,7 @@ export const suspend = <A, E = never, R = never, I extends Input = string>(
   let parser: Parser<A, E, R, I> | undefined
   return described((state) => (parser ??= evaluate()).step(state), "suspend", {
     _tag: "Suspend",
-    resolve: () => parser ??= evaluate()
+    resolve: () => (parser ??= evaluate())
   })
 }
 
@@ -459,11 +473,15 @@ export const location: Parser<number, never, never, Input> = /*#__PURE__*/ descr
  * @since 0.1.0
  * @category constructors
  */
-export const eof: Parser<void, never, never, Input> = /*#__PURE__*/ described((state) => {
-  if (state.pos < state.end) return state.backtrack("Eof", expectedEof)
-  if (state.partial) return state.incomplete(1, expectedEof)
-  return undefined
-}, "eof", { _tag: "Eof" })
+export const eof: Parser<void, never, never, Input> = /*#__PURE__*/ described(
+  (state) => {
+    if (state.pos < state.end) return state.backtrack("Eof", expectedEof)
+    if (state.partial) return state.incomplete(1, expectedEof)
+    return undefined
+  },
+  "eof",
+  { _tag: "Eof" }
+)
 
 const expectedEof = ["end of input"]
 
@@ -480,13 +498,20 @@ const expectedEof = ["end of input"]
 export const map: {
   <A, B>(f: (a: A) => B): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<B, E, R, I>
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, E, R, I>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, E, R, I> => {
-  const step = self.step
-  return described((state) => {
-    const a = step(state)
-    return a === Fail ? Fail : f(a)
-  }, self.name, { _tag: "Map", self, f })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, E, R, I> => {
+    const step = self.step
+    return described(
+      (state) => {
+        const a = step(state)
+        return a === Fail ? Fail : f(a)
+      },
+      self.name,
+      { _tag: "Map", self, f }
+    )
+  }
+)
 
 /**
  * Builds an object from the `[key, value]` entries a parser returns, as
@@ -526,7 +551,7 @@ export const as: {
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, value: B): Parser<B, E, R, I>
 } = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, value: B): Parser<B, E, R, I> => {
   const step = self.step
-  return described((state) => step(state) === Fail ? Fail : value, self.name, { _tag: "As", self, value })
+  return described((state) => (step(state) === Fail ? Fail : value), self.name, { _tag: "As", self, value })
 })
 
 /**
@@ -535,8 +560,7 @@ export const as: {
  * @since 0.1.0
  * @category mapping
  */
-export const asVoid = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<void, E, R, I> =>
-  as(self, undefined)
+export const asVoid = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<void, E, R, I> => as(self, undefined)
 
 /**
  * Replaces the output of a parser with `Option.some(output)`.
@@ -556,14 +580,21 @@ export const asSome = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Pars
 export const tap: {
   <A>(f: (a: A) => void): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E, R, I>
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, f: (a: A) => void): Parser<A, E, R, I>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, f: (a: A) => void): Parser<A, E, R, I> => {
-  const step = self.step
-  return described((state) => {
-    const a = step(state)
-    if (a !== Fail) f(a)
-    return a
-  }, self.name, { _tag: "Tap", self, f })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input>(self: Parser<A, E, R, I>, f: (a: A) => void): Parser<A, E, R, I> => {
+    const step = self.step
+    return described(
+      (state) => {
+        const a = step(state)
+        if (a !== Fail) f(a)
+        return a
+      },
+      self.name,
+      { _tag: "Tap", self, f }
+    )
+  }
+)
 
 /**
  * Uses the output of a parser to choose the parser that consumes the rest
@@ -580,16 +611,23 @@ export const flatMap: {
     self: Parser<A, E, R, I>,
     f: (a: A) => Parser<B, E2, R2, I2>
   ): Parser<B, E | E2, R | R2, I & I2>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
-  self: Parser<A, E, R, I>,
-  f: (a: A) => Parser<B, E2, R2, I2>
-): Parser<B, E | E2, R | R2, I & I2> => {
-  const step = self.step
-  return described((state) => {
-    const a = step(state)
-    return a === Fail ? Fail : f(a).step(state)
-  }, undefined, { _tag: "FlatMap", self, f })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+    self: Parser<A, E, R, I>,
+    f: (a: A) => Parser<B, E2, R2, I2>
+  ): Parser<B, E | E2, R | R2, I & I2> => {
+    const step = self.step
+    return described(
+      (state) => {
+        const a = step(state)
+        return a === Fail ? Fail : f(a).step(state)
+      },
+      undefined,
+      { _tag: "FlatMap", self, f }
+    )
+  }
+)
 
 /**
  * Applies a second parser to the *output* of the first (winnow's
@@ -619,34 +657,37 @@ export const mapParser: {
     self: Parser<A, E, R, I>,
     inner: Parser<B, E2, R2, A>
   ): Parser<B, E | E2, R | R2, I>
-} = /*#__PURE__*/ dual(2, <A extends Input, E, R, I extends Input, B, E2, R2>(
-  self: Parser<A, E, R, I>,
-  inner: Parser<B, E2, R2, A>
-): Parser<B, E | E2, R | R2, I> => {
-  const step = self.step
-  return make((state) => {
-    const start = state.pos
-    const a = step(state)
-    if (a === Fail) return Fail
-    const sub = new State(a, { context: state.context })
-    sub.tracer = state.tracer
-    sub.depth = state.depth
-    sub.recovered = state.recovered
-    const b = inner.step(sub)
-    if (b === Fail) {
-      const f = sub.failure
-      if (sub.encoding !== undefined) state.encoding = sub.encoding
-      // The inner input is usually a slice ending where the outer parser stopped
-      const base = Math.max(start, state.pos - a.length)
-      const offset = Math.min(base + f.offset, state.pos)
-      return state.failWith(
-        sub.mode === "Incomplete" ? "Backtrack" : sub.mode,
-        new Failure(offset, f.kind, f.expected, f.context, f.hasCause, f.cause, f.message, 0)
-      )
-    }
-    return b
-  })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A extends Input, E, R, I extends Input, B, E2, R2>(
+    self: Parser<A, E, R, I>,
+    inner: Parser<B, E2, R2, A>
+  ): Parser<B, E | E2, R | R2, I> => {
+    const step = self.step
+    return make((state) => {
+      const start = state.pos
+      const a = step(state)
+      if (a === Fail) return Fail
+      const sub = new State(a, { context: state.context })
+      sub.tracer = state.tracer
+      sub.depth = state.depth
+      sub.recovered = state.recovered
+      const b = inner.step(sub)
+      if (b === Fail) {
+        const f = sub.failure
+        if (sub.encoding !== undefined) state.encoding = sub.encoding
+        // The inner input is usually a slice ending where the outer parser stopped
+        const base = Math.max(start, state.pos - a.length)
+        const offset = Math.min(base + f.offset, state.pos)
+        return state.failWith(
+          sub.mode === "Incomplete" ? "Backtrack" : sub.mode,
+          new Failure(offset, f.kind, f.expected, f.context, f.hasCause, f.cause, f.message, 0)
+        )
+      }
+      return b
+    })
+  }
+)
 
 /**
  * Transforms the output of a parser with a function that may fail with a
@@ -665,21 +706,28 @@ export const tryMap: {
     self: Parser<A, E, R, I>,
     f: (a: A) => Result.Result<B, E2>
   ): Parser<B, E | E2, R, I>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2>(
-  self: Parser<A, E, R, I>,
-  f: (a: A) => Result.Result<B, E2>
-): Parser<B, E | E2, R, I> => {
-  const step = self.step
-  return described((state) => {
-    const start = state.pos
-    const a = step(state)
-    if (a === Fail) return Fail
-    const r = f(a)
-    if (Result.isSuccess(r)) return r.success
-    state.pos = start
-    return state.failCause("Backtrack", "Verify", r.failure)
-  }, self.name, { _tag: "TryMap", self, f })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B, E2>(
+    self: Parser<A, E, R, I>,
+    f: (a: A) => Result.Result<B, E2>
+  ): Parser<B, E | E2, R, I> => {
+    const step = self.step
+    return described(
+      (state) => {
+        const start = state.pos
+        const a = step(state)
+        if (a === Fail) return Fail
+        const r = f(a)
+        if (Result.isSuccess(r)) return r.success
+        state.pos = start
+        return state.failCause("Backtrack", "Verify", r.failure)
+      },
+      self.name,
+      { _tag: "TryMap", self, f }
+    )
+  }
+)
 
 /**
  * Like {@link tryMap}, but the function may throw. Thrown values become the
@@ -691,15 +739,18 @@ export const tryMap: {
 export const tryMapUnknown: {
   <A, B>(f: (a: A) => B): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<B, E | unknown, R, I>
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, E | unknown, R, I>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, unknown, R, I> =>
-  tryMap(self, (a) => {
-    try {
-      return Result.succeed(f(a))
-    } catch (e) {
-      if (Stack.isStackOverflow(e)) throw e
-      return Result.fail(e)
-    }
-  }))
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, unknown, R, I> =>
+    tryMap(self, (a) => {
+      try {
+        return Result.succeed(f(a))
+      } catch (e) {
+        if (Stack.isStackOverflow(e)) throw e
+        return Result.fail(e)
+      }
+    })
+)
 
 /**
  * Transforms the output of a parser with a function returning an `Option`;
@@ -712,21 +763,25 @@ export const tryMapUnknown: {
 export const filterMap: {
   <A, B>(f: (a: A) => Option.Option<B>): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<B, E, R, I>
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => Option.Option<B>): Parser<B, E, R, I>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(
-  self: Parser<A, E, R, I>,
-  f: (a: A) => Option.Option<B>
-): Parser<B, E, R, I> => {
-  const step = self.step
-  return described((state) => {
-    const start = state.pos
-    const a = step(state)
-    if (a === Fail) return Fail
-    const o = f(a)
-    if (Option.isSome(o)) return o.value
-    state.pos = start
-    return state.backtrack("Verify")
-  }, self.name, { _tag: "FilterMap", self, f })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => Option.Option<B>): Parser<B, E, R, I> => {
+    const step = self.step
+    return described(
+      (state) => {
+        const start = state.pos
+        const a = step(state)
+        if (a === Fail) return Fail
+        const o = f(a)
+        if (Option.isSome(o)) return o.value
+        state.pos = start
+        return state.backtrack("Verify")
+      },
+      self.name,
+      { _tag: "FilterMap", self, f }
+    )
+  }
+)
 
 /**
  * Keeps the output of a parser only if it satisfies a predicate, otherwise
@@ -744,14 +799,18 @@ export const filter: {
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, predicate: (a: A) => boolean): Parser<A, E, R, I>
 } = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, predicate: (a: A) => boolean) => {
   const step = self.step
-  return described<A, E, R, I>((state) => {
-    const start = state.pos
-    const a = step(state)
-    if (a === Fail) return Fail
-    if (predicate(a)) return a
-    state.pos = start
-    return state.backtrack("Verify")
-  }, self.name, { _tag: "Filter", self, predicate })
+  return described<A, E, R, I>(
+    (state) => {
+      const start = state.pos
+      const a = step(state)
+      if (a === Fail) return Fail
+      if (predicate(a)) return a
+      state.pos = start
+      return state.backtrack("Verify")
+    },
+    self.name,
+    { _tag: "Filter", self, predicate }
+  )
 })
 
 /**
@@ -780,21 +839,24 @@ export const filterOrFail: {
     predicate: (a: A) => boolean,
     orFailWith: (a: A) => E2
   ): Parser<A, E | E2, R, I>
-} = /*#__PURE__*/ dual(3, <A, E, R, I extends Input, E2>(
-  self: Parser<A, E, R, I>,
-  predicate: (a: A) => boolean,
-  orFailWith: (a: A) => E2
-) => {
-  const step = self.step
-  return described<A, E | E2, R, I>((state) => {
-    const start = state.pos
-    const a = step(state)
-    if (a === Fail) return Fail
-    if (predicate(a)) return a
-    state.pos = start
-    return state.failCause("Backtrack", "Verify", orFailWith(a))
-  }, self.name, { _tag: "Filter", self, predicate })
-})
+} = /*#__PURE__*/ dual(
+  3,
+  <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, predicate: (a: A) => boolean, orFailWith: (a: A) => E2) => {
+    const step = self.step
+    return described<A, E | E2, R, I>(
+      (state) => {
+        const start = state.pos
+        const a = step(state)
+        if (a === Fail) return Fail
+        if (predicate(a)) return a
+        state.pos = start
+        return state.failCause("Backtrack", "Verify", orFailWith(a))
+      },
+      self.name,
+      { _tag: "Filter", self, predicate }
+    )
+  }
+)
 
 // -----------------------------------------------------------------------------
 // Consumed input
@@ -809,10 +871,14 @@ export const filterOrFail: {
  */
 export const taken = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<Slice<I>, E, R, I> => {
   const step = self.step
-  return described((state) => {
-    const start = state.pos
-    return step(state) === Fail ? Fail : state.slice(start, state.pos)
-  }, self.name, { _tag: "Taken", self, encoding: undefined })
+  return described(
+    (state) => {
+      const start = state.pos
+      return step(state) === Fail ? Fail : state.slice(start, state.pos)
+    },
+    self.name,
+    { _tag: "Taken", self, encoding: undefined }
+  )
 }
 
 /**
@@ -826,11 +892,15 @@ export const withTaken = <A, E, R, I extends Input>(
   self: Parser<A, E, R, I>
 ): Parser<[output: A, taken: Slice<I>], E, R, I> => {
   const step = self.step
-  return described((state) => {
-    const start = state.pos
-    const a = step(state)
-    return a === Fail ? Fail : [a, state.slice(start, state.pos)]
-  }, self.name, { _tag: "WithTaken", self })
+  return described(
+    (state) => {
+      const start = state.pos
+      const a = step(state)
+      return a === Fail ? Fail : [a, state.slice(start, state.pos)]
+    },
+    self.name,
+    { _tag: "WithTaken", self }
+  )
 }
 
 /**
@@ -842,10 +912,14 @@ export const withTaken = <A, E, R, I extends Input>(
  */
 export const span = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<Span, E, R, I> => {
   const step = self.step
-  return described((state) => {
-    const start = state.pos
-    return step(state) === Fail ? Fail : { start, end: state.pos }
-  }, self.name, { _tag: "Span", self })
+  return described(
+    (state) => {
+      const start = state.pos
+      return step(state) === Fail ? Fail : { start, end: state.pos }
+    },
+    self.name,
+    { _tag: "Span", self }
+  )
 }
 
 /**
@@ -855,13 +929,19 @@ export const span = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser
  * @since 0.1.0
  * @category consumed input
  */
-export const withSpan = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<[output: A, span: Span], E, R, I> => {
+export const withSpan = <A, E, R, I extends Input>(
+  self: Parser<A, E, R, I>
+): Parser<[output: A, span: Span], E, R, I> => {
   const step = self.step
-  return described((state) => {
-    const start = state.pos
-    const a = step(state)
-    return a === Fail ? Fail : [a, { start, end: state.pos }]
-  }, self.name, { _tag: "WithSpan", self })
+  return described(
+    (state) => {
+      const start = state.pos
+      const a = step(state)
+      return a === Fail ? Fail : [a, { start, end: state.pos }]
+    },
+    self.name,
+    { _tag: "WithSpan", self }
+  )
 }
 
 // -----------------------------------------------------------------------------
@@ -874,11 +954,15 @@ const changeMode = <A, E, R, I extends Input>(
   to: ErrMode
 ): Parser<A, E, R, I> => {
   const step = self.step
-  return described((state) => {
-    const a = step(state)
-    if (a === Fail && state.mode === from) state.mode = to
-    return a
-  }, self.name, { _tag: "Mode", self, from, to })
+  return described(
+    (state) => {
+      const a = step(state)
+      if (a === Fail && state.mode === from) state.mode = to
+      return a
+    },
+    self.name,
+    { _tag: "Mode", self, from, to }
+  )
 }
 
 /**
@@ -899,22 +983,26 @@ const changeMode = <A, E, R, I extends Input>(
  */
 export const cut = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<A, E, R, I> => {
   const step = self.step
-  return described((state) => {
-    // A committed failure is reported where it happened (winnow's
-    // `cut_err`): only failures recorded inside `self` can outrank it as the
-    // furthest failure, not ones from abandoned branches or lookaheads before
-    // the commit.
-    const deepest = state.deepest
-    state.deepest = undefined
-    const a = step(state)
-    if (a === Fail && state.mode !== "Incomplete") {
-      state.mode = "Cut"
+  return described(
+    (state) => {
+      // A committed failure is reported where it happened (winnow's
+      // `cut_err`): only failures recorded inside `self` can outrank it as the
+      // furthest failure, not ones from abandoned branches or lookaheads before
+      // the commit.
+      const deepest = state.deepest
+      state.deepest = undefined
+      const a = step(state)
+      if (a === Fail && state.mode !== "Incomplete") {
+        state.mode = "Cut"
+        return a
+      }
+      const inner = state.deepest as Failure | undefined
+      if (deepest !== undefined && (inner === undefined || deepest.offset > inner.offset)) state.deepest = deepest
       return a
-    }
-    const inner = state.deepest as Failure | undefined
-    if (deepest !== undefined && (inner === undefined || deepest.offset > inner.offset)) state.deepest = deepest
-    return a
-  }, self.name, { _tag: "Mode", self, from: "Backtrack", to: "Cut" })
+    },
+    self.name,
+    { _tag: "Mode", self, from: "Backtrack", to: "Cut" }
+  )
 }
 
 /**
@@ -936,15 +1024,19 @@ export const backtrack = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): P
  */
 export const complete = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<A, E, R, I> => {
   const step = self.step
-  return described((state) => {
-    const start = state.pos
-    const a = step(state)
-    if (a === Fail && state.mode === "Incomplete") {
-      state.pos = start
-      return state.backtrack("Complete")
-    }
-    return a
-  }, self.name, { _tag: "Mode", self, from: "Incomplete", to: "Backtrack" })
+  return described(
+    (state) => {
+      const start = state.pos
+      const a = step(state)
+      if (a === Fail && state.mode === "Incomplete") {
+        state.pos = start
+        return state.backtrack("Complete")
+      }
+      return a
+    },
+    self.name,
+    { _tag: "Mode", self, from: "Incomplete", to: "Backtrack" }
+  )
 }
 
 /**
@@ -960,23 +1052,20 @@ export const context: {
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, label: string): Parser<A, E, R, I>
 } = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, label: string): Parser<A, E, R, I> => {
   const step = self.step
-  return described((state) => {
-    const a = step(state)
-    if (a === Fail && state.mode !== "Incomplete") {
-      const f = state.failure
-      state.replaceFailure(new Failure(
-        f.offset,
-        f.kind,
-        f.expected,
-        [...f.context, label],
-        f.hasCause,
-        f.cause,
-        f.message,
-        f.needed
-      ))
-    }
-    return a
-  }, self.name ?? label, { _tag: "Context", self, label })
+  return described(
+    (state) => {
+      const a = step(state)
+      if (a === Fail && state.mode !== "Incomplete") {
+        const f = state.failure
+        state.replaceFailure(
+          new Failure(f.offset, f.kind, f.expected, [...f.context, label], f.hasCause, f.cause, f.message, f.needed)
+        )
+      }
+      return a
+    },
+    self.name ?? label,
+    { _tag: "Context", self, label }
+  )
 })
 
 /**
@@ -991,22 +1080,31 @@ export const context: {
 export const expected: {
   (description: string): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E, R, I>
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, description: string): Parser<A, E, R, I>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, description: string): Parser<A, E, R, I> => {
-  const step = self.step
-  const desc = [description]
-  return described((state) => {
-    const start = state.pos
-    const hintOffset = state.hintOffset
-    const hintExpected = state.hintExpected
-    const a = step(state)
-    if (a === Fail && state.failure.offset === start) {
-      const f = state.failure
-      const expected = hintOffset === start ? mergeExpected(hintExpected, desc) : desc
-      state.replaceFailure(new Failure(f.offset, f.kind, expected, f.context, f.hasCause, f.cause, f.message, f.needed))
-    }
-    return a
-  }, description, { _tag: "Expected", self, description })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input>(self: Parser<A, E, R, I>, description: string): Parser<A, E, R, I> => {
+    const step = self.step
+    const desc = [description]
+    return described(
+      (state) => {
+        const start = state.pos
+        const hintOffset = state.hintOffset
+        const hintExpected = state.hintExpected
+        const a = step(state)
+        if (a === Fail && state.failure.offset === start) {
+          const f = state.failure
+          const expected = hintOffset === start ? mergeExpected(hintExpected, desc) : desc
+          state.replaceFailure(
+            new Failure(f.offset, f.kind, expected, f.context, f.hasCause, f.cause, f.message, f.needed)
+          )
+        }
+        return a
+      },
+      description,
+      { _tag: "Expected", self, description }
+    )
+  }
+)
 
 /**
  * Transforms the user error (cause) of a parser's failures.
@@ -1017,17 +1115,26 @@ export const expected: {
 export const mapError: {
   <E, E2>(f: (e: E) => E2): <A, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E2, R, I>
   <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, f: (e: E) => E2): Parser<A, E2, R, I>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, f: (e: E) => E2): Parser<A, E2, R, I> => {
-  const step = self.step
-  return described((state) => {
-    const a = step(state)
-    if (a === Fail && state.failure.hasCause) {
-      const x = state.failure
-      state.replaceFailure(new Failure(x.offset, x.kind, x.expected, x.context, true, f(x.cause as E), x.message, x.needed))
-    }
-    return a
-  }, self.name, { _tag: "MapError", self })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, f: (e: E) => E2): Parser<A, E2, R, I> => {
+    const step = self.step
+    return described(
+      (state) => {
+        const a = step(state)
+        if (a === Fail && state.failure.hasCause) {
+          const x = state.failure
+          state.replaceFailure(
+            new Failure(x.offset, x.kind, x.expected, x.context, true, f(x.cause as E), x.message, x.needed)
+          )
+        }
+        return a
+      },
+      self.name,
+      { _tag: "MapError", self }
+    )
+  }
+)
 
 /**
  * Replaces any failure of a parser with the given user error, keeping the
@@ -1039,18 +1146,25 @@ export const mapError: {
 export const orFail: {
   <E2>(error: () => E2): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E2, R, I>
   <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, error: () => E2): Parser<A, E2, R, I>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, error: () => E2): Parser<A, E2, R, I> => {
-  const step = self.step
-  return described((state) => {
-    const start = state.pos
-    const a = step(state)
-    if (a === Fail && state.mode !== "Incomplete") {
-      const x = state.failure
-      state.replaceFailure(new Failure(start, x.kind, [], x.context, true, error(), undefined, 0))
-    }
-    return a
-  }, self.name, { _tag: "OrFail", self })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, E2>(self: Parser<A, E, R, I>, error: () => E2): Parser<A, E2, R, I> => {
+    const step = self.step
+    return described(
+      (state) => {
+        const start = state.pos
+        const a = step(state)
+        if (a === Fail && state.mode !== "Incomplete") {
+          const x = state.failure
+          state.replaceFailure(new Failure(start, x.kind, [], x.context, true, error(), undefined, 0))
+        }
+        return a
+      },
+      self.name,
+      { _tag: "OrFail", self }
+    )
+  }
+)
 
 /**
  * If the parser fails recoverably, tries `that` from the same position.
@@ -1067,10 +1181,13 @@ export const orElse: {
     self: Parser<A, E, R, I>,
     that: () => Parser<B, E2, R2, I2>
   ): Parser<A | B, E | E2, R | R2, I & I2>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
-  self: Parser<A, E, R, I>,
-  that: () => Parser<B, E2, R2, I2>
-): Parser<A | B, E | E2, R | R2, I & I2> => alt(self, suspend(that)))
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+    self: Parser<A, E, R, I>,
+    that: () => Parser<B, E2, R2, I2>
+  ): Parser<A | B, E | E2, R | R2, I & I2> => alt(self, suspend(that))
+)
 
 /**
  * If the parser fails recoverably, succeeds with the given value without
@@ -1082,17 +1199,24 @@ export const orElse: {
 export const orElseSucceed: {
   <B>(value: () => B): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A | B, E, R, I>
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, value: () => B): Parser<A | B, E, R, I>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, value: () => B): Parser<A | B, E, R, I> => {
-  const step = self.step
-  return described((state) => {
-    const start = state.pos
-    const a = step(state)
-    if (a !== Fail) return a
-    if (state.mode !== "Backtrack") return Fail
-    recover(state, start)
-    return value()
-  }, self.name, { _tag: "OrElseSucceed", self, value })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, value: () => B): Parser<A | B, E, R, I> => {
+    const step = self.step
+    return described(
+      (state) => {
+        const start = state.pos
+        const a = step(state)
+        if (a !== Fail) return a
+        if (state.mode !== "Backtrack") return Fail
+        recover(state, start)
+        return value()
+      },
+      self.name,
+      { _tag: "OrElseSucceed", self, value }
+    )
+  }
+)
 
 /** Rewinds after a recoverable failure, remembering it as a hint. */
 const recover = (state: State<any>, start: number): void => {
@@ -1117,14 +1241,18 @@ const recover = (state: State<any>, start: number): void => {
  */
 export const opt = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<Option.Option<A>, E, R, I> => {
   const step = self.step
-  return described((state) => {
-    const start = state.pos
-    const a = step(state)
-    if (a !== Fail) return Option.some(a)
-    if (state.mode !== "Backtrack") return Fail
-    recover(state, start)
-    return Option.none()
-  }, self.name, { _tag: "Opt", self })
+  return described(
+    (state) => {
+      const start = state.pos
+      const a = step(state)
+      if (a !== Fail) return Option.some(a)
+      if (state.mode !== "Backtrack") return Fail
+      recover(state, start)
+      return Option.none()
+    },
+    self.name,
+    { _tag: "Opt", self }
+  )
 }
 
 /**
@@ -1146,7 +1274,7 @@ export const optional = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Pa
 export const cond = <A, E, R, I extends Input>(
   condition: boolean,
   self: Parser<A, E, R, I>
-): Parser<Option.Option<A>, E, R, I> => condition ? asSome(self) : succeed(Option.none())
+): Parser<Option.Option<A>, E, R, I> => (condition ? asSome(self) : succeed(Option.none()))
 
 /**
  * Runs a parser without consuming input (winnow's and nom's `peek`).
@@ -1156,22 +1284,26 @@ export const cond = <A, E, R, I extends Input>(
  */
 export const peek = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<A, E, R, I> => {
   const step = self.step
-  return described((state) => {
-    const start = state.pos
-    const hintOffset = state.hintOffset
-    const hintExpected = state.hintExpected
-    const deepest = state.deepest
-    const a = step(state)
-    if (a !== Fail) {
-      // Failures inside a lookahead that succeeded are about input that was
-      // never consumed, so they are not reported as the furthest failure
-      state.pos = start
-      state.hintOffset = hintOffset
-      state.hintExpected = hintExpected
-      state.deepest = deepest
-    }
-    return a
-  }, self.name, { _tag: "Peek", self })
+  return described(
+    (state) => {
+      const start = state.pos
+      const hintOffset = state.hintOffset
+      const hintExpected = state.hintExpected
+      const deepest = state.deepest
+      const a = step(state)
+      if (a !== Fail) {
+        // Failures inside a lookahead that succeeded are about input that was
+        // never consumed, so they are not reported as the furthest failure
+        state.pos = start
+        state.hintOffset = hintOffset
+        state.hintExpected = hintExpected
+        state.deepest = deepest
+      }
+      return a
+    },
+    self.name,
+    { _tag: "Peek", self }
+  )
 }
 
 /**
@@ -1183,25 +1315,29 @@ export const peek = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser
  */
 export const not = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<void, E, R, I> => {
   const step = self.step
-  return described((state) => {
-    const start = state.pos
-    const hintOffset = state.hintOffset
-    const hintExpected = state.hintExpected
-    const deepest = state.deepest
-    const a = step(state)
-    if (a !== Fail) {
-      // The failures inside `self` are not this parser's failure
+  return described(
+    (state) => {
+      const start = state.pos
+      const hintOffset = state.hintOffset
+      const hintExpected = state.hintExpected
+      const deepest = state.deepest
+      const a = step(state)
+      if (a !== Fail) {
+        // The failures inside `self` are not this parser's failure
+        state.pos = start
+        state.deepest = deepest
+        return state.backtrack("Not")
+      }
+      if (state.mode !== "Backtrack") return Fail
       state.pos = start
+      state.hintOffset = hintOffset
+      state.hintExpected = hintExpected
       state.deepest = deepest
-      return state.backtrack("Not")
-    }
-    if (state.mode !== "Backtrack") return Fail
-    state.pos = start
-    state.hintOffset = hintOffset
-    state.hintExpected = hintExpected
-    state.deepest = deepest
-    return undefined
-  }, self.name, { _tag: "Not", self })
+      return undefined
+    },
+    self.name,
+    { _tag: "Not", self }
+  )
 }
 
 /**
@@ -1234,15 +1370,19 @@ export const seq = <const Ps extends ReadonlyArray<Parser.Any>>(
 > => {
   const steps = parsers.map((p) => p.step)
   const n = steps.length
-  return described((state: State<any>) => {
-    const out = new Array(n)
-    for (let i = 0; i < n; i++) {
-      const a = steps[i]!(state)
-      if (a === Fail) return Fail
-      out[i] = a
-    }
-    return out as any
-  }, "seq", { _tag: "Seq", parsers, output: "tuple" })
+  return described(
+    (state: State<any>) => {
+      const out = new Array(n)
+      for (let i = 0; i < n; i++) {
+        const a = steps[i]!(state)
+        if (a === Fail) return Fail
+        out[i] = a
+      }
+      return out as any
+    },
+    "seq",
+    { _tag: "Seq", parsers, output: "tuple" }
+  )
 }
 
 /**
@@ -1264,15 +1404,19 @@ export const struct = <const Fields extends Readonly<Record<string, Parser.Any>>
   const keys = Object.keys(fields)
   const steps = keys.map((k) => fields[k]!.step)
   const n = keys.length
-  return described((state: State<any>) => {
-    const out: Record<string, unknown> = {}
-    for (let i = 0; i < n; i++) {
-      const a = steps[i]!(state)
-      if (a === Fail) return Fail
-      out[keys[i]!] = a
-    }
-    return out as any
-  }, "struct", { _tag: "Struct", keys, parsers: keys.map((k) => fields[k]!) })
+  return described(
+    (state: State<any>) => {
+      const out: Record<string, unknown> = {}
+      for (let i = 0; i < n; i++) {
+        const a = steps[i]!(state)
+        if (a === Fail) return Fail
+        out[keys[i]!] = a
+      }
+      return out as any
+    },
+    "struct",
+    { _tag: "Struct", keys, parsers: keys.map((k) => fields[k]!) }
+  )
 }
 
 /**
@@ -1289,10 +1433,13 @@ export const zip: {
     self: Parser<A, E, R, I>,
     that: Parser<B, E2, R2, I2>
   ): Parser<[A, B], E | E2, R | R2, I & I2>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
-  self: Parser<A, E, R, I>,
-  that: Parser<B, E2, R2, I2>
-): Parser<[A, B], E | E2, R | R2, I & I2> => zipWith(self, that, (a, b) => [a, b]))
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+    self: Parser<A, E, R, I>,
+    that: Parser<B, E2, R2, I2>
+  ): Parser<[A, B], E | E2, R | R2, I & I2> => zipWith(self, that, (a, b) => [a, b])
+)
 
 /**
  * Runs two parsers in sequence and combines their outputs.
@@ -1310,21 +1457,28 @@ export const zipWith: {
     that: Parser<B, E2, R2, I2>,
     f: (a: A, b: B) => C
   ): Parser<C, E | E2, R | R2, I & I2>
-} = /*#__PURE__*/ dual(3, <A, E, R, I extends Input, B, E2, R2, I2 extends Input, C>(
-  self: Parser<A, E, R, I>,
-  that: Parser<B, E2, R2, I2>,
-  f: (a: A, b: B) => C
-): Parser<C, E | E2, R | R2, I & I2> => {
-  const s1 = self.step
-  const s2 = that.step
-  return described((state) => {
-    const a = s1(state)
-    if (a === Fail) return Fail
-    const b = s2(state)
-    if (b === Fail) return Fail
-    return f(a, b)
-  }, undefined, { _tag: "ZipWith", self, that, f })
-})
+} = /*#__PURE__*/ dual(
+  3,
+  <A, E, R, I extends Input, B, E2, R2, I2 extends Input, C>(
+    self: Parser<A, E, R, I>,
+    that: Parser<B, E2, R2, I2>,
+    f: (a: A, b: B) => C
+  ): Parser<C, E | E2, R | R2, I & I2> => {
+    const s1 = self.step
+    const s2 = that.step
+    return described(
+      (state) => {
+        const a = s1(state)
+        if (a === Fail) return Fail
+        const b = s2(state)
+        if (b === Fail) return Fail
+        return f(a, b)
+      },
+      undefined,
+      { _tag: "ZipWith", self, that, f }
+    )
+  }
+)
 
 /**
  * Runs two parsers in sequence, keeping the output of the first.
@@ -1340,10 +1494,13 @@ export const zipLeft: {
     self: Parser<A, E, R, I>,
     that: Parser<B, E2, R2, I2>
   ): Parser<A, E | E2, R | R2, I & I2>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
-  self: Parser<A, E, R, I>,
-  that: Parser<B, E2, R2, I2>
-): Parser<A, E | E2, R | R2, I & I2> => terminated(self, that))
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+    self: Parser<A, E, R, I>,
+    that: Parser<B, E2, R2, I2>
+  ): Parser<A, E | E2, R | R2, I & I2> => terminated(self, that)
+)
 
 /**
  * Runs two parsers in sequence, keeping the output of the second.
@@ -1359,10 +1516,13 @@ export const zipRight: {
     self: Parser<A, E, R, I>,
     that: Parser<B, E2, R2, I2>
   ): Parser<B, E | E2, R | R2, I & I2>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
-  self: Parser<A, E, R, I>,
-  that: Parser<B, E2, R2, I2>
-): Parser<B, E | E2, R | R2, I & I2> => preceded(self, that))
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+    self: Parser<A, E, R, I>,
+    that: Parser<B, E2, R2, I2>
+  ): Parser<B, E | E2, R | R2, I & I2> => preceded(self, that)
+)
 
 /**
  * Runs `prefix` then `parser`, keeping the output of `parser` (winnow's and
@@ -1377,7 +1537,7 @@ export const preceded = <A1, E1, R1, I1 extends Input, A2, E2, R2, I2 extends In
 ): Parser<A2, E1 | E2, R1 | R2, I1 & I2> => {
   const s1 = prefix.step
   const s2 = parser.step
-  return described((state) => s1(state) === Fail ? Fail : s2(state), parser.name, {
+  return described((state) => (s1(state) === Fail ? Fail : s2(state)), parser.name, {
     _tag: "Seq",
     parsers: [prefix, parser],
     output: 1
@@ -1397,11 +1557,15 @@ export const terminated = <A1, E1, R1, I1 extends Input, A2, E2, R2, I2 extends 
 ): Parser<A1, E1 | E2, R1 | R2, I1 & I2> => {
   const s1 = parser.step
   const s2 = suffix.step
-  return described((state) => {
-    const a = s1(state)
-    if (a === Fail) return Fail
-    return s2(state) === Fail ? Fail : a
-  }, parser.name, { _tag: "Seq", parsers: [parser, suffix], output: 0 })
+  return described(
+    (state) => {
+      const a = s1(state)
+      if (a === Fail) return Fail
+      return s2(state) === Fail ? Fail : a
+    },
+    parser.name,
+    { _tag: "Seq", parsers: [parser, suffix], output: 0 }
+  )
 }
 
 /**
@@ -1411,20 +1575,7 @@ export const terminated = <A1, E1, R1, I1 extends Input, A2, E2, R2, I2 extends 
  * @since 0.1.0
  * @category sequencing
  */
-export const delimited = <
-  A1,
-  E1,
-  R1,
-  I1 extends Input,
-  A2,
-  E2,
-  R2,
-  I2 extends Input,
-  A3,
-  E3,
-  R3,
-  I3 extends Input
->(
+export const delimited = <A1, E1, R1, I1 extends Input, A2, E2, R2, I2 extends Input, A3, E3, R3, I3 extends Input>(
   open: Parser<A1, E1, R1, I1>,
   parser: Parser<A2, E2, R2, I2>,
   close: Parser<A3, E3, R3, I3>
@@ -1432,12 +1583,16 @@ export const delimited = <
   const s1 = open.step
   const s2 = parser.step
   const s3 = close.step
-  return described((state) => {
-    if (s1(state) === Fail) return Fail
-    const a = s2(state)
-    if (a === Fail) return Fail
-    return s3(state) === Fail ? Fail : a
-  }, parser.name, { _tag: "Seq", parsers: [open, parser, close], output: 1 })
+  return described(
+    (state) => {
+      if (s1(state) === Fail) return Fail
+      const a = s2(state)
+      if (a === Fail) return Fail
+      return s3(state) === Fail ? Fail : a
+    },
+    parser.name,
+    { _tag: "Seq", parsers: [open, parser, close], output: 1 }
+  )
 }
 
 /**
@@ -1447,20 +1602,7 @@ export const delimited = <
  * @since 0.1.0
  * @category sequencing
  */
-export const separatedPair = <
-  A1,
-  E1,
-  R1,
-  I1 extends Input,
-  A2,
-  E2,
-  R2,
-  I2 extends Input,
-  A3,
-  E3,
-  R3,
-  I3 extends Input
->(
+export const separatedPair = <A1, E1, R1, I1 extends Input, A2, E2, R2, I2 extends Input, A3, E3, R3, I3 extends Input>(
   first: Parser<A1, E1, R1, I1>,
   separator: Parser<A2, E2, R2, I2>,
   second: Parser<A3, E3, R3, I3>
@@ -1468,13 +1610,17 @@ export const separatedPair = <
   const s1 = first.step
   const s2 = separator.step
   const s3 = second.step
-  return described((state) => {
-    const a = s1(state)
-    if (a === Fail) return Fail
-    if (s2(state) === Fail) return Fail
-    const b = s3(state)
-    return b === Fail ? Fail : [a, b]
-  }, undefined, { _tag: "Seq", parsers: [first, separator, second], output: [0, 2] })
+  return described(
+    (state) => {
+      const a = s1(state)
+      if (a === Fail) return Fail
+      if (s2(state) === Fail) return Fail
+      const b = s3(state)
+      return b === Fail ? Fail : [a, b]
+    },
+    undefined,
+    { _tag: "Seq", parsers: [first, separator, second], output: [0, 2] }
+  )
 }
 
 /**
@@ -1513,7 +1659,7 @@ export const separatedPair = <
  * @since 0.1.0
  * @category sequencing
  */
-export const gen =<Eff extends Parser.Any, AEff>(
+export const gen = <Eff extends Parser.Any, AEff>(
   f: () => Generator<Eff, AEff, never>
 ): Parser<AEff, Parser.Error<Eff>, Parser.Services<Eff>, Parser.InputOf<Eff>> =>
   make((state: State<any>) => {
@@ -1568,7 +1714,8 @@ export const bind: {
     f: (a: NoInfer<A>) => Parser<B, E2, R2, I2>
   ): Parser<Simplify<Omit<A, N> & { [K in N]: B }>, E | E2, R | R2, I & I2>
 } = /*#__PURE__*/ dual(3, (self: Parser.Any, name: string, f: (a: any) => Parser.Any): Parser.Any =>
-  flatMap(self, (a) => map(f(a), (b) => ({ ...a, [name]: b }))))
+  flatMap(self, (a) => map(f(a), (b) => ({ ...a, [name]: b })))
+)
 
 /**
  * Wraps the output of a parser in a record with a single field.
@@ -1592,7 +1739,8 @@ const let_: {
     f: (a: NoInfer<A>) => B
   ): Parser<Simplify<Omit<A, N> & { [K in N]: B }>, E, R, I>
 } = /*#__PURE__*/ dual(3, (self: Parser.Any, name: string, f: (a: any) => unknown): Parser.Any =>
-  map(self, (a) => ({ ...a, [name]: f(a) })))
+  map(self, (a) => ({ ...a, [name]: f(a) }))
+)
 
 export {
   /**
@@ -1632,21 +1780,25 @@ export const alt = <const Ps extends ReadonlyArray<Parser.Any>>(
   const n = steps.length
   if (n === 0) return reject as any
   if (n === 1) return parsers[0]!
-  return described((state: State<any>) => {
-    const start = state.pos
-    let failure: Failure | undefined
-    for (let i = 0; i < n; i++) {
-      const a = steps[i]!(state)
-      if (a !== Fail) {
-        if (failure !== undefined && failure.offset === state.pos) state.setHint(failure.offset, failure.expected)
-        return a
+  return described(
+    (state: State<any>) => {
+      const start = state.pos
+      let failure: Failure | undefined
+      for (let i = 0; i < n; i++) {
+        const a = steps[i]!(state)
+        if (a !== Fail) {
+          if (failure !== undefined && failure.offset === state.pos) state.setHint(failure.offset, failure.expected)
+          return a
+        }
+        if (state.mode !== "Backtrack") return Fail
+        failure = failure === undefined ? state.failure : mergeFailures(failure, state.failure)
+        state.pos = start
       }
-      if (state.mode !== "Backtrack") return Fail
-      failure = failure === undefined ? state.failure : mergeFailures(failure, state.failure)
-      state.pos = start
-    }
-    return state.failWith("Backtrack", failure!)
-  }, "alt", { _tag: "Alt", parsers })
+      return state.failWith("Backtrack", failure!)
+    },
+    "alt",
+    { _tag: "Alt", parsers }
+  )
 }
 
 /**
@@ -1705,26 +1857,32 @@ export const dispatch: {
   cases: ((key: any) => Parser.Any | undefined) | Record<PropertyKey, Parser.Any>,
   otherwise?: Parser.Any
 ) => {
-  const choose = typeof cases === "function" ? cases : (key: PropertyKey) =>
-    Object.prototype.hasOwnProperty.call(cases, key) ? cases[key] : otherwise
+  const choose =
+    typeof cases === "function"
+      ? cases
+      : (key: PropertyKey) => (Object.prototype.hasOwnProperty.call(cases, key) ? cases[key] : otherwise)
   const step = selector.step
-  return described((state: State<any>) => {
-    const start = state.pos
-    const key = step(state)
-    if (key === Fail) return Fail
-    const parser = choose(key)
-    if (parser === undefined) {
-      state.pos = start
-      return state.backtrack("Dispatch")
+  return described(
+    (state: State<any>) => {
+      const start = state.pos
+      const key = step(state)
+      if (key === Fail) return Fail
+      const parser = choose(key)
+      if (parser === undefined) {
+        state.pos = start
+        return state.backtrack("Dispatch")
+      }
+      return parser.step(state)
+    },
+    "dispatch",
+    {
+      _tag: "Dispatch",
+      selector,
+      cases: typeof cases === "function" ? undefined : cases,
+      otherwise: typeof cases === "function" ? undefined : otherwise,
+      choose
     }
-    return parser.step(state)
-  }, "dispatch", {
-    _tag: "Dispatch",
-    selector,
-    cases: typeof cases === "function" ? undefined : cases,
-    otherwise: typeof cases === "function" ? undefined : otherwise,
-    choose
-  })
+  )
 }
 
 /**
@@ -1813,39 +1971,43 @@ const foldImpl = <A, B, E, R, I extends Input>(
   const step = self.step
   const checkLoop = max === Infinity
   const key = {}
-  return described((state) => {
-    const entry = state.pos
-    let acc: B
-    let count = 0
-    const resumed = state.resume === undefined ? undefined : Resume.take(state, key, entry) as FoldCheckpoint<B>
-    if (resumed instanceof Resume.Done) {
-      state.pos = resumed.pos
-      return resumed.value as B
-    }
-    if (resumed !== undefined) {
-      acc = resumed.acc
-      count = resumed.count
-      state.pos = resumed.pos
-    } else {
-      acc = init()
-    }
-    for (; count < max; count++) {
-      if (cond !== undefined && count >= min && !cond(acc)) break
-      const start = state.pos
-      const a = step(state)
-      if (a === Fail) {
-        if (state.mode === "Incomplete" && state.resume !== undefined) {
-          Resume.save(state, key, entry, { acc, count, pos: start } satisfies FoldCheckpoint<B>)
-        }
-        if (state.mode !== "Backtrack" || count < min) return Fail
-        recover(state, start)
-        return Resume.done(state, key, entry, resumed !== undefined, acc)
+  return described(
+    (state) => {
+      const entry = state.pos
+      let acc: B
+      let count = 0
+      const resumed = state.resume === undefined ? undefined : (Resume.take(state, key, entry) as FoldCheckpoint<B>)
+      if (resumed instanceof Resume.Done) {
+        state.pos = resumed.pos
+        return resumed.value as B
       }
-      if (checkLoop && state.pos === start) return assertConsumes(state, name)
-      acc = f(acc, a)
-    }
-    return Resume.done(state, key, entry, resumed !== undefined, acc)
-  }, name, node ?? { _tag: "Fold", self, init, f, while: cond, name, ...bounds(range) })
+      if (resumed !== undefined) {
+        acc = resumed.acc
+        count = resumed.count
+        state.pos = resumed.pos
+      } else {
+        acc = init()
+      }
+      for (; count < max; count++) {
+        if (cond !== undefined && count >= min && !cond(acc)) break
+        const start = state.pos
+        const a = step(state)
+        if (a === Fail) {
+          if (state.mode === "Incomplete" && state.resume !== undefined) {
+            Resume.save(state, key, entry, { acc, count, pos: start } satisfies FoldCheckpoint<B>)
+          }
+          if (state.mode !== "Backtrack" || count < min) return Fail
+          recover(state, start)
+          return Resume.done(state, key, entry, resumed !== undefined, acc)
+        }
+        if (checkLoop && state.pos === start) return assertConsumes(state, name)
+        acc = f(acc, a)
+      }
+      return Resume.done(state, key, entry, resumed !== undefined, acc)
+    },
+    name,
+    node ?? { _tag: "Fold", self, init, f, while: cond, name, ...bounds(range) }
+  )
 }
 
 /**
@@ -1880,10 +2042,18 @@ export const repeat: {
     range?: Rg
   ): Parser<Repeated<A, Rg>, E, R, I>
 } = /*#__PURE__*/ dual(isParserArg, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, range?: Range) =>
-  foldImpl<A, Array<A>, E, R, I>(self, range, () => [], (acc, a) => {
-    acc.push(a)
-    return acc
-  }, "repeat", { _tag: "Repeat", self, ...bounds(range) }))
+  foldImpl<A, Array<A>, E, R, I>(
+    self,
+    range,
+    () => [],
+    (acc, a) => {
+      acc.push(a)
+      return acc
+    },
+    "repeat",
+    { _tag: "Repeat", self, ...bounds(range) }
+  )
+)
 
 /**
  * Applies a parser repeatedly, folding the outputs into an accumulator
@@ -1918,18 +2088,27 @@ export const fold: {
     readonly range?: Range | undefined
     readonly while?: ((acc: B) => boolean) | undefined
   }): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<B, E, R, I>
-  <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, options: {
-    readonly init: () => B
-    readonly f: (acc: B, a: A) => B
-    readonly range?: Range | undefined
-    readonly while?: ((acc: B) => boolean) | undefined
-  }): Parser<B, E, R, I>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, options: {
-  readonly init: () => B
-  readonly f: (acc: B, a: A) => B
-  readonly range?: Range | undefined
-  readonly while?: ((acc: B) => boolean) | undefined
-}): Parser<B, E, R, I> => foldImpl(self, options.range, options.init, options.f, "fold", undefined, options.while))
+  <A, E, R, I extends Input, B>(
+    self: Parser<A, E, R, I>,
+    options: {
+      readonly init: () => B
+      readonly f: (acc: B, a: A) => B
+      readonly range?: Range | undefined
+      readonly while?: ((acc: B) => boolean) | undefined
+    }
+  ): Parser<B, E, R, I>
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B>(
+    self: Parser<A, E, R, I>,
+    options: {
+      readonly init: () => B
+      readonly f: (acc: B, a: A) => B
+      readonly range?: Range | undefined
+      readonly while?: ((acc: B) => boolean) | undefined
+    }
+  ): Parser<B, E, R, I> => foldImpl(self, options.range, options.init, options.f, "fold", undefined, options.while)
+)
 
 /**
  * Applies `self` repeatedly until `end` succeeds, returning the collected
@@ -1943,47 +2122,52 @@ export const repeatTill: {
   <B, E2, R2, I2 extends Input, const Rg extends Range = { readonly min: 0 }>(
     end: Parser<B, E2, R2, I2>,
     range?: Rg
-  ): <A, E, R, I extends Input>(
-    self: Parser<A, E, R, I>
-  ) => Parser<[Repeated<A, Rg>, B], E | E2, R | R2, I & I2>
+  ): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<[Repeated<A, Rg>, B], E | E2, R | R2, I & I2>
   <A, E, R, I extends Input, B, E2, R2, I2 extends Input, const Rg extends Range = { readonly min: 0 }>(
     self: Parser<A, E, R, I>,
     end: Parser<B, E2, R2, I2>,
     range?: Rg
   ): Parser<[Repeated<A, Rg>, B], E | E2, R | R2, I & I2>
-} = /*#__PURE__*/ dual(isTwoParserArgs, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
-  self: Parser<A, E, R, I>,
-  end: Parser<B, E2, R2, I2>,
-  range?: Range
-): Parser<[Array<A>, B], E | E2, R | R2, I & I2> => {
-  const [min, max] = normalizeRange(range)
-  const step = self.step
-  const endStep = end.step
-  return described((state) => {
-    const acc: Array<A> = []
-    while (true) {
-      const start = state.pos
-      let endFailure: Failure | undefined
-      if (acc.length >= min) {
-        const b = endStep(state)
-        if (b !== Fail) return [acc, b]
-        if (state.mode !== "Backtrack") return Fail
-        endFailure = state.failure
-        state.pos = start
-        if (acc.length >= max) return Fail
-      }
-      const a = step(state)
-      if (a === Fail) {
-        if (endFailure !== undefined && state.mode === "Backtrack") {
-          state.failWith("Backtrack", mergeFailures(endFailure, state.failure))
+} = /*#__PURE__*/ dual(
+  isTwoParserArgs,
+  <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+    self: Parser<A, E, R, I>,
+    end: Parser<B, E2, R2, I2>,
+    range?: Range
+  ): Parser<[Array<A>, B], E | E2, R | R2, I & I2> => {
+    const [min, max] = normalizeRange(range)
+    const step = self.step
+    const endStep = end.step
+    return described(
+      (state) => {
+        const acc: Array<A> = []
+        while (true) {
+          const start = state.pos
+          let endFailure: Failure | undefined
+          if (acc.length >= min) {
+            const b = endStep(state)
+            if (b !== Fail) return [acc, b]
+            if (state.mode !== "Backtrack") return Fail
+            endFailure = state.failure
+            state.pos = start
+            if (acc.length >= max) return Fail
+          }
+          const a = step(state)
+          if (a === Fail) {
+            if (endFailure !== undefined && state.mode === "Backtrack") {
+              state.failWith("Backtrack", mergeFailures(endFailure, state.failure))
+            }
+            return Fail
+          }
+          if (state.pos === start) return assertConsumes(state, "repeatTill")
+          acc.push(a)
         }
-        return Fail
-      }
-      if (state.pos === start) return assertConsumes(state, "repeatTill")
-      acc.push(a)
-    }
-  }, "repeatTill", { _tag: "RepeatTill", self, end, ...bounds(range) })
-})
+      },
+      "repeatTill",
+      { _tag: "RepeatTill", self, end, ...bounds(range) }
+    )
+  }
+)
 
 /**
  * Applies `self` repeatedly, separated by `separator`, collecting the
@@ -2017,64 +2201,72 @@ export const separated: {
     separator: Parser<S, E2, R2, I2>,
     range?: Rg
   ): Parser<Repeated<A, Rg>, E | E2, R | R2, I & I2>
-} = /*#__PURE__*/ dual(isTwoParserArgs, <A, E, R, I extends Input, S, E2, R2, I2 extends Input>(
-  self: Parser<A, E, R, I>,
-  separator: Parser<S, E2, R2, I2>,
-  range?: Range
-): Parser<Array<A>, E | E2, R | R2, I & I2> => {
-  const [min, max] = normalizeRange(range)
-  const step = self.step
-  const sepStep = separator.step
-  const checkLoop = max === Infinity
-  const key = {}
-  return described((state) => {
-    const entry = state.pos
-    let acc: Array<A>
-    const resumed = state.resume === undefined ? undefined : Resume.take(state, key, entry) as SeparatedCheckpoint<A>
-    if (resumed instanceof Resume.Done) {
-      state.pos = resumed.pos
-      return resumed.value as Array<A>
-    }
-    if (resumed !== undefined) {
-      acc = resumed.acc
-      state.pos = resumed.pos
-    } else {
-      acc = []
-      if (max === 0) return acc
-      const start = state.pos
-      const first = step(state)
-      if (first === Fail) {
-        if (state.mode !== "Backtrack" || min > 0) return Fail
-        recover(state, start)
-        return acc
-      }
-      acc.push(first)
-    }
-    while (acc.length < max) {
-      const start = state.pos
-      if (sepStep(state) === Fail) {
-        if (state.mode === "Incomplete" && state.resume !== undefined) {
-          Resume.save(state, key, entry, { acc, pos: start } satisfies SeparatedCheckpoint<A>)
+} = /*#__PURE__*/ dual(
+  isTwoParserArgs,
+  <A, E, R, I extends Input, S, E2, R2, I2 extends Input>(
+    self: Parser<A, E, R, I>,
+    separator: Parser<S, E2, R2, I2>,
+    range?: Range
+  ): Parser<Array<A>, E | E2, R | R2, I & I2> => {
+    const [min, max] = normalizeRange(range)
+    const step = self.step
+    const sepStep = separator.step
+    const checkLoop = max === Infinity
+    const key = {}
+    return described(
+      (state) => {
+        const entry = state.pos
+        let acc: Array<A>
+        const resumed =
+          state.resume === undefined ? undefined : (Resume.take(state, key, entry) as SeparatedCheckpoint<A>)
+        if (resumed instanceof Resume.Done) {
+          state.pos = resumed.pos
+          return resumed.value as Array<A>
         }
-        if (state.mode !== "Backtrack" || acc.length < min) return Fail
-        recover(state, start)
-        return Resume.done(state, key, entry, resumed !== undefined, acc)
-      }
-      if (checkLoop && state.pos === start) return assertConsumes(state, "separated")
-      const a = step(state)
-      if (a === Fail) {
-        if (state.mode === "Incomplete" && state.resume !== undefined) {
-          Resume.save(state, key, entry, { acc, pos: start } satisfies SeparatedCheckpoint<A>)
+        if (resumed !== undefined) {
+          acc = resumed.acc
+          state.pos = resumed.pos
+        } else {
+          acc = []
+          if (max === 0) return acc
+          const start = state.pos
+          const first = step(state)
+          if (first === Fail) {
+            if (state.mode !== "Backtrack" || min > 0) return Fail
+            recover(state, start)
+            return acc
+          }
+          acc.push(first)
         }
-        if (state.mode !== "Backtrack" || acc.length < min) return Fail
-        state.pos = start
+        while (acc.length < max) {
+          const start = state.pos
+          if (sepStep(state) === Fail) {
+            if (state.mode === "Incomplete" && state.resume !== undefined) {
+              Resume.save(state, key, entry, { acc, pos: start } satisfies SeparatedCheckpoint<A>)
+            }
+            if (state.mode !== "Backtrack" || acc.length < min) return Fail
+            recover(state, start)
+            return Resume.done(state, key, entry, resumed !== undefined, acc)
+          }
+          if (checkLoop && state.pos === start) return assertConsumes(state, "separated")
+          const a = step(state)
+          if (a === Fail) {
+            if (state.mode === "Incomplete" && state.resume !== undefined) {
+              Resume.save(state, key, entry, { acc, pos: start } satisfies SeparatedCheckpoint<A>)
+            }
+            if (state.mode !== "Backtrack" || acc.length < min) return Fail
+            state.pos = start
+            return Resume.done(state, key, entry, resumed !== undefined, acc)
+          }
+          acc.push(a)
+        }
         return Resume.done(state, key, entry, resumed !== undefined, acc)
-      }
-      acc.push(a)
-    }
-    return Resume.done(state, key, entry, resumed !== undefined, acc)
-  }, "separated", { _tag: "Separated", self, separator, ...bounds(range) })
-})
+      },
+      "separated",
+      { _tag: "Separated", self, separator, ...bounds(range) }
+    )
+  }
+)
 
 /**
  * Parses one or more `self` separated by `separator`, folding them from the
@@ -2105,41 +2297,45 @@ export const separatedFoldl1 = <A, E, R, I extends Input, S, E2, R2, I2 extends 
   const step = self.step
   const sepStep = separator.step
   const key = {}
-  return described((state) => {
-    const entry = state.pos
-    const resumed = state.resume === undefined ? undefined : Resume.take(state, key, entry) as FoldCheckpoint<A>
-    let acc: A | Fail
-    if (resumed instanceof Resume.Done) {
-      state.pos = resumed.pos
-      return resumed.value as A
-    }
-    if (resumed !== undefined) {
-      acc = resumed.acc
-      state.pos = resumed.pos
-    } else {
-      acc = step(state)
-      if (acc === Fail) return Fail
-    }
-    while (true) {
-      const start = state.pos
-      const s = sepStep(state)
-      if (s === Fail) {
-        if (state.mode === "Incomplete" && state.resume !== undefined) saveFold(state, key, entry, acc, start)
-        if (state.mode !== "Backtrack") return Fail
-        recover(state, start)
-        return Resume.done(state, key, entry, resumed !== undefined, acc as A)
+  return described(
+    (state) => {
+      const entry = state.pos
+      const resumed = state.resume === undefined ? undefined : (Resume.take(state, key, entry) as FoldCheckpoint<A>)
+      let acc: A | Fail
+      if (resumed instanceof Resume.Done) {
+        state.pos = resumed.pos
+        return resumed.value as A
       }
-      if (state.pos === start) return assertConsumes(state, "separatedFoldl1")
-      const a = step(state)
-      if (a === Fail) {
-        if (state.mode === "Incomplete" && state.resume !== undefined) saveFold(state, key, entry, acc, start)
-        if (state.mode !== "Backtrack") return Fail
-        state.pos = start
-        return Resume.done(state, key, entry, resumed !== undefined, acc as A)
+      if (resumed !== undefined) {
+        acc = resumed.acc
+        state.pos = resumed.pos
+      } else {
+        acc = step(state)
+        if (acc === Fail) return Fail
       }
-      acc = op(acc, s, a)
-    }
-  }, "separatedFoldl1", { _tag: "SeparatedFold", self, separator, op, right: false })
+      while (true) {
+        const start = state.pos
+        const s = sepStep(state)
+        if (s === Fail) {
+          if (state.mode === "Incomplete" && state.resume !== undefined) saveFold(state, key, entry, acc, start)
+          if (state.mode !== "Backtrack") return Fail
+          recover(state, start)
+          return Resume.done(state, key, entry, resumed !== undefined, acc as A)
+        }
+        if (state.pos === start) return assertConsumes(state, "separatedFoldl1")
+        const a = step(state)
+        if (a === Fail) {
+          if (state.mode === "Incomplete" && state.resume !== undefined) saveFold(state, key, entry, acc, start)
+          if (state.mode !== "Backtrack") return Fail
+          state.pos = start
+          return Resume.done(state, key, entry, resumed !== undefined, acc as A)
+        }
+        acc = op(acc, s, a)
+      }
+    },
+    "separatedFoldl1",
+    { _tag: "SeparatedFold", self, separator, op, right: false }
+  )
 }
 
 /**
@@ -2158,35 +2354,39 @@ export const separatedFoldr1 = <A, E, R, I extends Input, S, E2, R2, I2 extends 
 ): Parser<A, E | E2, R | R2, I & I2> => {
   const step = self.step
   const sepStep = separator.step
-  return described((state) => {
-    const first = step(state)
-    if (first === Fail) return Fail
-    const values: Array<A> = [first]
-    const seps: Array<S> = []
-    while (true) {
-      const start = state.pos
-      const s = sepStep(state)
-      if (s === Fail) {
-        if (state.mode !== "Backtrack") return Fail
-        recover(state, start)
-        break
+  return described(
+    (state) => {
+      const first = step(state)
+      if (first === Fail) return Fail
+      const values: Array<A> = [first]
+      const seps: Array<S> = []
+      while (true) {
+        const start = state.pos
+        const s = sepStep(state)
+        if (s === Fail) {
+          if (state.mode !== "Backtrack") return Fail
+          recover(state, start)
+          break
+        }
+        if (state.pos === start) return assertConsumes(state, "separatedFoldr1")
+        const a = step(state)
+        if (a === Fail) {
+          if (state.mode !== "Backtrack") return Fail
+          state.pos = start
+          break
+        }
+        seps.push(s)
+        values.push(a)
       }
-      if (state.pos === start) return assertConsumes(state, "separatedFoldr1")
-      const a = step(state)
-      if (a === Fail) {
-        if (state.mode !== "Backtrack") return Fail
-        state.pos = start
-        break
+      let acc = values[values.length - 1] as A
+      for (let i = seps.length - 1; i >= 0; i--) {
+        acc = op(values[i] as A, seps[i] as S, acc)
       }
-      seps.push(s)
-      values.push(a)
-    }
-    let acc = values[values.length - 1] as A
-    for (let i = seps.length - 1; i >= 0; i--) {
-      acc = op(values[i] as A, seps[i] as S, acc)
-    }
-    return acc
-  }, "separatedFoldr1", { _tag: "SeparatedFold", self, separator, op, right: true })
+      return acc
+    },
+    "separatedFoldr1",
+    { _tag: "SeparatedFold", self, separator, op, right: true }
+  )
 }
 
 // -----------------------------------------------------------------------------
@@ -2245,22 +2445,29 @@ export const provideService: {
     key: Context.Key<Id, S>,
     service: NoInfer<S>
   ): Parser<A, E, Exclude<R, Id>, I>
-} = /*#__PURE__*/ dual(3, <A, E, R, I extends Input, Id, S>(
-  self: Parser<A, E, R, I>,
-  key: Context.Key<Id, S>,
-  service: S
-): Parser<A, E, Exclude<R, Id>, I> => {
-  const step = self.step
-  return described((state) => {
-    const prev = state.context
-    state.context = Context.add(prev, key, service) as Context.Context<never>
-    try {
-      return step(state)
-    } finally {
-      state.context = prev
-    }
-  }, self.name, { _tag: "Provide", self })
-})
+} = /*#__PURE__*/ dual(
+  3,
+  <A, E, R, I extends Input, Id, S>(
+    self: Parser<A, E, R, I>,
+    key: Context.Key<Id, S>,
+    service: S
+  ): Parser<A, E, Exclude<R, Id>, I> => {
+    const step = self.step
+    return described(
+      (state) => {
+        const prev = state.context
+        state.context = Context.add(prev, key, service) as Context.Context<never>
+        try {
+          return step(state)
+        } finally {
+          state.context = prev
+        }
+      },
+      self.name,
+      { _tag: "Provide", self }
+    )
+  }
+)
 
 /**
  * Provides a context of services to a parser.
@@ -2276,21 +2483,28 @@ export const provide: {
     self: Parser<A, E, R, I>,
     context: Context.Context<R2>
   ): Parser<A, E, Exclude<R, R2>, I>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, R2>(
-  self: Parser<A, E, R, I>,
-  context: Context.Context<R2>
-): Parser<A, E, Exclude<R, R2>, I> => {
-  const step = self.step
-  return described((state) => {
-    const prev = state.context
-    state.context = Context.merge(prev, context) as Context.Context<never>
-    try {
-      return step(state)
-    } finally {
-      state.context = prev
-    }
-  }, self.name, { _tag: "Provide", self })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, R2>(
+    self: Parser<A, E, R, I>,
+    context: Context.Context<R2>
+  ): Parser<A, E, Exclude<R, R2>, I> => {
+    const step = self.step
+    return described(
+      (state) => {
+        const prev = state.context
+        state.context = Context.merge(prev, context) as Context.Context<never>
+        try {
+          return step(state)
+        } finally {
+          state.context = prev
+        }
+      },
+      self.name,
+      { _tag: "Provide", self }
+    )
+  }
+)
 
 // -----------------------------------------------------------------------------
 // Error recovery
@@ -2314,26 +2528,33 @@ export const resumeAfter: {
     self: Parser<A, E, R, I>,
     recover: Parser<B, E2, R2, I2>
   ): Parser<Option.Option<A>, E | E2, R | R2, I & I2>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
-  self: Parser<A, E, R, I>,
-  recover: Parser<B, E2, R2, I2>
-): Parser<Option.Option<A>, E | E2, R | R2, I & I2> => {
-  const step = self.step
-  const recoverStep = recover.step
-  return described((state) => {
-    const start = state.pos
-    const a = step(state)
-    if (a !== Fail) return Option.some(a)
-    if (state.recovered === undefined || state.mode === "Incomplete") return Fail
-    const failure = state.failure
-    const mode = state.mode
-    state.pos = start
-    if (recoverStep(state) === Fail) return state.failWith(mode, failure)
-    state.recovered.push(failure)
-    state.syntax?.skipped(start, failure, mode)
-    return Option.none()
-  }, self.name, { _tag: "ResumeAfter", self, recover })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+    self: Parser<A, E, R, I>,
+    recover: Parser<B, E2, R2, I2>
+  ): Parser<Option.Option<A>, E | E2, R | R2, I & I2> => {
+    const step = self.step
+    const recoverStep = recover.step
+    return described(
+      (state) => {
+        const start = state.pos
+        const a = step(state)
+        if (a !== Fail) return Option.some(a)
+        if (state.recovered === undefined || state.mode === "Incomplete") return Fail
+        const failure = state.failure
+        const mode = state.mode
+        state.pos = start
+        if (recoverStep(state) === Fail) return state.failWith(mode, failure)
+        state.recovered.push(failure)
+        state.syntax?.skipped(start, failure, mode)
+        return Option.none()
+      },
+      self.name,
+      { _tag: "ResumeAfter", self, recover }
+    )
+  }
+)
 
 /**
  * Error recovery: if the parser fails, record the failure, skip input with
@@ -2353,27 +2574,34 @@ export const retryAfter: {
     self: Parser<A, E, R, I>,
     recover: Parser<B, E2, R2, I2>
   ): Parser<A, E | E2, R | R2, I & I2>
-} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
-  self: Parser<A, E, R, I>,
-  recover: Parser<B, E2, R2, I2>
-): Parser<A, E | E2, R | R2, I & I2> => {
-  const step = self.step
-  const recoverStep = recover.step
-  return described((state) => {
-    while (true) {
-      const start = state.pos
-      const a = step(state)
-      if (a !== Fail) return a
-      if (state.recovered === undefined || state.mode === "Incomplete") return Fail
-      const failure = state.failure
-      const mode = state.mode
-      state.pos = start
-      if (recoverStep(state) === Fail || state.pos === start) return state.failWith(mode, failure)
-      state.recovered.push(failure)
-      state.syntax?.skipped(start, failure, mode)
-    }
-  }, self.name, { _tag: "RetryAfter", self, recover })
-})
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B, E2, R2, I2 extends Input>(
+    self: Parser<A, E, R, I>,
+    recover: Parser<B, E2, R2, I2>
+  ): Parser<A, E | E2, R | R2, I & I2> => {
+    const step = self.step
+    const recoverStep = recover.step
+    return described(
+      (state) => {
+        while (true) {
+          const start = state.pos
+          const a = step(state)
+          if (a !== Fail) return a
+          if (state.recovered === undefined || state.mode === "Incomplete") return Fail
+          const failure = state.failure
+          const mode = state.mode
+          state.pos = start
+          if (recoverStep(state) === Fail || state.pos === start) return state.failWith(mode, failure)
+          state.recovered.push(failure)
+          state.syntax?.skipped(start, failure, mode)
+        }
+      },
+      self.name,
+      { _tag: "RetryAfter", self, recover }
+    )
+  }
+)
 
 // -----------------------------------------------------------------------------
 // Debugging
@@ -2393,26 +2621,30 @@ export const trace: {
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I>
 } = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I> => {
   const step = self.step
-  return described((state) => {
-    const tracer = state.tracer
-    if (tracer === undefined) return step(state)
-    const start = state.pos
-    const depth = state.depth
-    tracer({ _tag: "Enter", name, depth, offset: start, state })
-    state.depth = depth + 1
-    const a = step(state)
-    state.depth = depth
-    tracer({
-      _tag: "Exit",
-      name,
-      depth,
-      offset: start,
-      endOffset: state.pos,
-      result: a === Fail ? state.mode : "Ok",
-      state
-    })
-    return a
-  }, name, { _tag: "Trace", self, name })
+  return described(
+    (state) => {
+      const tracer = state.tracer
+      if (tracer === undefined) return step(state)
+      const start = state.pos
+      const depth = state.depth
+      tracer({ _tag: "Enter", name, depth, offset: start, state })
+      state.depth = depth + 1
+      const a = step(state)
+      state.depth = depth
+      tracer({
+        _tag: "Exit",
+        name,
+        depth,
+        offset: start,
+        endOffset: state.pos,
+        result: a === Fail ? state.mode : "Ok",
+        state
+      })
+      return a
+    },
+    name,
+    { _tag: "Trace", self, name }
+  )
 })
 
 const preview = (state: State<any>, offset: number): string => {
@@ -2598,7 +2830,11 @@ export const parse: {
  */
 export const parseSync: {
   <A, E, I extends Input>(self: Parser<A, E, never, I>, input: NoInfer<Source<I>>, options?: ParseOptions): A
-  <A, E, R, I extends Input>(self: Parser<A, E, R, I>, input: NoInfer<Source<I>>, options: ParseOptionsWithContext<R>): A
+  <A, E, R, I extends Input>(
+    self: Parser<A, E, R, I>,
+    input: NoInfer<Source<I>>,
+    options: ParseOptionsWithContext<R>
+  ): A
 } = <A, E, R, I extends Input>(
   self: Parser<A, E, R, I>,
   input: I | Source<I>,
@@ -2745,9 +2981,8 @@ export const parseEffect = <A, E, R, I extends Input>(
   input: NoInfer<Source<I>>,
   options?: ParseOptions
 ): Effect.Effect<A, ParseError.ParseError<E>, R> =>
-  Effect.flatMap(
-    Effect.context<R>(),
-    (context) => Effect.fromResult(parseComplete(self, input, { ...options, context }))
+  Effect.flatMap(Effect.context<R>(), (context) =>
+    Effect.fromResult(parseComplete(self, input, { ...options, context }))
   )
 
 /**

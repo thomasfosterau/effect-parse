@@ -119,7 +119,7 @@ const isLeaf = (node: Node): boolean => {
   }
 }
 
-const lowerAscii = (c: number): number => c >= 65 && c <= 90 ? c + 32 : c
+const lowerAscii = (c: number): number => (c >= 65 && c <= 90 ? c + 32 : c)
 const isLetter = (c: number): boolean => (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
 
 /** The inclusive ranges of 1s in a table. */
@@ -139,7 +139,7 @@ const runsOf = (table: Uint8Array): Array<[number, number]> => {
 const rangeTest = (runs: ReadonlyArray<readonly [number, number]>, v: string): string | undefined => {
   if (runs.length === 0) return "false"
   if (runs.length > 4) return undefined
-  return runs.map(([a, b]) => a === b ? `${v}===${a}` : `(${v}>=${a}&&${v}<=${b})`).join("||")
+  return runs.map(([a, b]) => (a === b ? `${v}===${a}` : `(${v}>=${a}&&${v}<=${b})`)).join("||")
 }
 
 /** The inclusive ranges of `[0, size)` where `table[c] === value`. */
@@ -174,13 +174,24 @@ const tableTest = (table: Uint8Array, v: string, size: number): string | undefin
   const acceptCost = cost(accept)
   const rejectCost = cost(reject)
   if (Math.min(acceptCost, rejectCost) > 6) return undefined
-  const terms = acceptCost <= rejectCost
-    ? accept.map(([a, b]) =>
-      a === b ? `${v}===${a}` : a === 0 ? `${v}<=${b}` : b === size - 1 ? `${v}>=${a}` : `(${v}>=${a}&&${v}<=${b})`
-    ).join("||")
-    : reject.map(([a, b]) =>
-      a === b ? `${v}!==${a}` : a === 0 ? `${v}>${b}` : b === size - 1 ? `${v}<${a}` : `(${v}<${a}||${v}>${b})`
-    ).join("&&")
+  const terms =
+    acceptCost <= rejectCost
+      ? accept
+          .map(([a, b]) =>
+            a === b
+              ? `${v}===${a}`
+              : a === 0
+                ? `${v}<=${b}`
+                : b === size - 1
+                  ? `${v}>=${a}`
+                  : `(${v}>=${a}&&${v}<=${b})`
+          )
+          .join("||")
+      : reject
+          .map(([a, b]) =>
+            a === b ? `${v}!==${a}` : a === 0 ? `${v}>${b}` : b === size - 1 ? `${v}<${a}` : `(${v}<${a}||${v}>${b})`
+          )
+          .join("&&")
   return `(${terms})`
 }
 
@@ -204,7 +215,11 @@ class Emitter {
   private readonly closure: ClosureCompiler
   private next = 0
 
-  constructor(readonly root: ParserLike, readonly kind: 0 | 1 | 2, readonly resumable = false) {
+  constructor(
+    readonly root: ParserLike,
+    readonly kind: 0 | 1 | 2,
+    readonly resumable = false
+  ) {
     this.closure = createClosureCompiler(kind, resumable)
     this.countRefs(root)
   }
@@ -341,9 +356,11 @@ class Emitter {
     const ok = this.v(fn)
     const t = this.v(fn)
     const leaf = this.label()
-    return `${st}=p;${ok}=false;${leaf}:{${bad}:{${code}${ok}=true;}` +
+    return (
+      `${st}=p;${ok}=false;${leaf}:{${bad}:{${code}${ok}=true;}` +
       `if(!$S.partial||p+${ahead}<=E){if(${ok})break ${leaf};${fail}}` +
       `p=${st};$S.pos=p;${t}=${this.const(p.step)}($S);if(${t}===F){${fail}}p=$S.pos;${out === null ? "" : `${out}=${t};`}}`
+    )
   }
 
   call(name: string, out: string | null, fail: string): string {
@@ -364,7 +381,7 @@ class Emitter {
 
   inline(p: ParserLike, used: boolean, out: string | null, fail: string, fn: Fn, depth: number): string {
     const node = nodeOf(p)
-    const set = (value: string) => out === null ? "" : `${out}=${value};`
+    const set = (value: string) => (out === null ? "" : `${out}=${value};`)
     const d = depth + 1
     switch (node._tag) {
       case "Succeed":
@@ -374,8 +391,11 @@ class Emitter {
       case "Fail":
         return `$S.mode=${JSON.stringify(node.mode)};${fail}`
       case "Eof":
-        return `if(p<E){${BT}${fail}}` + (this.resumable ? `if($S.partial){$S.mode="Incomplete";${fail}}` : "") +
+        return (
+          `if(p<E){${BT}${fail}}` +
+          (this.resumable ? `if($S.partial){$S.mode="Incomplete";${fail}}` : "") +
           set("void 0")
+        )
       case "Location":
         return set("p")
       case "RestLen":
@@ -422,8 +442,10 @@ class Emitter {
         const t = this.v(fn)
         const r = this.v(fn)
         const [tag, field] = node._tag === "TryMap" ? ["Success", "success"] : ["Some", "value"]
-        return this.gen(node.self, true, t, fail, fn, d) +
+        return (
+          this.gen(node.self, true, t, fail, fn, d) +
           `${r}=${this.const(node.f)}(${t});if(${r}._tag!=="${tag}"){${BT}${fail}}${set(`${r}.${field}`)}`
+        )
       }
       case "Filter": {
         const t = out ?? this.v(fn)
@@ -433,8 +455,10 @@ class Emitter {
         const t = this.v(fn)
         const r = out ?? this.v(fn)
         this.closure.note(p, node, "the parser returned by the function runs interpreted")
-        return this.gen(node.self, true, t, fail, fn, d) +
+        return (
+          this.gen(node.self, true, t, fail, fn, d) +
           `$S.pos=p;${r}=${this.const(node.f)}(${t}).step($S);if(${r}===F){${fail}}p=$S.pos;`
+        )
       }
       case "Taken": {
         if (node.encoding !== undefined && !this.native(node.encoding)) return this.delegate(p, used, out, fail, fn)
@@ -442,7 +466,10 @@ class Emitter {
         const body = `${st}=p;` + this.gen(node.self, false, null, fail, fn, d)
         if (out === null && node.encoding === undefined) return body
         if (node.encoding === undefined) {
-          return body + set(this.kind === 0 ? `I.slice(${st},p)` : this.kind === 1 ? `I.subarray(${st},p)` : `$S.slice(${st},p)`)
+          return (
+            body +
+            set(this.kind === 0 ? `I.slice(${st},p)` : this.kind === 1 ? `I.subarray(${st},p)` : `$S.slice(${st},p)`)
+          )
         }
         const t = out ?? this.v(fn)
         const enc = this.const(node.encoding)
@@ -462,8 +489,10 @@ class Emitter {
       case "Mode": {
         const ok = this.label()
         const bad = this.label()
-        return `${ok}:{${bad}:{${this.gen(node.self, used, out, `break ${bad};`, fn, d)}break ${ok};}` +
+        return (
+          `${ok}:{${bad}:{${this.gen(node.self, used, out, `break ${bad};`, fn, d)}break ${ok};}` +
           `if($S.mode===${JSON.stringify(node.from)})$S.mode=${JSON.stringify(node.to)};${fail}}`
+        )
       }
       case "Context":
       case "Expected":
@@ -486,8 +515,10 @@ class Emitter {
         const t = out === null ? null : this.v(fn)
         const some = node._tag === "Opt" ? `R.some(${t})` : t!
         const orElse = node._tag === "Opt" ? "R.none()" : `${this.const(node.value)}()`
-        return `${st}=p;${ok}:{${bad}:{${this.gen(node.self, used, t, `break ${bad};`, fn, d)}${set(some)}break ${ok};}` +
+        return (
+          `${st}=p;${ok}:{${bad}:{${this.gen(node.self, used, t, `break ${bad};`, fn, d)}${set(some)}break ${ok};}` +
           `if($S.mode!=="Backtrack"){${fail}}p=${st};${set(orElse)}}`
+        )
       }
       case "Peek": {
         const st = this.v(fn)
@@ -497,8 +528,10 @@ class Emitter {
         const st = this.v(fn)
         const ok = this.label()
         const bad = this.label()
-        return `${st}=p;${ok}:{${bad}:{${this.gen(node.self, false, null, `break ${bad};`, fn, d)}p=${st};${BT}${fail}}` +
+        return (
+          `${st}=p;${ok}:{${bad}:{${this.gen(node.self, false, null, `break ${bad};`, fn, d)}p=${st};${BT}${fail}}` +
           `if($S.mode!=="Backtrack"){${fail}}p=${st};}${set("void 0")}`
+        )
       }
       case "Seq":
         return this.seq(node, used, out, fail, fn, d)
@@ -512,11 +545,15 @@ class Emitter {
         return code + `${out}={${node.keys.map((k, i) => `${JSON.stringify(k)}:${vars[i]}`).join(",")}};`
       }
       case "ZipWith": {
-        if (out === null) return this.gen(node.self, false, null, fail, fn, d) + this.gen(node.that, false, null, fail, fn, d)
+        if (out === null)
+          return this.gen(node.self, false, null, fail, fn, d) + this.gen(node.that, false, null, fail, fn, d)
         const x = this.v(fn)
         const y = this.v(fn)
-        return this.gen(node.self, true, x, fail, fn, d) + this.gen(node.that, true, y, fail, fn, d) +
+        return (
+          this.gen(node.self, true, x, fail, fn, d) +
+          this.gen(node.that, true, y, fail, fn, d) +
           `${out}=${this.const(node.f)}(${x},${y});`
+        )
       }
       case "Alt":
         return this.alt(node, used, out, fail, fn, d)
@@ -551,9 +588,11 @@ class Emitter {
     const scan = this.const(floatScan)
     // Near the end of a partial input, the parser may have to report `Incomplete`
     const near = this.resumable ? `||$S.partial&&${scan}.read+${Margin}>E` : ""
-    return `${out}=${this.kind === 0 ? "R.scanFloatString" : "R.scanFloatBytes"}(I,p,E);` +
+    return (
+      `${out}=${this.kind === 0 ? "R.scanFloatString" : "R.scanFloatBytes"}(I,p,E);` +
       `if(${out}===void 0${near}){${this.gen(node.self, true, t, fail, fn, d)}${out}=${this.const(toFloat)}(${t})}` +
       `else if(${out}===F){${BT}${fail}}else p=${scan}.end;`
+    )
   }
 
   seq(node: NodeOf<"Seq">, used: boolean, out: string | null, fail: string, fn: Fn, d: number): string {
@@ -563,7 +602,7 @@ class Emitter {
       return node.parsers.map((q, i) => this.gen(q, i === output, i === output ? out : null, fail, fn, d)).join("")
     }
     const keep = (i: number) => output === "tuple" || output.includes(i)
-    const vars = node.parsers.map((_, i) => keep(i) ? this.v(fn) : null)
+    const vars = node.parsers.map((_, i) => (keep(i) ? this.v(fn) : null))
     const code = node.parsers.map((q, i) => this.gen(q, keep(i), vars[i]!, fail, fn, d)).join("")
     return code + `${out}=[${vars.filter((v) => v !== null).join(",")}];`
   }
@@ -591,23 +630,33 @@ class Emitter {
     let code = `${st}=p;${prune ? `${u}=${read};` : ""}${done}:{`
     parsers.forEach((q, i) => {
       const bad = this.label()
-      const branch = `${bad}:{${this.gen(q, used, out, `break ${bad};`, fn, d)}break ${done};}` +
+      const branch =
+        `${bad}:{${this.gen(q, used, out, `break ${bad};`, fn, d)}break ${done};}` +
         `if($S.mode!=="Backtrack"){${fail}}p=${st};`
       const f = firsts?.[i]
-      code += prune && f!.mode === Strict
-        ? `if(${this.resumable ? `${u}===-2||` : ""}${this.startTest(f!, u)}){${branch}}`
-        : branch
+      code +=
+        prune && f!.mode === Strict
+          ? `if(${this.resumable ? `${u}===-2||` : ""}${this.startTest(f!, u)}){${branch}}`
+          : branch
     })
     return code + `${BT}${fail}}`
   }
 
-  dispatch(p: ParserLike, node: NodeOf<"Dispatch">, used: boolean, out: string | null, fail: string, fn: Fn, d: number): string {
+  dispatch(
+    p: ParserLike,
+    node: NodeOf<"Dispatch">,
+    used: boolean,
+    out: string | null,
+    fail: string,
+    fn: Fn,
+    d: number
+  ): string {
     const choose = this.const(node.choose)
     // The general path: run the selector, choose, then run the case's compiled step
     const cases = new Map<ParserLike, Step>()
     const caseStep = (q: ParserLike) => {
       let s = cases.get(q)
-      if (s === undefined) cases.set(q, s = this.closure.compile(q, used))
+      if (s === undefined) cases.set(q, (s = this.closure.compile(q, used)))
       return s
     }
     if (node.cases !== undefined) {
@@ -620,9 +669,11 @@ class Emitter {
       const k = this.v(fn)
       const q = this.v(fn)
       const r = out ?? this.v(fn)
-      return `${st}=p;${this.gen(node.selector, true, k, fail, fn, d)}${q}=${choose}(${k});` +
+      return (
+        `${st}=p;${this.gen(node.selector, true, k, fail, fn, d)}${q}=${choose}(${k});` +
         `if(${q}===void 0){p=${st};${BT}${fail}}$S.pos=p;${r}=(${table}.get(${q})??${q}.step)($S);` +
         `if(${r}===F){${fail}}p=$S.pos;`
+      )
     }
     if (node.cases === undefined) {
       this.closure.note(p, node, "the parser returned by the function of cases runs interpreted")
@@ -640,23 +691,22 @@ class Emitter {
     // Group the units by the case they select
     const groups = new Map<ParserLike, Array<number>>()
     for (let unit = 0; unit < size; unit++) {
-      const q = (node.choose)(enc === undefined && this.kind === 1 ? unit : charOf(unit))
+      const q = node.choose(enc === undefined && this.kind === 1 ? unit : charOf(unit))
       if (q === undefined) continue
       let g = groups.get(q)
-      if (g === undefined) groups.set(q, g = [])
+      if (g === undefined) groups.set(q, (g = []))
       g.push(unit)
     }
     const u = this.v(fn)
     const sw = this.label()
     // A unit cut short by the end of the input takes the general path
-    const read = r === undefined
-      ? `p<E?${this.unit("p")}:-1`
-      : `${r.guard("p")}?${r.unit("p")}:p<E?${size}:-1`
+    const read = r === undefined ? `p<E?${this.unit("p")}:-1` : `${r.guard("p")}?${r.unit("p")}:p<E?${size}:-1`
     // Near the end of a partial input, the general path handles incomplete units
     const near = this.resumable ? `$S.partial&&p+${Margin}>E?${size}:` : ""
     let code = `${u}=${near}${read};${sw}:switch(${u}){`
     for (const [q, units] of groups) {
-      code += units.map((x) => `case ${x}:`).join("") +
+      code +=
+        units.map((x) => `case ${x}:`).join("") +
         `{${peek ? "" : `p+=${r?.width ?? 1};`}${this.gen(q, used, out, fail, fn, d)}break ${sw};}`
     }
     code += `case -1:{${BT}${fail}}default:{if(${u}<${size}){${BT}${fail}}${general()}}}`
@@ -698,15 +748,19 @@ class Emitter {
     const check = max === Infinity ? `if(p===${st}){$S.mode="Cut";${fail}}` : ""
     const bound = max === Infinity ? "" : `${n}<${max}`
     const r = this.resumable ? this.resumePoint(fn) : undefined
-    const save = r === undefined
-      ? ""
-      : `if($S.mode==="Incomplete"&&$S.resume!==void 0)R.save($S,${r.key},${r.entry},{acc:${acc},count:${n},pos:${st}});`
+    const save =
+      r === undefined
+        ? ""
+        : `if($S.mode==="Incomplete"&&$S.resume!==void 0)R.save($S,${r.key},${r.entry},{acc:${acc},count:${n},pos:${st}});`
     // With `collect` (never in resumable builds), the element adds itself once the loop check passed
-    const element = collect === undefined
-      ? `${this.gen(node.self, tracked, x, `break ${bad};`, fn, d)}${check}${add}`
-      : collect.element(`break ${bad};`, check)
-    const stop = cond === undefined ? "" : `if(${min > 0 ? `${n}>=${min}&&` : ""}!${this.const(cond)}(${acc}))break ${loop};`
-    const body = `${loop}:for(;${bound};${n}++){${stop}${st}=p;` +
+    const element =
+      collect === undefined
+        ? `${this.gen(node.self, tracked, x, `break ${bad};`, fn, d)}${check}${add}`
+        : collect.element(`break ${bad};`, check)
+    const stop =
+      cond === undefined ? "" : `if(${min > 0 ? `${n}>=${min}&&` : ""}!${this.const(cond)}(${acc}))break ${loop};`
+    const body =
+      `${loop}:for(;${bound};${n}++){${stop}${st}=p;` +
       `${bad}:{${element}continue ${loop};}` +
       `${save}if($S.mode!=="Backtrack"${min > 0 ? `||${n}<${min}` : ""}){${fail}}p=${st};break ${loop};}`
     if (r === undefined) return `${init}${n}=0;${body}${collect?.finish ?? ""}`
@@ -755,22 +809,30 @@ class Emitter {
     const loop = this.label()
     const push = keep ? `${acc}.push(${x});` : ""
     const r = this.resumable ? this.resumePoint(fn) : undefined
-    const save = r === undefined
-      ? ""
-      : `if($S.mode==="Incomplete"&&$S.resume!==void 0)R.save($S,${r.key},${r.entry},{acc:${acc},count:${n},pos:${st}});`
+    const save =
+      r === undefined
+        ? ""
+        : `if($S.mode==="Incomplete"&&$S.resume!==void 0)R.save($S,${r.key},${r.entry},{acc:${acc},count:${n},pos:${st}});`
     // Runs `body`; on its failure, stops the repetition (or fails if `fatal`)
     const attempt = (body: (fail: string) => string, success: string, fatal: string, checkpoint: string) => {
       const ok = this.label()
       const bad = this.label()
-      return `${ok}:{${bad}:{${body(`break ${bad};`)}${success}break ${ok};}` +
+      return (
+        `${ok}:{${bad}:{${body(`break ${bad};`)}${success}break ${ok};}` +
         `${checkpoint}if($S.mode!=="Backtrack"${fatal}){${fail}}p=${st};break ${done};}`
+      )
     }
-    const self = (f: string) => collect === undefined ? this.gen(node.self, keep, x, f, fn, d) : collect.element(f, "")
+    const self = (f: string) =>
+      collect === undefined ? this.gen(node.self, keep, x, f, fn, d) : collect.element(f, "")
     const sep = (f: string) => this.gen(node.separator, false, null, f, fn, d)
     const check = max === Infinity ? `if(p===${st}){$S.mode="Cut";${fail}}` : ""
-    const first = `${collect?.init ?? (keep ? `${acc}=[];` : "")}${n}=0;${st}=p;` + attempt(self, `${push}${n}++;`, min > 0 ? "||true" : "", "")
-    const rest = `${loop}:while(${max === Infinity ? "true" : `${n}<${max}`}){${st}=p;` +
-      attempt(sep, "", `||${n}<${min}`, save) + check +
+    const first =
+      `${collect?.init ?? (keep ? `${acc}=[];` : "")}${n}=0;${st}=p;` +
+      attempt(self, `${push}${n}++;`, min > 0 ? "||true" : "", "")
+    const rest =
+      `${loop}:while(${max === Infinity ? "true" : `${n}<${max}`}){${st}=p;` +
+      attempt(sep, "", `||${n}<${min}`, save) +
+      check +
       attempt(self, `${push}${n}++;continue ${loop};`, `||${n}<${min}`, save) +
       `}`
     if (r === undefined) return `${done}:{${first}${rest}}${collect?.finish ?? ""}`
@@ -791,14 +853,16 @@ class Emitter {
       case "Mode": {
         const ok = this.label()
         const bad = this.label()
-        return `${ok}:{${bad}:{${this.entries(node.self, out, `break ${bad};`, fn, d)}break ${ok};}` +
+        return (
+          `${ok}:{${bad}:{${this.entries(node.self, out, `break ${bad};`, fn, d)}break ${ok};}` +
           `if($S.mode===${JSON.stringify(node.from)})$S.mode=${JSON.stringify(node.to)};${fail}}`
+        )
       }
       case "Seq": {
         const i = node.output as number
-        return node.parsers.map((q, j) =>
-          j === i ? this.entries(q, out, fail, fn, d) : this.gen(q, false, null, fail, fn, d)
-        ).join("")
+        return node.parsers
+          .map((q, j) => (j === i ? this.entries(q, out, fail, fn, d) : this.gen(q, false, null, fail, fn, d)))
+          .join("")
       }
       case "Repeat":
       case "Separated": {
@@ -809,9 +873,19 @@ class Emitter {
         const collect: Collect = {
           init: `${out}={};${deferred}=void 0;`,
           element: (f, check) =>
-            pair.parsers.map((q, j) =>
-              this.gen(q, j === pair.key || j === pair.value, j === pair.key ? key : j === pair.value ? value : null, f, fn, d)
-            ).join("") + check +
+            pair.parsers
+              .map((q, j) =>
+                this.gen(
+                  q,
+                  j === pair.key || j === pair.value,
+                  j === pair.key ? key : j === pair.value ? value : null,
+                  f,
+                  fn,
+                  d
+                )
+              )
+              .join("") +
+            check +
             `if(${deferred}===void 0&&R.isPlainKey(${key}))${out}[${key}]=${value};` +
             `else ${deferred}=R.addEntry(${out},${deferred},${key},${value});`,
           finish: `if(${deferred}!==void 0)R.flushEntries(${out},${deferred});`
@@ -868,7 +942,7 @@ class Emitter {
     fail: string,
     fn: Fn
   ): string | undefined {
-    const set = (value: string) => out === null ? "" : `${out}=${value};`
+    const set = (value: string) => (out === null ? "" : `${out}=${value};`)
     const enc = node.encoding
     const kind = this.kind as 0 | 1
     const failBT = `{${BT}${fail}}`
@@ -877,40 +951,47 @@ class Emitter {
         if (enc === undefined) {
           if (kind === 1) return `if(p>=E)${failBT}${set("I[p]")}p++;`
           const c = this.v(fn)
-          return `if(p>=E)${failBT}${c}=I.charCodeAt(p);` +
+          return (
+            `if(p>=E)${failBT}${c}=I.charCodeAt(p);` +
             `if(${c}>=55296&&${c}<=56319&&p+1<I.length&&(I.charCodeAt(p+1)&64512)===56320){${set("I.slice(p,p+2)")}p+=2}` +
             `else{${set("I[p]")}p++}`
+          )
         }
         const r = this.reader(enc)
         const c = this.v(fn)
         const dec = `${this.const(enc.decode)}(I,p,E)`
-        return `if(p>=E)${failBT}` +
-          (r.fast > 0 ? `if(${r.guard("p")}&&(${c}=${r.unit("p")})<${r.fast}){${set(`R.charOf(${c})`)}p+=${r.width}}else` : "") +
+        return (
+          `if(p>=E)${failBT}` +
+          (r.fast > 0
+            ? `if(${r.guard("p")}&&(${c}=${r.unit("p")})<${r.fast}){${set(`R.charOf(${c})`)}p+=${r.width}}else`
+            : "") +
           `{${c}=${dec};if(${c}<0)${failBT}${set(`R.charOf(${c})`)}p+=${this.const(enc.width)}(${c})}`
+        )
       }
       case "Literal": {
         const lit = node.literal
         if (enc !== undefined) {
           if (node.caseless) return undefined
           const encoded = enc.encode(lit as string)
-          return this.literalUnits(
-            typeof encoded === "string" ? unitsOf(encoded) : Array.from(encoded),
-            false,
-            fail
-          ) + set(this.lit(lit))
+          return (
+            this.literalUnits(typeof encoded === "string" ? unitsOf(encoded) : Array.from(encoded), false, fail) +
+            set(this.lit(lit))
+          )
         }
         const literalKind = typeof lit === "string" ? 0 : lit instanceof Uint8Array ? 1 : 2
         if (kind === 0 && literalKind !== 0) return undefined
         if (literalKind === 2) return undefined
-        const codes = kind === 0
-          ? unitsOf(lit as string)
-          : Array.from(literalKind === 0 ? new TextEncoder().encode(lit as string) : lit as Uint8Array)
+        const codes =
+          kind === 0
+            ? unitsOf(lit as string)
+            : Array.from(literalKind === 0 ? new TextEncoder().encode(lit as string) : (lit as Uint8Array))
         const len = codes.length
-        const value = !node.caseless && literalKind === kind
-          ? this.lit(lit)
-          : kind === 0
-          ? `I.slice(p-${len},p)`
-          : `I.subarray(p-${len},p)`
+        const value =
+          !node.caseless && literalKind === kind
+            ? this.lit(lit)
+            : kind === 0
+              ? `I.slice(p-${len},p)`
+              : `I.subarray(p-${len},p)`
         return this.literalUnits(codes, node.caseless, fail) + set(value)
       }
       case "OneOf": {
@@ -918,27 +999,32 @@ class Emitter {
         const cs = enc === undefined ? tokenSet(node.set, kind) : textSet(node.set)
         const accept = acceptTable(cs, negate)
         const c = this.v(fn)
-        const value = (len: string) => this.kind === 0 ? `I.slice(p,p+${len})` : `I[p]`
+        const value = (len: string) => (this.kind === 0 ? `I.slice(p,p+${len})` : `I[p]`)
         if (enc === undefined) {
-          if (kind === 1) return `if(p>=E)${failBT}${c}=I[p];if(!(${this.member(accept, c)}))${failBT}${set("I[p]")}p++;`
+          if (kind === 1)
+            return `if(p>=E)${failBT}${c}=I[p];if(!(${this.member(accept, c)}))${failBT}${set("I[p]")}p++;`
           const cp = this.v(fn)
           if (!negate && this.memberHigh(cs, negate, cp) === "false") {
             return `if(p>=E)${failBT}${c}=I.charCodeAt(p);if(${c}>=${TableSize}||!(${this.member(accept, c)}))${failBT}${set("I[p]")}p++;`
           }
-          return `if(p>=E)${failBT}${c}=I.charCodeAt(p);` +
+          return (
+            `if(p>=E)${failBT}${c}=I.charCodeAt(p);` +
             `if(${c}<${TableSize}){if(!(${this.member(accept, c)}))${failBT}${set("I[p]")}p++}` +
             `else{${cp}=${c};if(${c}>=55296&&${c}<=56319&&p+1<I.length){const d=I.charCodeAt(p+1);` +
             `if((d&64512)===56320)${cp}=((${c}-55296)<<10)+(d-56320)+65536}` +
             `if(!(${this.memberHigh(cs, negate, cp)}))${failBT}` +
             `if(${cp}>65535){${set(value("2"))}p+=2}else{${set("I[p]")}p++}}`
+          )
         }
         const r = this.reader(enc)
-        return `if(p>=E)${failBT}` +
+        return (
+          `if(p>=E)${failBT}` +
           (r.fast > 0
             ? `if(${r.guard("p")}&&(${c}=${r.unit("p")})<${r.fast}){if(!${this.textAccepts(r, cs, accept, negate, c)})${failBT}${set(`R.charOf(${c})`)}p+=${r.width}}else`
             : "") +
           `{${c}=${this.const(enc.decode)}(I,p,E);if(${c}<0||${this.textRejectsDecoded(enc, r, cs, negate, c)})${failBT}` +
           `${set(`R.charOf(${c})`)}p+=${this.const(enc.width)}(${c})}`
+        )
       }
       case "TakeWhile":
         return this.takeWhile(node, out, fail, fn)
@@ -980,13 +1066,10 @@ class Emitter {
     const counted = max !== Infinity || min > 1
     const count = counted ? `${n}++;` : ""
     const bound = max !== Infinity ? `&&${n}<${max}` : ""
-    const slice = enc !== undefined
-      ? `${this.const(enc.text)}(I,${st},p)`
-      : kind === 0
-      ? `I.slice(${st},p)`
-      : `I.subarray(${st},p)`
-    const finish = (min > 0 ? `if(${counted ? n : `p-${st}`}<${min}){${BT}${fail}}` : "") +
-      (out === null ? "" : `${out}=${slice};`)
+    const slice =
+      enc !== undefined ? `${this.const(enc.text)}(I,${st},p)` : kind === 0 ? `I.slice(${st},p)` : `I.subarray(${st},p)`
+    const finish =
+      (min > 0 ? `if(${counted ? n : `p-${st}`}<${min}){${BT}${fail}}` : "") + (out === null ? "" : `${out}=${slice};`)
     const head = `${st}=p;${counted ? `${n}=0;` : ""}${loop}:while(p<E${bound}){${c}=${this.unit("p")};`
     const member = this.member(accept, c)
     if (kind === 1 && (enc === undefined || fastLimit(enc) >= TableSize)) {
@@ -998,12 +1081,14 @@ class Emitter {
       const r = this.reader(enc)
       // The loop condition already checks a unit of width 1
       const guard = r.width === 1 ? "" : `${r.guard("p")}&&`
-      return `${st}=p;${counted ? `${n}=0;` : ""}${loop}:while(p<E${bound}){` +
+      return (
+        `${st}=p;${counted ? `${n}=0;` : ""}${loop}:while(p<E${bound}){` +
         (r.fast > 0
           ? `if(${guard}(${c}=${r.unit("p")})<${r.fast}){if(!${this.textAccepts(r, cs, accept, negate, c)})break ${loop};p+=${r.width}}else`
           : "") +
         `{${c}=${this.const(enc.decode)}(I,p,E);if(${c}<0||${this.textRejectsDecoded(enc, r, cs, negate, c)})break ${loop};` +
         `p+=${this.const(enc.width)}(${c})}${count}}${finish}`
+      )
     }
     const fast = 0xd800
     const small = TableSize
@@ -1014,13 +1099,14 @@ class Emitter {
     // Every code point from `TableSize` up is accepted: without a count,
     // surrogate pairs can be skipped a unit at a time
     const always = highTest(c) === "true"
-    const rest = never && !negate
-      ? `break;`
-      : always && !counted
-      ? `p++;`
-      : `if(${c}<${fast}||${c}>56319){if(!(${highTest(c)}))break ${loop};p++}` +
-        `else{${cp}=${c};if(p+1<I.length){const d=I.charCodeAt(p+1);if((d&64512)===56320)${cp}=((${c}-55296)<<10)+(d-56320)+65536}` +
-        `if(!(${highTest(cp)}))break ${loop};p+=${cp}>65535?2:1}`
+    const rest =
+      never && !negate
+        ? `break;`
+        : always && !counted
+          ? `p++;`
+          : `if(${c}<${fast}||${c}>56319){if(!(${highTest(c)}))break ${loop};p++}` +
+            `else{${cp}=${c};if(p+1<I.length){const d=I.charCodeAt(p+1);if((d&64512)===56320)${cp}=((${c}-55296)<<10)+(d-56320)+65536}` +
+            `if(!(${highTest(cp)}))break ${loop};p+=${cp}>65535?2:1}`
     return `${head}if(${c}<${small}){if(!(${member}))break;p++}else ${rest}${count}}${finish}`
   }
 
@@ -1030,7 +1116,7 @@ class Emitter {
     const r = enc === undefined ? undefined : this.reader(enc)
     if (r !== undefined && !(ctrl < r.fast)) return this.delegate(p, !node.raw, out, fail, fn)
     const raw = node.raw
-    const acc = raw ? null : out ?? this.v(fn)
+    const acc = raw ? null : (out ?? this.v(fn))
     const x = raw ? null : this.v(fn)
     const b = this.v(fn)
     const st = this.v(fn)
@@ -1042,17 +1128,20 @@ class Emitter {
     const onNormal = raw
       ? `if(p===${b}){$S.mode="Cut";${fail}}continue ${loop};`
       : `if(p!==${b}){${acc}+=${x};continue ${loop}}`
-    const slice = enc !== undefined
-      ? `${this.const(enc.text)}(I,${st},p)`
-      : this.kind === 0
-      ? `I.slice(${st},p)`
-      : `I.subarray(${st},p)`
+    const slice =
+      enc !== undefined
+        ? `${this.const(enc.text)}(I,${st},p)`
+        : this.kind === 0
+          ? `I.slice(${st},p)`
+          : `I.subarray(${st},p)`
     const ctrlTest = r === undefined ? `p<E&&${this.unit("p")}===${ctrl}` : `${r.guard("p")}&&${r.unit("p")}===${ctrl}`
-    return `${raw ? `${st}=p;` : `${acc}="";`}${loop}:while(p<E){${b}=p;${okv}=false;` +
+    return (
+      `${raw ? `${st}=p;` : `${acc}="";`}${loop}:while(p<E){${b}=p;${okv}=false;` +
       `${bad}:{${normal}${okv}=true;}` +
       `if(${okv}){${onNormal}}else{if($S.mode!=="Backtrack"){${fail}}p=${b}}` +
       `if(${ctrlTest}){p+=${r?.width ?? 1};${escape}${raw ? "" : `${acc}+=${x};`}}else break ${loop};}` +
       (raw && out !== null ? `${out}=${slice};` : "")
+    )
   }
 }
 
@@ -1067,21 +1156,30 @@ const acceptTable = (set: CharSet, negate: boolean): Uint8Array => {
 }
 
 /** Generates the source of a compiled parser, without building it. */
-export const generate = (root: ParserLike, kind: 0 | 1 | 2, resumable = false): {
+export const generate = (
+  root: ParserLike,
+  kind: 0 | 1 | 2,
+  resumable = false
+): {
   readonly source: string
   readonly constants: ReadonlyArray<unknown>
   readonly fallbacks: ReadonlyArray<Fallback>
 } => {
   const e = new Emitter(root, kind, resumable)
   const main = e.rule(root, true)
-  const source = `"use strict";let $I,$E,$S,P;${e.functions.join("\n")}\n` +
+  const source =
+    `"use strict";let $I,$E,$S,P;${e.functions.join("\n")}\n` +
     `return function run(state){const sI=$I,sE=$E,sS=$S,sP=P;$I=state.input;$E=state.end;$S=state;` +
     `try{const v=${main}(state.pos);if(v!==F)state.pos=P;return v}finally{$I=sI;$E=sE;$S=sS;P=sP}}`
   return { source, constants: e.constants, fallbacks: e.fallbacks }
 }
 
 /** Compiles a root parser for one input kind with `new Function`. */
-export const compileJit = (root: ParserLike, kind: 0 | 1 | 2, resumable = false): {
+export const compileJit = (
+  root: ParserLike,
+  kind: 0 | 1 | 2,
+  resumable = false
+): {
   readonly step: Step
   readonly fallbacks: ReadonlyArray<Fallback>
   readonly source: string
@@ -1092,7 +1190,9 @@ export const compileJit = (root: ParserLike, kind: 0 | 1 | 2, resumable = false)
   // holds when `end` is the input's length, as it is in the runners.
   let closure: Step | undefined
   const step: Step = (state) =>
-    state.end === state.input.length ? run(state) : (closure ??= createClosureCompiler(kind, resumable).compile(root, true))(state)
+    state.end === state.input.length
+      ? run(state)
+      : (closure ??= createClosureCompiler(kind, resumable).compile(root, true))(state)
   return { step, fallbacks, source }
 }
 

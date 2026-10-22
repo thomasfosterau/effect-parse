@@ -35,9 +35,13 @@ describe("parser descriptions", () => {
 
   it("marks undescribable parsers as opaque", () => {
     expect(tagOf(Parser.make(() => 1))).toBe("Opaque")
-    expect(tagOf(Parser.gen(function*() {
-      return yield* Token.any
-    }))).toBe("Opaque")
+    expect(
+      tagOf(
+        Parser.gen(function* () {
+          return yield* Token.any
+        })
+      )
+    ).toBe("Opaque")
     expect(tags(Arithmetic.ast).Opaque).toBe(1)
   })
 

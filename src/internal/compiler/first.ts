@@ -46,10 +46,10 @@ const union = (a: First, b: First, mode: 0 | 1 | 2): First => {
   return { mode, units, high: a.high || b.high }
 }
 
-const withMode = (f: First, mode: 0 | 1 | 2): First => f.mode === mode ? f : { ...f, mode }
+const withMode = (f: First, mode: 0 | 1 | 2): First => (f.mode === mode ? f : { ...f, mode })
 
-const lowerAscii = (c: number): number => c >= 65 && c <= 90 ? c + 32 : c
-const upperAscii = (c: number): number => c >= 97 && c <= 122 ? c - 32 : c
+const lowerAscii = (c: number): number => (c >= 65 && c <= 90 ? c + 32 : c)
+const upperAscii = (c: number): number => (c >= 97 && c <= 122 ? c - 32 : c)
 
 const ofUnits = (codes: ReadonlyArray<number>, mode: 0 | 1 | 2 = Strict): First => {
   const units = new Uint8Array(TableSize)

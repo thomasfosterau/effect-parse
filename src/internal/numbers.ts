@@ -63,7 +63,7 @@ const twoProduct = (a: number, b: number): void => {
   const bh = t - (t - b)
   const bl = b - bh
   productHi = p
-  productLo = ((ah * bh - p) + ah * bl + al * bh) + al * bl
+  productLo = ah * bh - p + ah * bl + al * bh + al * bl
 }
 
 /** 2^-96: a bound on the relative error of {@link decimal}'s 19-digit path. */
@@ -105,7 +105,7 @@ const decimal = (negative: boolean, high: number, low: number, lowDigits: number
       const p = exact[-e10]!
       xh = wh / p
       twoProduct(xh, p)
-      xl = ((wh - productHi) - productLo + wl) / p
+      xl = (wh - productHi - productLo + wl) / p
     }
     v = xh + xl
     const error = (xh < 0 ? -xh : xh) * Error19

@@ -82,29 +82,31 @@ export const TypeId: "~effect-parse/ParseError" = "~effect-parse/ParseError"
  * @since 0.1.0
  * @category models
  */
-export class ParseError<out E = never> extends /*#__PURE__*/ Data.TaggedError("ParseError")<{
-  /** The input that was being parsed. */
-  readonly input: Input
-  /** The offset of the failure in the input. */
-  readonly offset: number
-  /** The kind of parser that failed. */
-  readonly kind: ErrorKind
-  /** How the error propagated before parsing stopped. */
-  readonly mode: ErrMode
-  /** Descriptions of what was expected at `offset`. */
-  readonly expected: ReadonlyArray<string>
-  /** Context labels (`Parser.context`), innermost first. */
-  readonly context: ReadonlyArray<string>
-  /** The user supplied cause, if any. */
-  readonly cause: E | undefined
-  /** An optional free-form description. */
-  readonly description: string | undefined
-  /**
-   * For byte inputs parsed by `Text` parsers, the text encoding. Errors
-   * then show the input as text, with line and column numbers.
-   */
-  readonly encoding?: Encoding<Uint8Array> | undefined
-}> {
+export class ParseError<out E = never>
+  extends /*#__PURE__*/ Data.TaggedError("ParseError")<{
+    /** The input that was being parsed. */
+    readonly input: Input
+    /** The offset of the failure in the input. */
+    readonly offset: number
+    /** The kind of parser that failed. */
+    readonly kind: ErrorKind
+    /** How the error propagated before parsing stopped. */
+    readonly mode: ErrMode
+    /** Descriptions of what was expected at `offset`. */
+    readonly expected: ReadonlyArray<string>
+    /** Context labels (`Parser.context`), innermost first. */
+    readonly context: ReadonlyArray<string>
+    /** The user supplied cause, if any. */
+    readonly cause: E | undefined
+    /** An optional free-form description. */
+    readonly description: string | undefined
+    /**
+     * For byte inputs parsed by `Text` parsers, the text encoding. Errors
+     * then show the input as text, with line and column numbers.
+     */
+    readonly encoding?: Encoding<Uint8Array> | undefined
+  }>
+{
   /**
    * @since 0.1.0
    */
@@ -141,8 +143,7 @@ export class ParseError<out E = never> extends /*#__PURE__*/ Data.TaggedError("P
  * @since 0.1.0
  * @category guards
  */
-export const isParseError = (u: unknown): u is ParseError<unknown> =>
-  typeof u === "object" && u !== null && TypeId in u
+export const isParseError = (u: unknown): u is ParseError<unknown> => typeof u === "object" && u !== null && TypeId in u
 
 /**
  * Builds a `ParseError` from the failure details recorded while parsing.
@@ -163,7 +164,7 @@ export const fromFailure = <E = never>(
     mode,
     expected: failure.expected,
     context: failure.context,
-    cause: failure.hasCause ? failure.cause as E : undefined,
+    cause: failure.hasCause ? (failure.cause as E) : undefined,
     description: failure.message,
     encoding: input instanceof Uint8Array ? encoding : undefined
   })
@@ -318,10 +319,7 @@ const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | u
     if (line.endsWith("\r")) line = line.slice(0, -1)
     const gutter = String(lineColumn(input, offset, encoding).line)
     const pad = " ".repeat(gutter.length)
-    return [
-      `${gutter} | ${line}`,
-      `${pad} | ${" ".repeat(column - 1)}^`
-    ]
+    return [`${gutter} | ${line}`, `${pad} | ${" ".repeat(column - 1)}^`]
   }
   if (typeof input === "string") {
     const { column, line } = lineColumn(input, offset)
@@ -333,10 +331,7 @@ const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | u
     if (text.endsWith("\r")) text = text.slice(0, -1)
     const gutter = String(line)
     const pad = " ".repeat(gutter.length)
-    return [
-      `${gutter} | ${text}`,
-      `${pad} | ${" ".repeat(column - 1)}^`
-    ]
+    return [`${gutter} | ${text}`, `${pad} | ${" ".repeat(column - 1)}^`]
   }
   if (input instanceof Uint8Array) {
     const start = Math.max(0, offset - 8)
@@ -344,10 +339,7 @@ const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | u
     const bytes: Array<string> = []
     for (let i = start; i < end; i++) bytes.push(input[i]!.toString(16).padStart(2, "0"))
     const caret = (offset - start) * 3
-    return [
-      `${start.toString(16).padStart(8, "0")} | ${bytes.join(" ")}`,
-      `${" ".repeat(8)} | ${" ".repeat(caret)}^`
-    ]
+    return [`${start.toString(16).padStart(8, "0")} | ${bytes.join(" ")}`, `${" ".repeat(8)} | ${" ".repeat(caret)}^`]
   }
   return []
 }

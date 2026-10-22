@@ -33,8 +33,16 @@ describe("regressions", () => {
     expect(Parser.parsePartial(Token.any, "\uD83D")).toEqual(incomplete)
     expect(Parser.parsePartial(Token.take(1), "\uD83D")).toEqual(incomplete)
     expect(Parser.parsePartial(Token.oneOf("😀"), "\uD83D")).toEqual(incomplete)
-    expect(Parser.parsePartial(Token.takeWhile(() => true), "a\uD83D")).toEqual(incomplete)
-    const program = Stream.fromIterable(["a\uD83D", "\uDE00b"]).pipe(ParserStream.parseMany(Token.any), Stream.runCollect)
+    expect(
+      Parser.parsePartial(
+        Token.takeWhile(() => true),
+        "a\uD83D"
+      )
+    ).toEqual(incomplete)
+    const program = Stream.fromIterable(["a\uD83D", "\uDE00b"]).pipe(
+      ParserStream.parseMany(Token.any),
+      Stream.runCollect
+    )
     expect(Effect.runSync(program)).toEqual(["a", "😀", "b"])
   })
 
@@ -45,7 +53,7 @@ describe("regressions", () => {
 
   it("peek does not leak hints", () => {
     const p = Parser.seq(Parser.peek(Ascii.digit1), Ascii.digit1, Token.literal(";"))
-    expect(expectFailure(p, "1x").expected).toEqual(["digit", "\";\""])
+    expect(expectFailure(p, "1x").expected).toEqual(["digit", '";"'])
   })
 
   it("mapParser translates offsets for slices that start after skipped input", () => {
@@ -85,7 +93,10 @@ describe("takeUntil stops at State.end (#30)", () => {
 
   it("does not match a literal straddling the end", () => {
     expectWithin(within(4, Token.takeUntil("-->")), "abc-->", { result: "Fail", pos: 0 })
-    expectWithin(within(4, Token.takeUntil(Uint8Array.of(8, 9))), Uint8Array.of(1, 2, 3, 8, 9), { result: "Fail", pos: 0 })
+    expectWithin(within(4, Token.takeUntil(Uint8Array.of(8, 9))), Uint8Array.of(1, 2, 3, 8, 9), {
+      result: "Fail",
+      pos: 0
+    })
     expectWithin(within(4, Token.takeUntil([8, 9])), [1, 2, 3, 8, 9], { result: "Fail", pos: 0 })
   })
 
@@ -97,43 +108,50 @@ describe("takeUntil stops at State.end (#30)", () => {
 })
 
 describe("furthest failure and commits (#21)", () => {
-  const ident = Parser.taken(Parser.seq(
-    Token.takeWhile("abcx", { min: 1 }),
-    Parser.optional(Parser.seq(Token.literal(":"), Token.takeWhile("abc", { min: 1 })))
-  ))
+  const ident = Parser.taken(
+    Parser.seq(
+      Token.takeWhile("abcx", { min: 1 }),
+      Parser.optional(Parser.seq(Token.literal(":"), Token.takeWhile("abc", { min: 1 })))
+    )
+  )
   const item = Parser.seq(Ascii.digit1, Token.literal("!"))
 
   const errorOf = (p: Parser.Parser<unknown>, input: string) => {
     const e = expectFailure(p, input)
     const compiled = expectFailure(Compiler.jit(p), input)
-    expect({ offset: compiled.offset, mode: compiled.mode, expected: compiled.expected, message: compiled.message })
-      .toEqual({ offset: e.offset, mode: e.mode, expected: e.expected, message: e.message })
+    expect({
+      offset: compiled.offset,
+      mode: compiled.mode,
+      expected: compiled.expected,
+      message: compiled.message
+    }).toEqual({ offset: e.offset, mode: e.mode, expected: e.expected, message: e.message })
     return e
   }
 
   it("a cut failure after a successful lookahead is reported where it happened", () => {
-    const notReserved = Parser.flatMap(Parser.peek(ident), (name) => name === "x" ? Parser.cut(Parser.reject) : ident)
-      .pipe(Parser.expected("identifier"))
+    const notReserved = Parser.flatMap(Parser.peek(ident), (name) =>
+      name === "x" ? Parser.cut(Parser.reject) : ident
+    ).pipe(Parser.expected("identifier"))
     const p = Parser.terminated(notReserved, Token.literal(";"))
     const e = errorOf(p, "x;")
     expect(e.offset).toBe(0)
     expect(e.mode).toBe("Cut")
     expect(e.expected).toEqual(["identifier"])
-    expect(e.message).toContain("expected identifier, found \"x\"")
+    expect(e.message).toContain('expected identifier, found "x"')
     expectSuccess(p, "ab:c;", "ab:c")
   })
 
   it("failures inside a successful peek are not the furthest failure", () => {
     const e = errorOf(Parser.seq(Parser.peek(ident), Token.literal("y")), "x;")
     expect(e.offset).toBe(0)
-    expect(e.expected).toEqual(["\"y\""])
+    expect(e.expected).toEqual(['"y"'])
   })
 
   it("failures inside not are not the furthest failure", () => {
     const p = Parser.preceded(Parser.not(Parser.seq(Token.literal("a"), Token.literal("b"))), Token.literal("c"))
     const e = errorOf(p, "ax")
     expect(e.offset).toBe(0)
-    expect(e.expected).toEqual(["\"c\""])
+    expect(e.expected).toEqual(['"c"'])
   })
 
   it("a cut failure outranks deeper failures of abandoned branches", () => {
@@ -144,7 +162,7 @@ describe("furthest failure and commits (#21)", () => {
     const e = errorOf(p, "abz")
     expect(e.offset).toBe(1)
     expect(e.mode).toBe("Cut")
-    expect(e.expected).toEqual(["\"x\""])
+    expect(e.expected).toEqual(['"x"'])
   })
 
   it("a cut failure still reports deeper failures from inside the cut", () => {
@@ -154,21 +172,21 @@ describe("furthest failure and commits (#21)", () => {
     )
     const e = errorOf(list, "[1!,2]")
     expect(e.offset).toBe(5)
-    expect(e.expected).toEqual(["digit", "\"!\""])
+    expect(e.expected).toEqual(["digit", '"!"'])
   })
 
   it("backtracking keeps the furthest failure", () => {
     const e = errorOf(Parser.terminated(Parser.separated(item, Token.literal(",")), Token.literal(";")), "1!,2;")
     expect(e.offset).toBe(4)
-    expect(e.expected).toEqual(["digit", "\"!\""])
+    expect(e.expected).toEqual(["digit", '"!"'])
     // Failures inside a successful optional still count
     const f = errorOf(Parser.terminated(Parser.optional(item), Token.literal(";")), "1?")
     expect(f.offset).toBe(1)
-    expect(f.expected).toEqual(["digit", "\"!\""])
+    expect(f.expected).toEqual(["digit", '"!"'])
     // and so do those of a failed lookahead
     const g = errorOf(Parser.terminated(Parser.peek(item), Token.literal(";")), "1?")
     expect(g.offset).toBe(1)
-    expect(g.expected).toEqual(["digit", "\"!\""])
+    expect(g.expected).toEqual(["digit", '"!"'])
   })
 })
 
@@ -177,7 +195,12 @@ describe("deeply nested input reports TooDeep instead of throwing (#14)", () => 
     const text = Token.takeTill("{}", { min: 1 })
     const p: Parser.Parser<unknown> = Parser.seq(
       Token.literal("{"),
-      Parser.repeat(Parser.alt(text, Parser.suspend(() => p))),
+      Parser.repeat(
+        Parser.alt(
+          text,
+          Parser.suspend(() => p)
+        )
+      ),
       Token.literal("}")
     )
     return p

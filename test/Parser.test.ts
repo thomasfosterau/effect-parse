@@ -47,7 +47,11 @@ describe("Parser", () => {
   describe("mapping", () => {
     it("map / as / asVoid", () => {
       expectSuccess(a.pipe(Parser.map((s) => s.toUpperCase())), "a", "A")
-      expectSuccess(Parser.map(a, (s) => s.length), "a", 1)
+      expectSuccess(
+        Parser.map(a, (s) => s.length),
+        "a",
+        1
+      )
       expectSuccess(a.pipe(Parser.as(true)), "a", true)
       expectSuccess(Parser.asVoid(a), "a", undefined)
     })
@@ -59,9 +63,7 @@ describe("Parser", () => {
     })
 
     it("tryMap backtracks with cause", () => {
-      const p = Token.take(2).pipe(
-        Parser.tryMap((s) => s === "ok" ? Result.succeed(1) : Result.fail(`bad: ${s}`))
-      )
+      const p = Token.take(2).pipe(Parser.tryMap((s) => (s === "ok" ? Result.succeed(1) : Result.fail(`bad: ${s}`))))
       expectSuccess(p, "ok", 1)
       const err = expectFailure(p, "no")
       expect(err.cause).toBe("bad: no")
@@ -74,10 +76,15 @@ describe("Parser", () => {
       const even = digit.pipe(Parser.filter((d) => Number(d) % 2 === 0))
       expectSuccess(even, "4", "4")
       expectFailure(even, "3")
-      const small = digit.pipe(Parser.filterMap((d) => Number(d) < 5 ? Option.some(Number(d)) : Option.none()))
+      const small = digit.pipe(Parser.filterMap((d) => (Number(d) < 5 ? Option.some(Number(d)) : Option.none())))
       expectSuccess(small, "4", 4)
       expectFailure(small, "7")
-      const typed = digit.pipe(Parser.filterOrFail((d) => d !== "0", () => "zero" as const))
+      const typed = digit.pipe(
+        Parser.filterOrFail(
+          (d) => d !== "0",
+          () => "zero" as const
+        )
+      )
       expect(expectFailure(typed, "0").cause).toBe("zero")
     })
 
@@ -157,7 +164,7 @@ describe("Parser", () => {
     })
 
     it("gen", () => {
-      const p = Parser.gen(function*() {
+      const p = Parser.gen(function* () {
         const x = yield* a
         const y = yield* Parser.opt(b)
         return { x, y }
@@ -169,7 +176,7 @@ describe("Parser", () => {
 
     it("gen runs finally blocks on failure", () => {
       let cleaned = false
-      const p = Parser.gen(function*() {
+      const p = Parser.gen(function* () {
         try {
           yield* a
           yield* b
@@ -203,15 +210,15 @@ describe("Parser", () => {
     it("alt merges expectations", () => {
       const p = Parser.alt(Token.literal("true"), Token.literal("false"), Token.literal("null"))
       const err = expectFailure(p, "nope")
-      expect(err.expected).toEqual(["\"true\"", "\"false\"", "\"null\""])
-      expect(err.message).toContain("expected \"true\", \"false\" or \"null\", found \"n\"")
+      expect(err.expected).toEqual(['"true"', '"false"', '"null"'])
+      expect(err.message).toContain('expected "true", "false" or "null", found "n"')
     })
 
     it("alt keeps the furthest failure", () => {
       const p = Parser.alt(Parser.seq(a, b, a), Parser.seq(b, b))
       const err = expectFailure(p, "abb")
       expect(err.offset).toBe(2)
-      expect(err.expected).toEqual(["\"a\""])
+      expect(err.expected).toEqual(['"a"'])
     })
 
     it("alt stops at cut", () => {
@@ -229,7 +236,7 @@ describe("Parser", () => {
       expect(expectFailure(p, "c").offset).toBe(0)
       const withDefault = Parser.dispatch(Token.any, { a: Parser.succeed(1) }, Parser.succeed(0))
       expectSuccess(withDefault, "z", 0)
-      const q = Parser.dispatch(Token.any, (c) => c === "x" ? Parser.succeed("x!") : undefined)
+      const q = Parser.dispatch(Token.any, (c) => (c === "x" ? Parser.succeed("x!") : undefined))
       expectSuccess(q, "x", "x!")
       expectFailure(q, "y")
     })
@@ -308,7 +315,7 @@ describe("Parser", () => {
       expect(peek(p, "ababefg")).toEqual(Result.succeed(["g", [["ab", "ab"], "ef"]]))
       expectSuccess(p, "ef", [[], "ef"])
       const err = expectFailure(p, "abx")
-      expect(err.expected).toEqual(["\"ef\"", "\"ab\""])
+      expect(err.expected).toEqual(['"ef"', '"ab"'])
       expectFailure(Parser.repeatTill(ab, Token.literal("ef"), { min: 1 }), "ef")
       expectFailure(Parser.repeatTill(ab, Token.literal("ef"), { max: 1 }), "ababef")
     })
@@ -326,9 +333,21 @@ describe("Parser", () => {
     it("separatedFoldl1 / separatedFoldr1", () => {
       const num = Token.oneOf("0123456789").pipe(Parser.map(Number))
       const minus = Token.literal("-")
-      expectSuccess(Parser.separatedFoldl1(num, minus, (l, _, r) => l - r), "9-3-2", 4)
-      expectSuccess(Parser.separatedFoldr1(num, Token.literal("^"), (l, _, r) => l ** r), "2^3^2", 512)
-      expectSuccess(Parser.separatedFoldr1(num, minus, (l, _, r) => l - r), "9", 9)
+      expectSuccess(
+        Parser.separatedFoldl1(num, minus, (l, _, r) => l - r),
+        "9-3-2",
+        4
+      )
+      expectSuccess(
+        Parser.separatedFoldr1(num, Token.literal("^"), (l, _, r) => l ** r),
+        "2^3^2",
+        512
+      )
+      expectSuccess(
+        Parser.separatedFoldr1(num, minus, (l, _, r) => l - r),
+        "9",
+        9
+      )
     })
   })
 
@@ -344,14 +363,14 @@ describe("Parser", () => {
       const p = Parser.alt(a, b).pipe(Parser.expected("letter"))
       expect(expectFailure(p, "c").expected).toEqual(["letter"])
       const q = Parser.seq(a, b).pipe(Parser.expected("pair"))
-      expect(expectFailure(q, "ac").expected).toEqual(["\"b\""])
+      expect(expectFailure(q, "ac").expected).toEqual(['"b"'])
     })
 
     it("hints merge expectations of optional parsers", () => {
       const digit = Token.oneOf("0123456789").pipe(Parser.expected("digit"))
       const p = Parser.delimited(Token.literal("("), Parser.repeat(digit), Token.literal(")"))
       const err = expectFailure(p, "(12x")
-      expect(err.expected).toEqual(["digit", "\")\""])
+      expect(err.expected).toEqual(["digit", '")"'])
       const trailing = expectFailure(Parser.repeat(digit), "12x")
       expect(trailing.expected).toEqual(["digit", "end of input"])
     })
@@ -372,12 +391,9 @@ describe("Parser", () => {
       const p = Parser.separated(Token.literal("x"), Token.literal("\n"))
       const err = expectFailure(Parser.allConsuming(p), "x\nx\nxy")
       expect(err.position).toEqual({ line: 3, column: 2 })
-      expect(err.message).toBe([
-        "Parse error at line 3, column 2:",
-        "3 | xy",
-        "  |  ^",
-        "expected \"\\n\" or end of input, found \"y\""
-      ].join("\n"))
+      expect(err.message).toBe(
+        ["Parse error at line 3, column 2:", "3 | xy", "  |  ^", 'expected "\\n" or end of input, found "y"'].join("\n")
+      )
     })
   })
 
@@ -403,7 +419,7 @@ describe("Parser", () => {
     })
 
     it("ParseError is yieldable", () => {
-      const program = Effect.gen(function*() {
+      const program = Effect.gen(function* () {
         return yield* Parser.parseEffect(Token.literal("x"), "y")
       })
       const exit = Effect.runSyncExit(Effect.flip(program))
@@ -434,14 +450,7 @@ describe("Parser", () => {
       const events: Array<string> = []
       const p = Parser.trace(Parser.alt(Parser.trace(a, "a"), Parser.trace(b, "b")), "alt")
       Parser.parse(p, "b", { trace: (e) => events.push(`${e._tag}:${e.name}:${e.result ?? ""}`) })
-      expect(events).toEqual([
-        "Enter:alt:",
-        "Enter:a:",
-        "Exit:a:Backtrack",
-        "Enter:b:",
-        "Exit:b:Ok",
-        "Exit:alt:Ok"
-      ])
+      expect(events).toEqual(["Enter:alt:", "Enter:a:", "Exit:a:Backtrack", "Enter:b:", "Exit:b:Ok", "Exit:alt:Ok"])
     })
   })
 
