@@ -1,4 +1,5 @@
-import { Option, Result } from "effect"
+import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import { describe, expect, it } from "vite-plus/test"
 import * as Json from "../examples/json-syntax.js"
 import type { Input } from "../src/index.js"
@@ -20,19 +21,19 @@ const list = Syntax.node(
 
 /** Everything observable about a tree, for comparisons. */
 const snapshot = <I extends Input.Input>(tree: Syntax.Tree<unknown, unknown, I>) => {
-  const shape = (n: Syntax.SyntaxNode<I>): unknown => ({
+  const outline = (n: Syntax.SyntaxNode<I>): unknown => ({
     kind: n.kind,
     named: n.named,
     field: n.field,
     start: n.start,
     end: n.end,
     value: n.value,
-    children: n.children.map(shape)
+    children: n.children.map(outline)
   })
   return {
     value: tree.value,
     errors: tree.errors.map((e) => ({ offset: e.offset, mode: e.mode, message: e.message })),
-    root: shape(tree.root)
+    root: outline(tree.root)
   }
 }
 
@@ -232,11 +233,8 @@ describe("Syntax", () => {
         for (const doc of docs) {
           const interpreted = Parser.parse(Json.json, doc)
           const fast = Parser.parse(compiled, doc)
-          expect(Result.isSuccess(fast)).toBe(Result.isSuccess(interpreted))
-          if (Result.isSuccess(fast) && Result.isSuccess(interpreted)) expect(fast.success).toEqual(interpreted.success)
-          if (Result.isFailure(fast) && Result.isFailure(interpreted)) {
-            expect(fast.failure.message).toBe(interpreted.failure.message)
-          }
+          const message = (e: { readonly message: string }) => e.message
+          expect(Result.mapError(fast, message)).toEqual(Result.mapError(interpreted, message))
         }
       }
       expect(Parser.parse(list, "[1,2]")).toEqual(Result.succeed([1, 2]))
@@ -256,7 +254,7 @@ describe("Syntax", () => {
       const edited = Syntax.replace(tree, at, at + 3, "-5")
       expect(parsed).toBe(1)
       expect(edited.reused).toBe(999)
-      expect(Option.getOrThrow(edited.value)[500]).toBe(-5)
+      expect(Option.map(edited.value, (values) => values[500])).toEqual(Option.some(-5))
       expect(snapshot(edited)).toEqual(snapshot(Syntax.parse(items, edited.input)))
     })
 
@@ -378,7 +376,12 @@ describe("Syntax", () => {
           const fresh = Syntax.parse(grammar, next.input)
           expect(snapshot(next), JSON.stringify({ before: text, after: next.input })).toEqual(snapshot(fresh))
           // Parse the old text again from the edited tree, too
-          if (i % 3 === 0) expect(snapshot(Syntax.reparse(next, text))).toEqual(snapshot(Syntax.parse(grammar, text)))
+          // (every third edit)
+          const again =
+            i % 3 === 0
+              ? { reparsed: snapshot(Syntax.reparse(next, text)), parsed: snapshot(Syntax.parse(grammar, text)) }
+              : undefined
+          expect(again?.reparsed).toEqual(again?.parsed)
           reused += next.reused
           tree = next
         }
@@ -442,9 +445,7 @@ describe("Syntax", () => {
       const total = [...tree.root.descendants()].length
       const at = text.indexOf('"n150"')
       const edited = Syntax.replace(tree, at + 1, at + 5, "renamed")
-      expect(Option.getOrThrow(edited.value)).toEqual(
-        records.map((r) => (r.id === 150 ? { ...r, name: "renamed" } : r))
-      )
+      expect(edited.value).toEqual(Option.some(records.map((r) => (r.id === 150 ? { ...r, name: "renamed" } : r))))
       // Every record but the edited one is reused whole, as one node
       expect(edited.reused).toBeGreaterThan(299)
       // The nodes built again: those not shared with the old tree

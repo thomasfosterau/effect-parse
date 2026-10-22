@@ -7,7 +7,8 @@
  * `ParseError`, typed in the parser's `E` channel.
  */
 import * as Predicate from "effect/Predicate"
-import { Data, Result } from "effect"
+import * as Schema from "effect/Schema"
+import * as Result from "effect/Result"
 import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
 
 export type Atom =
@@ -19,10 +20,10 @@ export type Atom =
 export type Expr =
   | { readonly _tag: "Constant"; readonly atom: Atom }
   | { readonly _tag: "Application"; readonly head: Expr; readonly args: ReadonlyArray<Expr> }
-  | { readonly _tag: "If"; readonly cond: Expr; readonly then: Expr; readonly else: Expr | undefined }
+  | { readonly _tag: "If"; readonly cond: Expr; readonly consequent: Expr; readonly alternative: Expr | undefined }
   | { readonly _tag: "Quote"; readonly exprs: ReadonlyArray<Expr> }
 
-export class EvalError extends Data.TaggedError("EvalError")<{ readonly message: string }> {}
+export class EvalError extends Schema.TaggedError<EvalError>()("EvalError", { message: Schema.String }) {}
 
 const ws = Ascii.multispace0
 
@@ -61,10 +62,10 @@ const ifExpr = sExp(
     yield* Ascii.multispace1
     const cond = yield* exprRef
     yield* ws
-    const then = yield* exprRef
+    const consequent = yield* exprRef
     yield* ws
-    const otherwise = yield* Parser.optional(exprRef)
-    return { _tag: "If", cond, then, else: otherwise } satisfies Expr as Expr
+    const alternative = yield* Parser.optional(exprRef)
+    return { _tag: "If", cond, consequent, alternative } satisfies Expr as Expr
   })
 )
 
@@ -87,20 +88,24 @@ export const evaluate = (e: Expr): Result.Result<Atom, EvalError> => {
       const cond = evaluate(e.cond)
       if (Result.isFailure(cond)) return cond
       if (cond.success._tag !== "Bool") return fail("`if` expects a boolean condition")
-      if (cond.success.value) return evaluate(e.then)
-      return e.else === undefined ? fail("`if` without else") : evaluate(e.else)
+      if (cond.success.value) return evaluate(e.consequent)
+      return e.alternative === undefined ? fail("`if` without else") : evaluate(e.alternative)
     }
     case "Application": {
       const head = evaluate(e.head)
       if (Result.isFailure(head)) return head
       if (head.success._tag !== "BuiltIn") return fail("only built-in functions can be applied")
-      const args: Array<number | boolean> = []
-      for (const arg of e.args) {
+      // Left to right, stopping at the first argument that fails or is not a value
+      const evaluated = e.args.reduce<Result.Result<Array<number | boolean>, EvalError>>((acc, arg) => {
+        if (Result.isFailure(acc)) return acc
         const r = evaluate(arg)
-        if (Result.isFailure(r)) return r
+        if (Result.isFailure(r)) return Result.fail(r.failure)
         if (r.success._tag !== "Num" && r.success._tag !== "Bool") return fail("invalid argument")
-        args.push(r.success.value)
-      }
+        acc.success.push(r.success.value)
+        return acc
+      }, Result.succeed([]))
+      if (Result.isFailure(evaluated)) return Result.fail(evaluated.failure)
+      const args = evaluated.success
       const nums = () => (args.every((a) => Predicate.isNumber(a)) ? (args as Array<number>) : undefined)
       const op = head.success.op
       switch (op) {

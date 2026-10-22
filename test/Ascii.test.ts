@@ -1,4 +1,5 @@
-import { Option, Result } from "effect"
+import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import { describe, expect, it } from "vite-plus/test"
 import { Ascii, Parser, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"

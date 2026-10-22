@@ -87,6 +87,45 @@ export default defineConfig({
       // `casting-awareness` is an awareness prompt, not a defect rule — it
       // fires on every `as`. Stays visible as a warning.
       "effect/casting-awareness": "warn",
+
+      // ---- Effect preset: allowances still being paid down ------------------
+      // The parser predates the Effect oxlint preset. These rules sit at
+      // `warn` with the count they had when the preset was adopted, so the
+      // code stays committable while every site stays reported; a new site is
+      // a defect, not headroom. The remaining sites are listed in the
+      // follow-up issue linked from AGENTS.md. Flip a rule back to the
+      // preset's `error` and delete its line when its count reaches zero.
+      "effect/require-safety-comment-for-type-assertion": "warn", // 306
+      "effect/imperative-loops": "warn", // 75, all in test/ (src/ is off below, measured)
+      "effect/avoid-any": "warn", // 62
+      "effect/avoid-direct-tag-checks": "warn", // 60
+      "effect/avoid-direct-json": "warn", // 35 outside bench/
+      "effect/avoid-native-object-helpers": "warn", // 43 outside bench/
+      "effect/no-known-value-widening": "warn", // 33
+      "effect/no-length-comparison": "warn", // 24
+      "effect/prefer-arr-match": "warn", // 24
+      "effect/prefer-match-over-switch": "warn", // 23
+      "effect/no-chained-type-assertions": "warn", // 13
+      "effect/avoid-try-catch": "warn", // 11
+      "effect/avoid-untagged-errors": "warn", // 6 outside bench/
+      "effect/no-unsafe-dictionary-type": "warn", // 3 outside bench/
+      "effect/use-console-service": "warn", // 2 outside bench/ (`Parser.debug`'s console tracer)
+      // ---- Effect preset: rules this library's conventions cut across ------
+      // `prefer-option-over-null` fires on every `| undefined`: the absent
+      // value of the public API (`Parser.opt`, the options members spelled
+      // `?: T | undefined` under `exactOptionalPropertyTypes`, `Input.State`
+      // fields) and the step protocol's per-step results. Changing the public
+      // spelling breaks every consumer; boxing a step result in `Option`
+      // allocates on every parse step. 185 sites.
+      "effect/prefer-option-over-null": "warn",
+      // `unknown` is the honest type at the interpreter's erased boundary: a
+      // step returns the value of whatever parser it runs, and the compilers
+      // walk parser nodes whose values they never inspect. 43 + 43 sites.
+      // `object` keys are identity keys (the parser or node a checkpoint or a
+      // syntax node belongs to), compared by reference in `Map`s. 15 sites.
+      "effect/no-unknown-parameters": "warn",
+      "effect/no-unknown-returns": "warn",
+      "effect/no-object-parameters": "warn",
       // Hard-codes abbreviations (`Arr`, `P`, `R`, …) with no options, so it is
       // unsatisfiable under the full-name convention (`import * as Option from
       // "effect/Option"`) this library shares with its consumers.
@@ -98,6 +137,69 @@ export default defineConfig({
       "vite-plus/prefer-vite-plus-imports": "error"
     },
     overrides: [
+      // The parser runtime: every step function scans input a unit at a time
+      // and the compilers build code in loops. The shape this rule asks for
+      // (`Arr.range` + `Arr.findFirstIndex` over the positions) scans a 1 MB
+      // run of digits 7x slower than the `while` loop it replaces (9.15 ms
+      // against 1.26 ms, best of 30, Node 22; the `internal/tokens.ts` `scan`
+      // loop), and recursion overflows the stack on long inputs. The example
+      // custom parser step is the same kind of code, and the benchmarks'
+      // timing loops measure it, so a callback per iteration would skew them.
+      {
+        files: ["src/**", "examples/json-syntax.ts", "bench/**"],
+        rules: {
+          "effect/imperative-loops": "off"
+        }
+      },
+      // Preallocating an array whose length is known (a sequence's results,
+      // a syntax node's children) in the step loop: `new Array(n)` filled by
+      // index takes 20.8 ms for 3M four-element arrays, `[]` + `push` 88.5 ms
+      // and `Array.from({ length: n })` 1471 ms (Node 22).
+      {
+        files: ["src/**"],
+        rules: {
+          "unicorn/no-new-array": "off"
+        }
+      },
+      // `ParseError` and `ParserStream.ReadError` are published
+      // `Data.TaggedError` classes; moving them to `Schema.TaggedError`
+      // changes their public type for every consumer.
+      {
+        files: ["src/ParseError.ts", "src/ParserStream.ts"],
+        rules: {
+          "effect/avoid-data-tagged-error": "off"
+        }
+      },
+      // The benchmarks are plain Node programs: they print a table, compare
+      // against `JSON.parse` (the subject of the comparison), run their
+      // Effect programs at the top level, and abort on a wrong result.
+      {
+        files: ["bench/**"],
+        rules: {
+          "effect/use-console-service": "off",
+          "effect/avoid-direct-json": "off",
+          "effect/effect-run-in-body": "off",
+          "effect/avoid-untagged-errors": "off",
+          "effect/avoid-native-object-helpers": "off",
+          "effect/no-unsafe-dictionary-type": "off"
+        }
+      },
+      // A test body is the harness boundary the rule itself names as the
+      // place to run an Effect.
+      {
+        files: ["test/**"],
+        rules: {
+          "effect/effect-run-in-body": "off"
+        }
+      },
+      // Type-level tests: the expect-error directives ARE the assertions (a
+      // statement that must fail to compile).
+      {
+        files: ["test/**/*.types.ts"],
+        rules: {
+          "effect/avoid-ts-ignore": "off"
+        }
+      },
       // Build/test configs and the dist guard are evaluated in bare Node,
       // before any Effect runtime exists — there is no `Config` provider to
       // read from and no `FileSystem` service to call, so `process.env` and

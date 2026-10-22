@@ -1,7 +1,10 @@
 import * as Predicate from "effect/Predicate"
-import { Effect, Option, Result, Stream } from "effect"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Result from "effect/Result"
+import * as Stream from "effect/Stream"
 import type { ParseError } from "../src/index.js"
-import { describe, expect, it } from "vite-plus/test"
+import { assert, describe, expect, it } from "vite-plus/test"
 import { Ascii, Compiler, Expression, Parser, ParserStream, Syntax, Text, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 
@@ -208,7 +211,7 @@ describe("deeply nested input reports TooDeep instead of throwing (#14)", () => 
   }
   const deep = "{".repeat(100_000)
   const expectTooDeep = (result: Result.Result<unknown, ParseError.ParseError<unknown>>) => {
-    if (Result.isSuccess(result)) throw new Error("expected failure")
+    if (Result.isSuccess(result)) return assert.fail("expected failure")
     expect(result.failure.kind).toBe("TooDeep")
     expect(result.failure.mode).toBe("Cut")
     expect(result.failure.offset).toBeGreaterThan(0)

@@ -13,8 +13,8 @@
  */
 import { Compiler, Parser, Text } from "@thomasfosterau/effect-parse"
 import { json } from "../examples/json.ts"
-import { makeJson as makeFastJson } from "../examples/json-fast.ts"
-import { makeJson } from "../examples/json-text.ts"
+import { jsonGrammar as fastJsonGrammar } from "../examples/json-fast.ts"
+import { jsonGrammar } from "../examples/json-text.ts"
 
 /** A deterministic PRNG (mulberry32), so every run parses the same documents. */
 const rng = (seed: number) => () => {
@@ -78,10 +78,10 @@ const docs: Array<Doc> = [
 
 const decoder = new TextDecoder()
 const tokenAscii = Compiler.jit(json)
-const textString = Compiler.jit(makeJson(Text.string))
-const textUtf8 = Compiler.jit(makeJson(Text.utf8))
-const fastString = Compiler.jit(makeFastJson(Text.string))
-const fastUtf8 = Compiler.jit(makeFastJson(Text.utf8))
+const textString = Compiler.jit(jsonGrammar(Text.string))
+const textUtf8 = Compiler.jit(jsonGrammar(Text.utf8))
+const fastString = Compiler.jit(fastJsonGrammar(Text.string))
+const fastUtf8 = Compiler.jit(fastJsonGrammar(Text.utf8))
 
 interface Case {
   readonly name: string

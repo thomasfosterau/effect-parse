@@ -2,6 +2,8 @@
  * Token sets for compiled parsers: membership tables for small units, the
  * exact test for the rest, and the code point ranges when they are known.
  */
+import * as Arr from "effect/Array"
+import * as Order from "effect/Order"
 import * as Predicate from "effect/Predicate"
 import type { Encoding } from "../../Encoding.js"
 import { firstCodePoint } from "../text.js"
@@ -57,9 +59,11 @@ export const rangesOf = (set: unknown): Array<[number, number]> | undefined => {
     return false
   }
   if (!add(set)) return undefined
-  out.sort((a, b) => a[0] - b[0])
   const merged: Array<[number, number]> = []
-  for (const [a, b] of out) {
+  for (const [a, b] of Arr.sort(
+    out,
+    Order.mapInput(Order.Number, (range: readonly [number, number]) => range[0])
+  )) {
     if (b < a) continue
     const last = merged[merged.length - 1]
     if (last !== undefined && a <= last[1] + 1) last[1] = Math.max(last[1], b)

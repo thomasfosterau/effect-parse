@@ -1,11 +1,14 @@
-import { Effect, Option, Result, Stream } from "effect"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Result from "effect/Result"
+import * as Stream from "effect/Stream"
 import { describe, expect, it } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
 import * as Http from "../examples/http.js"
 import * as Ini from "../examples/ini.js"
 import * as Json from "../examples/json.js"
 import * as JsonFast from "../examples/json-fast.js"
-import { makeJson } from "../examples/json-text.js"
+import { jsonGrammar } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
 import { Compiler, Encoding, Parser, ParserStream, Text } from "../src/index.js"
 import { expectFailure, expectSuccess } from "./utils.js"
@@ -69,7 +72,7 @@ describe("examples/json-text", () => {
     ["utf16le", Text.utf16le, Encoding.utf16le.encode],
     ["utf16be", Text.utf16be, Encoding.utf16be.encode]
   ] as const)("parses %s input with one grammar", (_, T, encode) => {
-    const json = makeJson<any>(T)
+    const json = jsonGrammar<any>(T)
     expectSuccess(json, encode(doc), expected)
     const err = expectFailure(json, encode('{"é": [1,,2]}'))
     expect(err.position).toEqual({ line: 1, column: 10 })

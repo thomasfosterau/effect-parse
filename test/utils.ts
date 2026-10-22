@@ -1,4 +1,4 @@
-import { Result } from "effect"
+import * as Result from "effect/Result"
 import { assert, expect } from "vite-plus/test"
 import type { Input, Parser, ParseError } from "../src/index.js"
 import { Parser as P } from "../src/index.js"
@@ -11,7 +11,7 @@ export const expectSuccess = <A, E, I extends Input.Input>(
 ): void => {
   const result = P.parse(parser, input)
   if (Result.isFailure(result)) {
-    throw new Error(`expected success, got:\n${result.failure.message}`)
+    return assert.fail(`expected success, got:\n${result.failure.message}`)
   }
   expect(result.success).toEqual(expected)
 }
@@ -23,7 +23,7 @@ export const expectFailure = <A, E, I extends Input.Input>(
 ): ParseError.ParseError<E> => {
   const result = P.parse(parser, input)
   if (Result.isSuccess(result)) {
-    throw new Error(`expected failure, got: ${JSON.stringify(result.success)}`)
+    return assert.fail(`expected failure, got: ${JSON.stringify(result.success)}`)
   }
   return result.failure
 }

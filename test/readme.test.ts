@@ -1,4 +1,9 @@
-import { Context, Data, Effect, Option, Result, Stream } from "effect"
+import * as Context from "effect/Context"
+import * as Schema from "effect/Schema"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Result from "effect/Result"
+import * as Stream from "effect/Stream"
 import { expect, it } from "vite-plus/test"
 import {
   Ascii,
@@ -45,7 +50,7 @@ it("README examples behave as documented", () => {
   expect(Parser.parseSync(Parser.provideService(number, Radix, 16), "ff")).toBe(255)
   expect(Effect.runSync(Parser.parseEffect(number, "777").pipe(Effect.provideService(Radix, 8)))).toBe(511)
 
-  class OutOfRange extends Data.TaggedError("OutOfRange")<{ value: number }> {}
+  class OutOfRange extends Schema.TaggedError<OutOfRange>()("OutOfRange", { value: Schema.Number }) {}
   const port: Parser.Parser<number, string | OutOfRange> = Ascii.decUint.pipe(
     Parser.filterOrFail(
       (n) => n < 65536,

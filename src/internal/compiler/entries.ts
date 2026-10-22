@@ -41,9 +41,9 @@ const isDiagnostic = (
  * element of a sequence (`preceded`, `terminated`, `delimited`) and
  * diagnostics.
  */
-export const entriesShape = (p: ParserLike): boolean => {
+export const buildsEntries = (p: ParserLike): boolean => {
   const node = nodeOf(p)
-  if (isDiagnostic(node) || node._tag === "Mode") return entriesShape(node.self)
-  if (node._tag === "Seq") return Predicate.isNumber(node.output) && entriesShape(node.parsers[node.output])
+  if (isDiagnostic(node) || node._tag === "Mode") return buildsEntries(node.self)
+  if (node._tag === "Seq") return Predicate.isNumber(node.output) && buildsEntries(node.parsers[node.output])
   return (node._tag === "Repeat" || node._tag === "Separated") && pairOf(node.self) !== undefined
 }

@@ -3,14 +3,16 @@
  * results, values and errors alike, on valid, invalid and truncated input.
  */
 import * as Predicate from "effect/Predicate"
-import { Context, Option, Result } from "effect"
-import { describe, expect, it } from "vite-plus/test"
+import * as Context from "effect/Context"
+import * as Option from "effect/Option"
+import * as Result from "effect/Result"
+import { assert, describe, expect, it } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
 import * as Http from "../examples/http.js"
 import * as Ini from "../examples/ini.js"
 import * as Json from "../examples/json.js"
 import * as JsonFast from "../examples/json-fast.js"
-import { makeJson } from "../examples/json-text.js"
+import { jsonGrammar } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
 import type { Input } from "../src/index.js"
 import { Ascii, Binary, Compiler, Encoding, Expression, Parser, Text, Token } from "../src/index.js"
@@ -57,6 +59,9 @@ const twin = <P extends Parser.Parser.Any>(p: P, backend: Backend): P => {
   return c as P
 }
 
+/** Whether `s` has a character outside Latin-1, which `Text.latin1` cannot encode. */
+const beyondLatin1 = (s: string): boolean => Array.from(s).some((c) => (c.codePointAt(0) ?? 0) > 0xff)
+
 /** Runs the compiled step alone, to catch compiled failures that the fallback would hide. */
 const fast = (p: Parser.Parser.Any, input: Input.Input, context?: Context.Context<any>) => {
   const state = new State(input, { context })
@@ -65,7 +70,7 @@ const fast = (p: Parser.Parser.Any, input: Input.Input, context?: Context.Contex
   const compiled = defined(Registry.compiled(p, kind))
   if (compiled.error !== undefined) throw compiled.error
   if (compiled.jitError !== undefined) throw compiled.jitError
-  if (backendOf.get(p) === "jit") expect(compiled.backend).toBe("jit")
+  if (backendOf.get(p) === "jit") assert.strictEqual(compiled.backend, "jit")
   const a = step(state)
   return a === Fail ? undefined : { value: a, pos: state.pos, end: state.end }
 }
@@ -114,7 +119,7 @@ const same = (p: Parser.Parser.Any, input: Input.Input, context?: Context.Contex
     // The compiled step on its own succeeds exactly when the interpreter does
     const f = fast(c, input, context)
     expect(f !== undefined, `${label}: compiled success`).toBe(expectedPeek.ok)
-    if (f !== undefined && expected.ok) expect(f.pos, label).toBe(f.end)
+    if (f !== undefined && expected.ok) assert.strictEqual(f.pos, f.end, label)
     // The resumable build agrees with the interpreter on partial and on complete input
     const resumable = resumableStep(c, input)
     for (const partial of [true, false]) {
@@ -161,7 +166,7 @@ describe("compiled examples", () => {
     ["Text.utf16le", Text.utf16le, (s: string) => Encoding.utf16le.encode(s)],
     ["Text.utf16be", Text.utf16be, (s: string) => Encoding.utf16be.encode(s)]
   ] as const)("json-text with %s", (_, T, encode) => {
-    const p = makeJson(T as Text.TextParsers<any>)
+    const p = jsonGrammar(T as Text.TextParsers<any>)
     for (const input of jsonInputs) same(p, (encode as (s: string) => Input.Input)(input))
   })
 
@@ -170,8 +175,8 @@ describe("compiled examples", () => {
     ["Text.utf8", Text.utf8, (s: string) => Encoding.utf8.encode(s)],
     ["Text.utf16le", Text.utf16le, (s: string) => Encoding.utf16le.encode(s)]
   ] as const)("json-fast with %s, accepting what json-text accepts", (_, T, encode) => {
-    const fast = JsonFast.makeJson(T as Text.TextParsers<any>)
-    const text = makeJson(T as Text.TextParsers<any>)
+    const fast = JsonFast.jsonGrammar(T as Text.TextParsers<any>)
+    const text = jsonGrammar(T as Text.TextParsers<any>)
     const inputs = [
       ...jsonInputs,
       '{"__proto__": 1, "toString": [2], "constructor": {"__proto__": null}}',
@@ -187,12 +192,12 @@ describe("compiled examples", () => {
       const a = Parser.parse(fast, bytes as never)
       const b = Parser.parse(text, bytes as never)
       expect(Result.isSuccess(a), input).toBe(Result.isSuccess(b))
-      if (Result.isSuccess(a) && Result.isSuccess(b)) expect(a.success, input).toEqual(b.success)
+      expect(Result.getSuccess(a), input).toEqual(Result.getSuccess(b))
     }
   })
 
   it("json-text on malformed bytes", () => {
-    const p = makeJson(Text.utf8)
+    const p = jsonGrammar(Text.utf8)
     const random = rng(7)
     const base = Encoding.utf8.encode('["aé😀", {"k": "v"}, 12]')
     for (let i = 0; i < 300; i++) {
@@ -201,7 +206,7 @@ describe("compiled examples", () => {
       bytes[at] = [0x80, 0xc0, 0xe0, 0xed, 0xf0, 0xf5, 0xff, 0x22, 0x5c][i % 9]
       same(p, bytes.subarray(0, i % 3 === 0 ? bytes.length : at + 1))
     }
-    const latin = makeJson(Text.latin1)
+    const latin = jsonGrammar(Text.latin1)
     for (let b = 0; b < 256; b++) same(latin, new Uint8Array([0x22, b, 0x22]))
   })
 
@@ -600,7 +605,7 @@ describe("compiled combinators", () => {
     const inputs = allStrings(textAlphabet, 3)
     for (const p of textGrammars(T as Text.TextParsers<any>, name === "Text.latin1" ? "þ" : "😀")) {
       for (const input of inputs) {
-        if (name === "Text.latin1" && /[^\u0000-\u00ff]/.test(input)) continue
+        if (name === "Text.latin1" && beyondLatin1(input)) continue
         same(p, (T.encoding as Encoding.Encoding<any>).encode(input))
       }
       if (name !== "Text.string") {
@@ -710,7 +715,7 @@ describe("compiled combinators", () => {
           T.takeTill(set as never, { max: 2 })
         )
         for (const input of inputs) {
-          if (T === Text.latin1 && /[^\u0000-ÿ]/.test(input)) continue
+          if (T === Text.latin1 && beyondLatin1(input)) continue
           if (T === Text.utf8 && /[\ud800-\udfff]/.test(input.replace("😀", ""))) continue
           same(text, (T.encoding as Encoding.Encoding<any>).encode(input))
         }
@@ -817,10 +822,9 @@ describe("compiled combinators", () => {
         const expected = Parser.parse(p, bytes as never)
         for (const backend of backends) {
           const actual = Parser.parse(twin(p, backend), bytes as never)
-          if (Result.isSuccess(expected) && Result.isSuccess(actual)) {
-            // `toEqual` does not tell 0 from -0
-            expect(Object.is(actual.success[0], expected.success[0]), `${backend} on ${input}`).toBe(true)
-          }
+          // `toEqual` does not tell 0 from -0
+          const first = (r: typeof actual) => Result.map(r, (values) => Object.is(values[0], -0))
+          expect(first(actual), `${backend} on ${input}`).toEqual(first(expected))
         }
       }
     }
@@ -1033,8 +1037,10 @@ const sameAtOffset = (
     const expected: any = outcome(run(p, whole, { offset }))
     // Values that are positions (spans, `location`) are positions in the whole input
     if (!options?.positions) {
-      expect(shifted(expected, 0), `${runner}, interpreted on ${label}`).toEqual(
-        shifted(outcome(run(p, input)), offset)
+      assert.deepEqual(
+        shifted(expected, 0),
+        shifted(outcome(run(p, input)), offset),
+        `${runner}, interpreted on ${label}`
       )
     }
     for (const backend of backends) {
@@ -1058,7 +1064,7 @@ describe("running from an offset", () => {
   })
 
   it("json-text with Text.utf8", () => {
-    const p = makeJson(Text.utf8)
+    const p = jsonGrammar(Text.utf8)
     const prefix = Encoding.utf8.encode("é😀{")
     for (const input of jsonInputs) sameAtOffset(p, prefix, Encoding.utf8.encode(input))
   })

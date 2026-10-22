@@ -22,7 +22,7 @@ import type { AltPlan } from "./first.js"
 import * as Resume from "../resume.js"
 import type { Backend } from "./registry.js"
 import type { EntryPair } from "./entries.js"
-import { entriesShape, pairOf } from "./entries.js"
+import { buildsEntries, pairOf } from "./entries.js"
 import { FirstSets, planAlt } from "./first.js"
 import type { CharSet } from "./sets.js"
 import { kindOfEncoding, TableSize, textSet, tokenSet } from "./sets.js"
@@ -199,7 +199,7 @@ class Compiler {
           if (step !== undefined) return step
         }
         // Streaming builds keep the array, which their checkpoints hold
-        if (node.f === fromEntries && !this.resumable && entriesShape(node.self)) return this.entries(node.self)
+        if (node.f === fromEntries && !this.resumable && buildsEntries(node.self)) return this.entries(node.self)
         const c = this.compile(node.self, true)
         const f = node.f
         return (s) => {
@@ -652,7 +652,7 @@ class Compiler {
   }
 
   /**
-   * `map(self, Object.fromEntries)`, where `entriesShape(self)`: builds the
+   * `map(self, Object.fromEntries)`, where `buildsEntries(self)`: builds the
    * object directly (see the JIT).
    */
   private entries(p: ParserLike): Step {
@@ -685,7 +685,7 @@ class Compiler {
       case "Separated": {
         const pair = pairOf(node.self)
         if (pair !== undefined) return this.entriesLoop(node, pair)
-        // Not reached (`entriesShape` found the pair): build the pairs, then the object
+        // Not reached (`buildsEntries` found the pair): build the pairs, then the object
         const c = this.compile(p, true)
         return (s) => {
           const a = c(s)

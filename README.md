@@ -307,7 +307,7 @@ effect-parse tries hard to produce good messages without annotations:
 User errors are typed. `Parser.fail(e)`, `Parser.tryMap(f)` and `Parser.filterOrFail(pred, f)` add their error type to `E`, and the error arrives as `ParseError.cause`:
 
 ```ts
-class OutOfRange extends Data.TaggedError("OutOfRange")<{ value: number }> {}
+class OutOfRange extends Schema.TaggedError<OutOfRange>()("OutOfRange", { value: Schema.Number }) {}
 
 const port = Ascii.decUint.pipe(
   Parser.filterOrFail(
@@ -349,7 +349,7 @@ Stream.make("1\n2", "3\n", "4\n").pipe(ParserStream.parseMany(line), Stream.runC
 import { Effect } from "effect"
 import { Compiler, ParserStream, Text } from "@thomasfosterau/effect-parse"
 
-const json = Compiler.jit(makeJson(Text.utf8)) // see examples/json-text.ts
+const json = Compiler.jit(jsonGrammar(Text.utf8)) // see examples/json-text.ts
 
 const value = await Effect.runPromise(ParserStream.parseResponse(await fetch(url), json))
 ```

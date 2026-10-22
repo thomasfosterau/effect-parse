@@ -536,14 +536,7 @@ export class SyntaxNode<I extends Input = string> {
    * number of children.
    */
   descendantAt(start: number, end: number = start + 1): SyntaxNode<I> {
-    let node: SyntaxNode<I> = this
-    while (true) {
-      const i = node.childIndexAt(start)
-      if (i < 0) return node
-      const child = node.children[i]
-      if (end > child.end) return node
-      node = child
-    }
+    return descendantOf(this, start, end)
   }
 
   /** Like {@link descendantAt}, but only stops at named nodes. */
@@ -604,6 +597,18 @@ export class SyntaxNode<I extends Input = string> {
   private makeChild(i: number): SyntaxNode<I> {
     const green = this.green
     return new SyntaxNode(this.tree, green.children[i], this.start + green.offsets[i], this, i)
+  }
+}
+
+/** The smallest node, `root` or a descendant, that contains `[start, end)` (see `SyntaxNode.descendantAt`). */
+const descendantOf = <I extends Input>(root: SyntaxNode<I>, start: number, end: number): SyntaxNode<I> => {
+  let node = root
+  while (true) {
+    const i = node.childIndexAt(start)
+    if (i < 0) return node
+    const child = node.children[i]
+    if (end > child.end) return node
+    node = child
   }
 }
 

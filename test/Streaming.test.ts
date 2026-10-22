@@ -4,14 +4,16 @@
  * split, while parsing as the chunks arrive.
  */
 import * as Predicate from "effect/Predicate"
-import { Effect, Result, Stream } from "effect"
-import { describe, expect, it } from "vite-plus/test"
+import * as Effect from "effect/Effect"
+import * as Result from "effect/Result"
+import * as Stream from "effect/Stream"
+import { assert, describe, expect, it } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
 import * as Http from "../examples/http.js"
 import * as Ini from "../examples/ini.js"
 import * as Json from "../examples/json.js"
 import * as JsonFast from "../examples/json-fast.js"
-import { makeJson } from "../examples/json-text.js"
+import { jsonGrammar } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
 import type { Input } from "../src/index.js"
 import { Ascii, Compiler, Encoding, Parser, ParserStream, Text, Token } from "../src/index.js"
@@ -93,7 +95,7 @@ describe("streaming parses", () => {
     ["Text.utf8", Text.utf8],
     ["Text.utf16le", Text.utf16le]
   ] as const)("json-text with %s", (_, T) => {
-    const p = makeJson(T as Text.TextParsers<any>)
+    const p = jsonGrammar(T as Text.TextParsers<any>)
     jsonDocs.forEach((doc, i) => same(p, (T.encoding as Encoding.Encoding<any>).encode(doc), i))
   })
 
@@ -101,12 +103,12 @@ describe("streaming parses", () => {
     ["Text.string", Text.string],
     ["Text.utf8", Text.utf8]
   ] as const)("json-fast with %s (objects built with fromEntries)", (_, T) => {
-    const p = JsonFast.makeJson(T as Text.TextParsers<any>)
+    const p = JsonFast.jsonGrammar(T as Text.TextParsers<any>)
     jsonDocs.forEach((doc, i) => same(p, (T.encoding as Encoding.Encoding<any>).encode(doc), i))
   })
 
   it("json-text on malformed bytes", () => {
-    const p = makeJson(Text.utf8)
+    const p = jsonGrammar(Text.utf8)
     const random = rng(8)
     const base = Encoding.utf8.encode('["aé😀", {"k": "v\\n"}, 12, [true]]')
     for (let i = 0; i < 100; i++) {
@@ -180,9 +182,7 @@ describe("incremental parsing", () => {
       // Each element is parsed about once, not once per chunk
       expect(chunks.length).toBeGreaterThan(500)
       expect(parsed).toBeLessThan(2000 * 1.5)
-      if (backend !== "interpreted") {
-        expect(Registry.compiled(list, 0, true)?.backend).toBe(backend)
-      }
+      if (backend !== "interpreted") assert.strictEqual(Registry.compiled(list, 0, true)?.backend, backend)
     }
   )
 
@@ -223,7 +223,7 @@ describe("incremental parsing", () => {
 })
 
 describe("parseReadable and parseResponse", () => {
-  const json = makeJson(Text.utf8)
+  const json = jsonGrammar(Text.utf8)
   const doc = { a: [1, 2.5, "é😀"], b: { c: null, d: true } }
 
   it("parses a fetch Response body", async () => {

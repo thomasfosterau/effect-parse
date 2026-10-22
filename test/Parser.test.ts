@@ -1,4 +1,7 @@
-import { Context, Effect, Option, Result } from "effect"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import { describe, expect, it } from "vite-plus/test"
 import { Parser, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
@@ -419,10 +422,13 @@ describe("Parser", () => {
     })
 
     it("ParseError is yieldable", () => {
-      const program = Effect.gen(function* () {
-        return yield* Parser.parseEffect(Token.literal("x"), "y")
-      })
-      const exit = Effect.runSyncExit(Effect.flip(program))
+      const exit = Effect.runSyncExit(
+        Effect.flip(
+          Effect.gen(function* () {
+            return yield* Parser.parseEffect(Token.literal("x"), "y")
+          })
+        )
+      )
       expect(exit._tag).toBe("Success")
     })
   })

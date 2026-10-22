@@ -27,7 +27,7 @@ import * as Resume from "../resume.js"
 import { charOf, fastLimit, latin1, string, utf16be, utf16le, utf8, validate } from "../text.js"
 import type { ClosureCompiler, Fallback, Step } from "./closure.js"
 import { backend as closureBackend, createClosureCompiler } from "./closure.js"
-import { entriesShape, pairOf } from "./entries.js"
+import { buildsEntries, pairOf } from "./entries.js"
 import type { Backend } from "./registry.js"
 import type { First } from "./first.js"
 import { planAlt, Strict } from "./first.js"
@@ -425,7 +425,7 @@ class Emitter {
           if (code !== undefined) return code
         }
         // Streaming builds keep the array, which their checkpoints hold
-        if (node.f === fromEntries && out !== null && !this.resumable && entriesShape(node.self)) {
+        if (node.f === fromEntries && out !== null && !this.resumable && buildsEntries(node.self)) {
           return this.entries(node.self, out, fail, fn, d)
         }
         const t = this.v(fn)
@@ -841,7 +841,7 @@ class Emitter {
   }
 
   /**
-   * `map(self, Object.fromEntries)`, where `entriesShape(self)`: builds the
+   * `map(self, Object.fromEntries)`, where `buildsEntries(self)`: builds the
    * object directly, assigning each entry as it is parsed (see
    * `internal/entries.ts`), without the pairs and their array. `cut`,
    * `preceded`, `terminated` and diagnostics around the repetition are
@@ -868,7 +868,7 @@ class Emitter {
       case "Separated": {
         const pair = pairOf(node.self)
         if (pair === undefined) {
-          // Not reached (`entriesShape` found the pair): build the pairs, then the object
+          // Not reached (`buildsEntries` found the pair): build the pairs, then the object
           const t = this.v(fn)
           return this.gen(p, true, t, fail, fn, d) + `${out}=${this.const(fromEntries)}(${t});`
         }

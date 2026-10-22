@@ -14,8 +14,8 @@
  */
 import { Compiler, Encoding, Parser, Text } from "@thomasfosterau/effect-parse"
 import { json } from "../examples/json.ts"
-import { makeJson as makeFastJson } from "../examples/json-fast.ts"
-import { makeJson } from "../examples/json-text.ts"
+import { jsonGrammar as fastJsonGrammar } from "../examples/json-fast.ts"
+import { jsonGrammar } from "../examples/json-text.ts"
 import { parseFused } from "./json-fused.ts"
 
 const doc = JSON.stringify(
@@ -53,11 +53,11 @@ interface Case {
 const cases: Array<Case> = []
 const grammars = [
   ["Token/Ascii, string", json, doc],
-  ["Text.string", makeJson(Text.string), doc],
-  ["Text.utf8", makeJson(Text.utf8), utf8],
-  ["Text.utf16le", makeJson(Text.utf16le), utf16],
-  ["json-fast.ts, Text.string", makeFastJson(Text.string), doc],
-  ["json-fast.ts, Text.utf8", makeFastJson(Text.utf8), utf8]
+  ["Text.string", jsonGrammar(Text.string), doc],
+  ["Text.utf8", jsonGrammar(Text.utf8), utf8],
+  ["Text.utf16le", jsonGrammar(Text.utf16le), utf16],
+  ["json-fast.ts, Text.string", fastJsonGrammar(Text.string), doc],
+  ["json-fast.ts, Text.utf8", fastJsonGrammar(Text.utf8), utf8]
 ] as const
 for (const [group, grammar, input] of grammars) {
   for (const backend of backends) {
@@ -65,7 +65,7 @@ for (const [group, grammar, input] of grammars) {
     cases.push({ group, name: backend, run: () => Parser.parseSync(p, input) })
   }
 }
-const jsonString = variant(makeJson(Text.string), "jit")
+const jsonString = variant(jsonGrammar(Text.string), "jit")
 cases.push({
   group: "references",
   name: "TextDecoder + Text.string (jit)",

@@ -58,7 +58,7 @@ import { bounds, NodeId } from "./internal/node.js"
  * @since 0.1.0
  * @category type ids
  */
-export const TypeId: "~effect-parse/Parser" = "~effect-parse/Parser"
+export const TypeId = "~effect-parse/Parser" as const
 
 /**
  * A parser that consumes input of type `I`, producing a value of type `A`,
@@ -1694,7 +1694,7 @@ export const gen = <Eff extends Parser.Any, AEff>(
  * @since 0.1.0
  * @category do notation
  */
-export const Do: Parser<{}, never, never, Input> = /*#__PURE__*/ succeed({})
+export const Do: Parser<Record<never, never>, never, never, Input> = /*#__PURE__*/ succeed({})
 
 /**
  * Binds the output of a parser to a field of the Do record.
