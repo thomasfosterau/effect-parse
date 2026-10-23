@@ -7,6 +7,8 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { describe, expect, it } from "vite-plus/test"
 import { Ascii, Binary, Expression, Nom, Parser, ParserSchema, ParserStream, Token } from "../src/index.js"
+import { eagerExpression } from "./eager.js"
+import { allStrings } from "./generators.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 
 describe("Expression", () => {
@@ -80,6 +82,78 @@ describe("Expression", () => {
       args: [{ op: "+", args: [1, { op: "*", args: [2, 3] }] }, 4]
     })
   })
+
+  it("reports the failure that merging every tie as it happens would", () => {
+    // The operator loop leaves tied failures unmerged until they are read
+    // (#44), as `Parser.alt` does (#38); `eagerExpression` is the algorithm it
+    // replaced. Operators tie with each other, with the operand and with
+    // nested alternatives, and a postfix call reruns the whole expression.
+    type Make = (options: {
+      readonly operand: Parser.Parser<unknown, unknown>
+      readonly operators: ReadonlyArray<Expression.Operator<unknown, unknown>>
+    }) => Parser.Parser<unknown, unknown>
+    const lit = (s: string): Parser.Parser<string, unknown> => Token.literal(s)
+    const grammars = (make: Make): ReadonlyArray<Parser.Parser<unknown, unknown>> => {
+      const variants: ReadonlyArray<(self: () => Parser.Parser<unknown, unknown>) => Parameters<Make>[0]> = [
+        (self) => ({
+          operand: Parser.alt(lit("1"), Parser.delimited(lit("("), Parser.suspend(self), lit(")"))),
+          operators: [
+            Expression.prefix(lit("-"), 4, (_, x) => ["neg", x]),
+            Expression.prefix(Parser.alt(lit("~"), lit("!")), 4, (_, x) => ["not", x]),
+            Expression.postfix(lit("!"), 5, (x) => ["fact", x]),
+            Expression.postfix(Parser.context(lit("?"), "query"), 5, (x) => ["opt", x]),
+            Expression.infixRight(lit("^"), 3, (l, _, r) => ["^", l, r]),
+            Expression.infixLeft(Parser.alt(lit("*"), lit("/")), 2, (l, _, r) => ["*", l, r]),
+            Expression.infixLeft(lit("+"), 1, (l, _, r) => ["+", l, r]),
+            Expression.infixLeft(lit("-"), 1, (l, _, r) => ["-", l, r])
+          ]
+        }),
+        (self) => ({
+          operand: Parser.alt(Parser.alt(lit("1"), lit("2")), Parser.context(lit("x"), "x")),
+          operators: [
+            Expression.postfix(lit("!"), 5, (x) => ["fact", x]),
+            // A call suffix: its argument is a whole nested expression
+            Expression.postfix(Parser.delimited(lit("("), Parser.suspend(self), lit(")")), 6, (x, arg) => [x, arg]),
+            Expression.infixLeft(Parser.preceded(lit("^"), Parser.failMessage("no ^")), 3, (l, _, r) => [l, r]),
+            Expression.infixLeft(Parser.preceded(lit("*"), Parser.cut(lit("*"))), 2, (l, _, r) => ["**", l, r]),
+            Expression.infixLeft(lit("+"), 1, (l, _, r) => ["+", l, r]),
+            Expression.infixLeft(lit("-"), 1, (l, _, r) => ["-", l, r])
+          ]
+        }),
+        (self) => ({
+          operand: Parser.preceded(Parser.opt(lit("(")), lit("1")),
+          operators: [
+            Expression.prefix(lit("-"), 2, (_, x) => ["neg", x]),
+            Expression.prefix(Parser.preceded(lit("+"), Parser.fail({ code: 1 })), 2, (_, x) => x),
+            Expression.infixLeft(Parser.delimited(lit("("), Parser.suspend(self), lit(")")), 1, (l, o, r) => [o, l, r])
+          ]
+        })
+      ]
+      return variants.map((variant) => {
+        const p: Parser.Parser<unknown, unknown> = make(variant(() => p))
+        return Parser.seq(Parser.opt(Parser.seq(lit("x"), p, lit("x"))), p)
+      })
+    }
+    const lazy = grammars(Expression.make)
+    const eager = grammars(eagerExpression)
+    const inputs = [
+      ...allStrings(["1", "-", "!", "+", "(", ")", "^", "*", "x"], 3),
+      "1+1*1",
+      "-1!?^1",
+      "1(1)(1+",
+      "1(1+1)x",
+      "1**1+",
+      "(1(1)1",
+      "x1+1x1",
+      "~!1?!",
+      "1(2(x)!)+"
+    ]
+    lazy.forEach((p, i) =>
+      inputs.forEach((input) =>
+        expect(Parser.parse(p, input), `grammar ${i} on "${input}"`).toEqual(Parser.parse(eager[i], input))
+      )
+    )
+  }, 60_000)
 })
 
 describe("ParserStream", () => {

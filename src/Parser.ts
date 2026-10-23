@@ -1944,7 +1944,12 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
     const done = new Array<boolean>(n).fill(false)
     let remaining = n
     while (remaining > 0) {
+      // The round's failures merged left to right, with the last two tied
+      // ones left unmerged in `tie1` and `tie2`, as in `alt`: a round in
+      // which some parser matches discards them unmerged.
       let failure: Failure | undefined
+      let tie1: Failure | undefined
+      let tie2: Failure | undefined
       let matched = false
       for (let i = 0; i < n; i++) {
         if (done[i]) continue
@@ -1958,11 +1963,28 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
           break
         }
         if (state.mode !== "Backtrack") return Fail
-        failure = failure === undefined ? state.failure : mergeFailures(failure, state.failure)
         state.pos = start
+        const head = state.failureHead
+        if (failure === undefined || head.offset > failure.offset) {
+          failure = head
+          tie1 = state.failureTie1
+          tie2 = state.failureTie2
+        } else if (head.offset === failure.offset) {
+          const f = state.failure
+          if (tie1 === undefined) tie1 = f
+          else if (tie2 === undefined) tie2 = f
+          else {
+            failure = mergeTiedFailures(failure, tie1, mergeExpected(failure.expected, tie1.expected))
+            tie1 = tie2
+            tie2 = f
+          }
+        }
       }
-      // `failure` is set: some parser is not done yet, and each one that fails sets it
-      if (!matched) return state.failWith("Backtrack", failure ?? state.failure)
+      if (!matched) {
+        // `failure` is set: some parser is not done yet, and each one that fails sets it
+        if (failure === undefined) return state.failWith("Backtrack", state.failure)
+        return tie1 === undefined ? state.failWith("Backtrack", failure) : state.failTies(failure, tie1, tie2)
+      }
     }
     return out as any
   }, "permutation")

@@ -16,7 +16,7 @@ import * as JsonFast from "../examples/json-fast.js"
 import { jsonGrammar } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
 import type { Input } from "../src/index.js"
-import { Ascii, Compiler, Encoding, Parser, ParserStream, Text, Token } from "../src/index.js"
+import { Ascii, Compiler, Encoding, Expression, Parser, ParserStream, Text, Token } from "../src/index.js"
 import * as Registry from "../src/internal/compiler/registry.js"
 import { mutations, randomJson, rng } from "./generators.js"
 
@@ -147,7 +147,17 @@ describe("streaming parses", () => {
       Parser.alt(Parser.seq(Parser.repeat(a), b), Parser.seq(Parser.repeat(a), Token.literal("c"))),
       Parser.repeat(
         Parser.alt(Parser.alt(Token.literal("ab"), b, Token.literal("c")), Token.literal("+"), Ascii.digit1)
-      )
+      ),
+      Parser.repeat(Parser.permutation(Parser.alt(Token.literal("ab"), b), Parser.alt(a, Token.literal("c")))),
+      Expression.make({
+        operand: Parser.alt(Ascii.digit1, Token.literal("ab")),
+        operators: [
+          Expression.prefix(Parser.alt(Token.literal("+"), Token.literal("n")), 3, (_, x) => `-${x}`),
+          Expression.postfix(Token.literal(";"), 4, (x) => `${x};`),
+          Expression.infixLeft(Parser.alt(a, Token.literal("+")), 1, (l, _, r) => `(${l}+${r})`),
+          Expression.infixLeft(Parser.alt(b, Token.literal("c")), 2, (l, _, r) => `(${l}*${r})`)
+        ]
+      })
     ]
     const random = rng(9)
     const alphabet = 'ab+1\\"n;c'
