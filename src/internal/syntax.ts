@@ -223,6 +223,11 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
     return super.failWith(mode, failure)
   }
 
+  override failTies(head: Failure, tie1: Failure, tie2: Failure | undefined): Fail {
+    if (head.offset > this.highWater) this.highWater = head.offset
+    return super.failTies(head, tie1, tie2)
+  }
+
   override setHint(offset: number, expected: ReadonlyArray<string>): void {
     if (offset > this.highWater) this.highWater = offset
     super.setHint(offset, expected)

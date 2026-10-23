@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import { describe, expect, it } from "vite-plus/test"
-import { Parser, Token } from "../src/index.js"
+import { Input, Parser, Token } from "../src/index.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 
 const a = Token.literal("a")
@@ -222,6 +222,82 @@ describe("Parser", () => {
       const err = expectFailure(p, "abb")
       expect(err.offset).toBe(2)
       expect(err.expected).toEqual(['"a"'])
+    })
+
+    it("alt reports the failure that merging every tie as it happens would", () => {
+      // `alt` leaves ties unmerged until they are read (#38). `eagerAlt` is
+      // the algorithm it replaced, merging every failure as it happens: both
+      // must report the same failure, furthest failure and hint.
+      type Alt = (...parsers: Array<Parser.Parser<unknown>>) => Parser.Parser<unknown>
+      const eagerAlt: Alt = (...ps) =>
+        Parser.make((state) => {
+          const start = state.pos
+          const attempt = (i: number, failure: Input.Failure | undefined): unknown => {
+            if (i === ps.length) return state.failWith("Backtrack", failure ?? state.failure)
+            const r = ps[i].step(state)
+            if (r !== Input.Fail) {
+              if (failure !== undefined && failure.offset === state.pos) state.setHint(failure.offset, failure.expected)
+              return r
+            }
+            if (state.mode !== "Backtrack") return Input.Fail
+            const merged = failure === undefined ? state.failure : Input.mergeFailures(failure, state.failure)
+            state.pos = start
+            return attempt(i + 1, merged)
+          }
+          return attempt(0, undefined)
+        })
+      const grammar = (alt: Alt) => {
+        const c = Token.literal("c")
+        const leaves: ReadonlyArray<Parser.Parser<unknown>> = [
+          a,
+          ab,
+          Parser.context(b, "b"),
+          Parser.preceded(c, Parser.failMessage("boom")),
+          Parser.preceded(b, Parser.fail({ code: 1 })),
+          Parser.preceded(a, Parser.cut(b)),
+          Parser.seq(b, a),
+          Parser.opt(a)
+        ]
+        return leaves.flatMap((x, i) =>
+          leaves.map((y, j) => {
+            const z = leaves[(i + j + 1) % leaves.length]
+            return Parser.seq(
+              // A swallowed failure further in than the reported one, reported instead of it
+              Parser.opt(Parser.seq(Token.literal("x"), alt(x, alt(y, c), z))),
+              Parser.context(alt(alt(x, y, c), alt(z, c, b), alt(b, alt(y, a), c, ab), z), "outer"),
+              Parser.opt(alt(alt(x, b), c))
+            )
+          })
+        )
+      }
+      const lazy = grammar(Parser.alt)
+      const eager = grammar(eagerAlt)
+      // Every input of up to 3 characters
+      const alphabet = ["a", "b", "c", "x"]
+      const extend = (strings: ReadonlyArray<string>) => strings.flatMap((s) => alphabet.map((ch) => s + ch))
+      const one = extend([""])
+      const two = extend(one)
+      const inputs = ["", ...one, ...two, ...extend(two)]
+      lazy.forEach((p, i) =>
+        inputs.forEach((input) =>
+          expect(Parser.parse(p, input), `grammar ${i} on "${input}"`).toEqual(Parser.parse(eager[i], input))
+        )
+      )
+      // Well under a second on an idle machine; vitest's 5 s default is too tight under load
+    }, 30_000)
+
+    it("State keeps an alt's tied failures unmerged until they are read", () => {
+      const p = Parser.alt(Parser.alt(a, b, Token.literal("c")), Token.literal("d"))
+      const state = new Input.State("x")
+      expect(p.step(state)).toBe(Input.Fail)
+      expect(state.failureTie1).toBeDefined()
+      expect(state.deepest?.expected).toEqual(['"a"', '"b"', '"c"', '"d"'])
+      expect(state.failureTie1).toBeUndefined()
+      expect(state.deepest).toBe(state.failure)
+      expect(state.reportedFailure().expected).toEqual(['"a"', '"b"', '"c"', '"d"'])
+      state.reset()
+      expect(state.failure.expected).toEqual([])
+      expect(state.deepest).toBeUndefined()
     })
 
     it("alt stops at cut", () => {

@@ -144,7 +144,10 @@ describe("streaming parses", () => {
       Parser.terminated(Ascii.escaped(Token.takeTill('\\"'), "\\", Token.oneOf('\\"n')), Token.literal('"')),
       Parser.terminated(Ascii.takeEscaped(Ascii.alpha1, "\\", Token.oneOf("an")), Token.literal(";")),
       Parser.repeat(Parser.separated(a, b), { min: 1, max: 3 }),
-      Parser.alt(Parser.seq(Parser.repeat(a), b), Parser.seq(Parser.repeat(a), Token.literal("c")))
+      Parser.alt(Parser.seq(Parser.repeat(a), b), Parser.seq(Parser.repeat(a), Token.literal("c"))),
+      Parser.repeat(
+        Parser.alt(Parser.alt(Token.literal("ab"), b, Token.literal("c")), Token.literal("+"), Ascii.digit1)
+      )
     ]
     const random = rng(9)
     const alphabet = 'ab+1\\"n;c'
