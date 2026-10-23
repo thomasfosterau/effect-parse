@@ -1,5 +1,19 @@
 # @thomasfosterau/effect-parse
 
+## 0.3.0
+
+### Minor Changes
+
+- [#41](https://github.com/thomasfosterau/effect-parse/pull/41) [`2a57d83`](https://github.com/thomasfosterau/effect-parse/commit/2a57d836303e8f5453112c8df89cf4ef59f01608) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - Add parsers and printers derived from Effect `Schema`s. `ParserSchema.toParser(schema)` derives a parser from a schema, guided by annotations (`ParserSchema.annotate`, under the key `ParserSchema.annotationKey`) that give a node's `prefix`, `suffix`, `separator`, `keySeparator` and `whitespace`, or a `parser` and `print` that replace the derived ones. Structs, tuples, arrays, records, unions, literals, enums, template literals and recursive schemas are derived; the schema's checks and transformations run on the result. `ParserSchema.toPrinter(schema)` derives the printer of the same text. `ParserSchema.fromSchema(schema)` wraps both as a `Schema` from `string`, whose encoding checks that the text reads back as the value.
+  
+  The annotation key is declared on `Schema.Annotations.Annotations` by module augmentation.
+
+### Patch Changes
+
+- [#43](https://github.com/thomasfosterau/effect-parse/pull/43) [`6e69d9e`](https://github.com/thomasfosterau/effect-parse/commit/6e69d9ebe6c787430858192ff8eac5e96feb2db6) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - Interpreted `Parser.alt` no longer merges the failures of branches that fail at the same offset until the merged failure is read. A nested `alt` hands its tied failures to the enclosing one unmerged, so an `alt` whose next branch consumes input never pays for the merge: about 30% faster on a token-heavy interpreted grammar. Error results are unchanged. `Input.State`'s `failure` and `deepest` are now accessors (reads and writes behave as before).
+
+- [#46](https://github.com/thomasfosterau/effect-parse/pull/46) [`37bd245`](https://github.com/thomasfosterau/effect-parse/commit/37bd245604ea64a0236b844e933e91881c0be072) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - `Parser.permutation` and `Expression.make`'s operator loop no longer merge the failures of attempts that fail at the same offset until the merged failure is read, as `Parser.alt` already does. A round of a permutation in which some parser matches, or an operator round in which some operator matches, discards its tied failures without merging them, and a nested `alt`'s ties are taken over unmerged. Error results are unchanged.
+
 ## 0.2.0
 
 ### Minor Changes
