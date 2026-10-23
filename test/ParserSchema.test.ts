@@ -5,6 +5,7 @@ import * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaTransformation from "effect/SchemaTransformation"
 import { assert, describe, expect, it } from "vite-plus/test"
 import { Ascii, Parser, ParserSchema, Token } from "../src/index.js"
+import { mutations } from "./generators.js"
 import { expectFailure, expectSuccess } from "./utils.js"
 
 const success = <A, E>(result: Result.Result<A, E>): A => {
@@ -12,7 +13,30 @@ const success = <A, E>(result: Result.Result<A, E>): A => {
   return result.success
 }
 
-const { annotate, toParser } = ParserSchema
+const { annotate, toParser, toPrinter } = ParserSchema
+
+/** The text `schema`'s printer writes for `value`, failing the test if it cannot. */
+const printed = <S extends Schema.Codec<any, any>>(schema: S, value: S["Type"]): string =>
+  success(toPrinter(schema)(value))
+
+/** Why `schema`'s printer cannot write `value`. */
+const unprinted = <S extends Schema.Codec<any, any>>(schema: S, value: S["Type"]): string => {
+  const result = toPrinter(schema)(value)
+  assert(Result.isFailure(result), `expected a failure, got ${Result.isSuccess(result) ? result.success : ""}`)
+  return result.failure.message
+}
+
+/** Checks that every value parsed from `inputs` prints as text that parses back to it. */
+const roundTrips = <S extends Schema.Codec<any, any>>(schema: S, inputs: ReadonlyArray<string>): number => {
+  const parser = toParser(schema)
+  const print = toPrinter(schema)
+  const values = inputs.map((input) => Parser.parse(parser, input)).filter(Result.isSuccess)
+  values.forEach(({ success: value }) => {
+    const text = success(print(value))
+    expect(success(Parser.parse(parser, text)), text).toEqual(value)
+  })
+  return values.length
+}
 
 describe("ParserSchema.toParser", () => {
   describe("primitives", () => {
@@ -132,6 +156,13 @@ describe("ParserSchema.toParser", () => {
       )
       expectSuccess(p, " { Ann Lee , 34 } ", { name: "Ann Lee", age: 34 })
       expectSuccess(p, "{Ann,34}", { name: "Ann", age: 34 })
+      // Whitespace around an unannotated string is trimmed even where no grammar text precedes it,
+      // and does not count as the string
+      const spaced = toParser(
+        Schema.Tuple([Schema.String, Schema.Int]).pipe(annotate({ separator: ",", whitespace: true }))
+      )
+      expectSuccess(spaced, " a ,1", ["a", 1])
+      expectFailure(spaced, "  ,1")
     })
   })
 
@@ -259,7 +290,9 @@ describe("ParserSchema.toParser", () => {
 
     it("validates an annotated parser's output against the schema's type", () => {
       // `annotate` rejects this parser at compile time; `.annotate` does not
-      const Yes = Schema.Literal("yes").annotate({ parser: Token.takeWhile(Ascii.isAlpha, { min: 1 }) })
+      const Yes = Schema.Literal("yes").annotate({
+        [ParserSchema.annotationKey]: Token.takeWhile(Ascii.isAlpha, { min: 1 })
+      })
       expectSuccess(toParser(Yes), "yes", "yes")
       expect(expectFailure(toParser(Yes), "no").cause).toBeInstanceOf(Schema.SchemaError)
     })
@@ -351,8 +384,183 @@ describe("ParserSchema.fromSchema", () => {
     expect(() => Schema.decodeUnknownSync(Pair)("width")).toThrow(/expected "="/)
   })
 
+  it("encodes with the derived printer", () => {
+    const Point = ParserSchema.fromSchema(
+      Schema.Struct({ x: Schema.Int, y: Schema.Int }).pipe(annotate({ prefix: "(", separator: ",", suffix: ")" }))
+    )
+    expect(Schema.encodeSync(Point)({ x: 1, y: -2 })).toBe("(1,-2)")
+    expect(Schema.decodeSync(Point)("(1,-2)")).toEqual({ x: 1, y: -2 })
+  })
+
+  it("fails to encode a value its printer cannot write", () => {
+    const Pair2 = ParserSchema.fromSchema(Schema.Tuple([Schema.String, Schema.Int]).pipe(annotate({ separator: "=" })))
+    expect(() => Schema.encodeSync(Pair2)(["a=b", 1])).toThrow(/containing "="/)
+  })
+
+  it("refuses to encode text that reads back as a different value", () => {
+    const S = ParserSchema.fromSchema(
+      Schema.Struct({ a: Schema.optionalKey(Schema.Int), b: Schema.Int, c: Schema.optionalKey(Schema.Int) }).pipe(
+        annotate({ separator: "," })
+      )
+    )
+    expect(Schema.encodeSync(S)({ a: 1, b: 2 })).toBe("1,2")
+    // "2,3" reads back as { a: 2, b: 3 }
+    expect(() => Schema.encodeSync(S)({ b: 2, c: 3 })).toThrow(/"2,3", which does not read back/)
+  })
+
   it("composes with a token parser", () => {
     const Ident = Schema.String.pipe(annotate(Token.takeWhile(Ascii.isAlpha, { min: 1 })))
     expect(Schema.decodeUnknownSync(ParserSchema.fromSchema(Ident))("abc")).toBe("abc")
+  })
+})
+
+describe("ParserSchema.toPrinter", () => {
+  it("prints primitives as they are parsed", () => {
+    expect(printed(Schema.Number, -1.5)).toBe("-1.5")
+    expect(printed(Schema.Int, 42)).toBe("42")
+    expect(printed(Schema.BigInt, 12n)).toBe("12")
+    expect(printed(Schema.Boolean, false)).toBe("false")
+    expect(printed(Schema.Null, null)).toBe("null")
+    expect(printed(Schema.Undefined, undefined)).toBe("")
+    expect(printed(Schema.Literals(["<", "<="]), "<=")).toBe("<=")
+    expect(printed(Schema.TemplateLiteral(["user-", Schema.Number]), "user-7")).toBe("user-7")
+    expect(printed(Schema.String, "a b")).toBe("a b")
+  })
+
+  it("prints numbers that read back", () => {
+    const p = toParser(Schema.Number)
+    ;[0, -0.5, 1e21, 1e-7, Infinity, -Infinity].forEach((n) => {
+      expect(success(Parser.parse(p, printed(Schema.Number, n)))).toBe(n)
+    })
+    expect(Number.isNaN(success(Parser.parse(p, printed(Schema.Number, NaN))))).toBe(true)
+  })
+
+  it("prints structs, leaving out missing optional fields with their separators", () => {
+    const S = Schema.Struct({
+      a: Schema.optionalKey(Schema.Int),
+      b: Schema.Int,
+      c: Schema.optionalKey(Schema.Int)
+    }).pipe(annotate({ prefix: "(", separator: ",", suffix: ")" }))
+    expect(printed(S, { a: 1, b: 2, c: 3 })).toBe("(1,2,3)")
+    expect(printed(S, { b: 2 })).toBe("(2)")
+    expect(printed(S, { b: 2, c: 3 })).toBe("(2,3)")
+  })
+
+  it("prints tuples and arrays", () => {
+    const T = Schema.TupleWithRest(Schema.Tuple([Schema.Literal("v"), Schema.optionalKey(Schema.Int)]), [
+      Schema.Boolean
+    ]).pipe(annotate({ separator: " " }))
+    expect(printed(T, ["v"])).toBe("v")
+    expect(printed(T, ["v", 1, true, false])).toBe("v 1 true false")
+    const A = Schema.Array(Schema.Int).pipe(annotate({ prefix: "[", separator: ",", suffix: "]" }))
+    expect(printed(A, [])).toBe("[]")
+    expect(printed(A, [1, 2])).toBe("[1,2]")
+  })
+
+  it("prints keyed structs in declared order, then records", () => {
+    const Config = Schema.Struct({ host: Schema.String, port: Schema.Int, debug: Schema.optionalKey(Schema.Boolean) })
+    expect(printed(Config.pipe(annotate({ separator: ";", keySeparator: "=" })), { port: 80, host: "a" })).toBe(
+      "host=a;port=80"
+    )
+    const R = Schema.StructWithRest(Schema.Struct({ id: Schema.Literal("x") }), [
+      Schema.Record(Schema.String, Schema.String)
+    ]).pipe(annotate({ separator: "&", keySeparator: "=" }))
+    expect(printed(R, { b: "2", id: "x", a: "1" })).toBe("id=x&b=2&a=1")
+  })
+
+  it("prints transformations' encoded side", () => {
+    class Point extends Schema.Class<Point>("Point")({ x: Schema.Int, y: Schema.Int }) {}
+    expect(printed(Point.pipe(annotate({ separator: ",", prefix: "<", suffix: ">" })), new Point({ x: 1, y: 2 }))).toBe(
+      "<1,2>"
+    )
+    const Padded = Schema.String.pipe(Schema.decodeTo(Schema.NumberFromString, SchemaTransformation.trim()))
+    expect(printed(Padded, 12)).toBe("12")
+  })
+
+  it("prints a union's value with the first member it belongs to", () => {
+    const U = Schema.Union([Schema.Int, Schema.Boolean, Schema.Array(Schema.Int).pipe(annotate({ separator: "," }))])
+    expect(printed(U, true)).toBe("true")
+    expect(printed(U, [1, 2])).toBe("1,2")
+  })
+
+  it("falls back to the next member that can write the value", () => {
+    const Quoted = Schema.String.pipe(
+      annotate({
+        parser: Parser.delimited(Token.literal('"'), Token.takeTill('"'), Token.literal('"')),
+        print: (s) => `"${s}"`
+      })
+    )
+    const row = (member: ReadonlyArray<typeof Quoted | typeof Schema.String>) =>
+      Schema.Tuple([Schema.Union(member), Schema.Int]).pipe(annotate({ separator: ";" }))
+    // The plain string cannot hold ";", so the quoted one writes it
+    const PlainFirst = row([Schema.String, Quoted])
+    expect(printed(PlainFirst, ["a;b", 1])).toBe('"a;b";1')
+    expect(printed(PlainFirst, ["a", 1])).toBe("a;1")
+    // But the parser takes the plain string `"a` and does not come back to the union,
+    // so the text does not read back, and `fromSchema` refuses to encode it
+    expectFailure(toParser(PlainFirst), '"a;b";1')
+    expect(() => Schema.encodeSync(ParserSchema.fromSchema(PlainFirst))(["a;b", 1])).toThrow(/does not read back/)
+    // Quoted first, every value reads back
+    const QuotedFirst = row([Quoted, Schema.String])
+    expect(printed(QuotedFirst, ["a;b", 1])).toBe('"a;b";1')
+    expect(Schema.decodeSync(ParserSchema.fromSchema(QuotedFirst))('"a;b";1')).toEqual(["a;b", 1])
+  })
+
+  it("prints recursive schemas", () => {
+    interface Tree {
+      readonly value: number
+      readonly children: ReadonlyArray<Tree>
+    }
+    const Tree: Schema.Codec<Tree> = Schema.Struct({
+      value: Schema.Int,
+      children: Schema.Array(Schema.suspend((): Schema.Codec<Tree> => Tree)).pipe(
+        annotate({ prefix: "(", separator: " ", suffix: ")" })
+      )
+    })
+    const tree = { value: 1, children: [{ value: 2, children: [] }] }
+    expect(printed(Tree, tree)).toBe("1(2())")
+  })
+
+  it("uses an annotation's print", () => {
+    const Hex = Schema.Int.pipe(annotate({ parser: Ascii.hexUint, print: (n) => n.toString(16), prefix: "#" }))
+    expect(printed(Hex, 255)).toBe("#ff")
+    expect(unprinted(Schema.Int.pipe(annotate(Ascii.hexUint)), 255)).toContain("no print")
+  })
+
+  it("refuses strings that would not read back", () => {
+    const Pair = Schema.Tuple([Schema.String, Schema.String]).pipe(annotate({ separator: ";" }))
+    expect(unprinted(Pair, ["a;b", "c"])).toContain('containing ";"')
+    expect(unprinted(Pair, ["a;b", "c"])).toContain("[0]")
+    expect(unprinted(Pair, ["", "c"])).toContain("empty")
+    // The last field may hold the separator: nothing follows it
+    expect(printed(Pair, ["a", "b;c"])).toBe("a;b;c")
+    const Spaced = Schema.Tuple([Schema.String, Schema.Int]).pipe(annotate({ separator: ",", whitespace: true }))
+    expect(unprinted(Spaced, [" a", 1])).toContain("whitespace")
+    expect(printed(Spaced, ["a b", 1])).toBe("a b,1")
+  })
+
+  it("validates the value", () => {
+    expect(unprinted(Schema.Int, 1.5)).toContain("integer")
+    // SAFETY: deliberately not of the schema's type, to check that the printer validates it
+    expect(unprinted(Schema.Struct({ a: Schema.Int }), {} as never)).toContain("Missing key")
+  })
+
+  it("throws for a schema it cannot derive", () => {
+    expect(() => toPrinter(Schema.Struct({ a: Schema.Unknown }))).toThrow(/printer for Unknown at \[a\]/)
+  })
+
+  it("writes text that parses back as the value", () => {
+    const Entry = Schema.Struct({
+      name: Schema.String,
+      tags: Schema.Array(Schema.Literals(["a", "ab"])).pipe(annotate({ prefix: "[", separator: ",", suffix: "]" })),
+      size: Schema.optionalKey(Schema.Int)
+    }).pipe(annotate({ separator: ";", whitespace: true }))
+    const Doc = Schema.Union([
+      Schema.Array(Entry).pipe(annotate({ separator: "|" })),
+      Schema.Record(Schema.String, Schema.Int).pipe(annotate({ prefix: "{", separator: ",", keySeparator: "=" }))
+    ])
+    const docs = ["x;[a,ab];3| y ; [ ] ", "{a=1,b=2}"]
+    const inputs = docs.flatMap((doc) => [doc, ...mutations(doc, "xy;[],ab3 |{}=1", 300, 5)])
+    expect(roundTrips(Doc, inputs)).toBeGreaterThan(50)
   })
 })

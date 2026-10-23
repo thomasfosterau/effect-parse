@@ -57,7 +57,9 @@ it("README examples behave as documented", () => {
   const Config = Schema.Struct({
     name: Schema.String,
     origin: SchemaPoint,
-    color: Schema.optionalKey(Schema.Int.pipe(ParserSchema.annotate({ parser: Ascii.hexUint, prefix: "#" })))
+    color: Schema.optionalKey(
+      Schema.Int.pipe(ParserSchema.annotate({ parser: Ascii.hexUint, print: (n) => n.toString(16), prefix: "#" }))
+    )
   }).pipe(ParserSchema.annotate({ separator: ";", keySeparator: "=" }))
   const config = ParserSchema.toParser(Config)
   expect(Parser.parse(config, "origin=( 1, -2 );name=main;color=#ff")).toEqual(
@@ -71,6 +73,9 @@ it("README examples behave as documented", () => {
       "  |                     ^",
       'expected one of "+-" or digit, found "x"'
     ].join("\n")
+  )
+  expect(ParserSchema.toPrinter(Config)({ name: "main", origin: { x: 1, y: -2 }, color: 255 })).toEqual(
+    Result.succeed("name=main;origin=(1,-2);color=#ff")
   )
 
   class OutOfRange extends Schema.TaggedError<OutOfRange>()("OutOfRange", { value: Schema.Number }) {}
