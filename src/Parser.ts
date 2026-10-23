@@ -48,6 +48,7 @@ import * as Entries from "./internal/entries.js"
 import * as Resume from "./internal/resume.js"
 import * as Run from "./internal/run.js"
 import * as Stack from "./internal/stack.js"
+import { TiedFailures } from "./internal/ties.js"
 import type { Node } from "./internal/node.js"
 import { bounds, NodeId } from "./internal/node.js"
 
@@ -1940,16 +1941,13 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
   const steps = parsers.map((p) => p.step)
   const n = steps.length
   return make((state: State<any>) => {
-    const out = new Array(n)
+    // A round's failures, merged only if no parser matches in it (#44)
+    const ties = new TiedFailures()
     const done = new Array<boolean>(n).fill(false)
+    const out = new Array(n)
     let remaining = n
     while (remaining > 0) {
-      // The round's failures merged left to right, with the last two tied
-      // ones left unmerged in `tie1` and `tie2`, as in `alt`: a round in
-      // which some parser matches discards them unmerged.
-      let failure: Failure | undefined
-      let tie1: Failure | undefined
-      let tie2: Failure | undefined
+      ties.clear()
       let matched = false
       for (let i = 0; i < n; i++) {
         if (done[i]) continue
@@ -1964,27 +1962,10 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
         }
         if (state.mode !== "Backtrack") return Fail
         state.pos = start
-        const head = state.failureHead
-        if (failure === undefined || head.offset > failure.offset) {
-          failure = head
-          tie1 = state.failureTie1
-          tie2 = state.failureTie2
-        } else if (head.offset === failure.offset) {
-          const f = state.failure
-          if (tie1 === undefined) tie1 = f
-          else if (tie2 === undefined) tie2 = f
-          else {
-            failure = mergeTiedFailures(failure, tie1, mergeExpected(failure.expected, tie1.expected))
-            tie1 = tie2
-            tie2 = f
-          }
-        }
+        ties.add(state)
       }
-      if (!matched) {
-        // `failure` is set: some parser is not done yet, and each one that fails sets it
-        if (failure === undefined) return state.failWith("Backtrack", state.failure)
-        return tie1 === undefined ? state.failWith("Backtrack", failure) : state.failTies(failure, tie1, tie2)
-      }
+      // Some parser is not done yet, and each one that fails is folded in
+      if (!matched) return ties.fail(state)
     }
     return out as any
   }, "permutation")

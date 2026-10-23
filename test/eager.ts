@@ -94,42 +94,44 @@ export const eagerExpression = (options: { readonly operand: Any; readonly opera
         return Input.Fail
       }
     }
+    // Stops before an operator that binds looser than `minPower`
+    const stop = (lhs: unknown, start: number): unknown => {
+      state.pos = start
+      return lhs
+    }
+    const hint = (postfixFailure: Input.Failure | undefined): void => {
+      const f =
+        postfixFailure === undefined
+          ? failure
+          : failure === undefined
+            ? postfixFailure
+            : Input.mergeFailures(postfixFailure, failure)
+      if (f !== undefined && f.offset === state.pos) state.setHint(f.offset, f.expected)
+    }
+    const infix = (lhs: unknown, start: number): unknown => {
+      const postfixFailure = failure
+      const i = tryOps(state, infixes, false)
+      if (i === -2) return Input.Fail
+      if (i < 0) {
+        hint(postfixFailure)
+        return lhs
+      }
+      const op = infixes[i]
+      const leftPower = op.precedence * 2
+      if (leftPower < minPower) return stop(lhs, start)
+      const opOut = matched
+      const rhs = expr(state, op.associativity === "left" ? leftPower + 1 : leftPower)
+      if (rhs === Input.Fail) return Input.Fail
+      return loop(op.fold(lhs, opOut, rhs))
+    }
     const loop = (lhs: unknown): unknown => {
       const start = state.pos
       failure = undefined
       const q = tryOps(state, postfixes, true)
       if (q === -2) return Input.Fail
-      if (q >= 0) {
-        const op = postfixes[q]
-        if (op.precedence * 2 < minPower) {
-          state.pos = start
-          return lhs
-        }
-        return loop(op.fold(lhs, matched))
-      }
-      const postfixFailure = failure
-      const i = tryOps(state, infixes, false)
-      if (i === -2) return Input.Fail
-      if (i < 0) {
-        const f =
-          postfixFailure === undefined
-            ? failure
-            : failure === undefined
-              ? postfixFailure
-              : Input.mergeFailures(postfixFailure, failure)
-        if (f !== undefined && f.offset === state.pos) state.setHint(f.offset, f.expected)
-        return lhs
-      }
-      const op = infixes[i]
-      const leftPower = op.precedence * 2
-      if (leftPower < minPower) {
-        state.pos = start
-        return lhs
-      }
-      const opOut = matched
-      const rhs = expr(state, op.associativity === "left" ? leftPower + 1 : leftPower)
-      if (rhs === Input.Fail) return Input.Fail
-      return loop(op.fold(lhs, opOut, rhs))
+      if (q < 0) return infix(lhs, start)
+      const op = postfixes[q]
+      return op.precedence * 2 < minPower ? stop(lhs, start) : loop(op.fold(lhs, matched))
     }
     return loop(first)
   }
