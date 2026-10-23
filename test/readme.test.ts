@@ -12,6 +12,7 @@ import {
   Input,
   Parser,
   ParseError,
+  ParserSchema,
   ParserStream,
   Syntax,
   Text,
@@ -49,6 +50,33 @@ it("README examples behave as documented", () => {
   )
   expect(Parser.parseSync(Parser.provideService(number, Radix, 16), "ff")).toBe(255)
   expect(Effect.runSync(Parser.parseEffect(number, "777").pipe(Effect.provideService(Radix, 8)))).toBe(511)
+
+  const SchemaPoint = Schema.Struct({ x: Schema.Int, y: Schema.Int }).pipe(
+    ParserSchema.annotate({ prefix: "(", separator: ",", suffix: ")", whitespace: true })
+  )
+  const Config = Schema.Struct({
+    name: Schema.String,
+    origin: SchemaPoint,
+    color: Schema.optionalKey(
+      Schema.Int.pipe(ParserSchema.annotate({ parser: Ascii.hexUint, print: (n) => n.toString(16), prefix: "#" }))
+    )
+  }).pipe(ParserSchema.annotate({ separator: ";", keySeparator: "=" }))
+  const config = ParserSchema.toParser(Config)
+  expect(Parser.parse(config, "origin=( 1, -2 );name=main;color=#ff")).toEqual(
+    Result.succeed({ name: "main", origin: { x: 1, y: -2 }, color: 255 })
+  )
+  const badConfig = Parser.parse(config, "name=main;origin=(1,x)")
+  expect(Result.isFailure(badConfig) && badConfig.failure.message).toBe(
+    [
+      "Parse error at line 1, column 21:",
+      "1 | name=main;origin=(1,x)",
+      "  |                     ^",
+      'expected one of "+-" or digit, found "x"'
+    ].join("\n")
+  )
+  expect(ParserSchema.toPrinter(Config)({ name: "main", origin: { x: 1, y: -2 }, color: 255 })).toEqual(
+    Result.succeed("name=main;origin=(1,-2);color=#ff")
+  )
 
   class OutOfRange extends Schema.TaggedError<OutOfRange>()("OutOfRange", { value: Schema.Number }) {}
   const port: Parser.Parser<number, string | OutOfRange> = Ascii.decUint.pipe(
