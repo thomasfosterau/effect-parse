@@ -4,6 +4,8 @@ import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import { describe, expect, it } from "vite-plus/test"
 import { Input, Parser, Token } from "../src/index.js"
+import { eagerPermutation } from "./eager.js"
+import { allStrings } from "./generators.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 
 const a = Token.literal("a")
@@ -326,6 +328,43 @@ describe("Parser", () => {
       expectSuccess(p, "abc", ["a", "b", "c"])
       expectFailure(p, "aac")
     })
+
+    it("permutation reports the failure that merging every tie as it happens would", () => {
+      // `permutation` leaves a round's ties unmerged until they are read (#44),
+      // as `alt` does (#38); `eagerPermutation` is the algorithm it replaced.
+      type Permutation = (...parsers: Array<Parser.Parser<unknown, unknown>>) => Parser.Parser<unknown, unknown>
+      const c = Token.literal("c")
+      const leaves: ReadonlyArray<Parser.Parser<unknown, unknown>> = [
+        a,
+        ab,
+        Parser.context(b, "b"),
+        Parser.alt(Parser.alt(a, b), c),
+        Parser.preceded(c, Parser.failMessage("boom")),
+        Parser.preceded(b, Parser.fail({ code: 1 })),
+        Parser.preceded(a, Parser.cut(b)),
+        Parser.opt(c)
+      ]
+      const grammar = (permutation: Permutation) =>
+        leaves.flatMap((x, i) =>
+          leaves.map((y, j) => {
+            const z = leaves[(i + j + 1) % leaves.length]
+            return Parser.seq(
+              // A swallowed failure further in than the reported one, reported instead of it
+              Parser.opt(Parser.seq(Token.literal("x"), permutation(x, y))),
+              Parser.context(permutation(x, Parser.alt(y, c), z), "outer"),
+              Parser.opt(permutation(z, b))
+            )
+          })
+        )
+      const lazy = grammar(Parser.permutation)
+      const eager = grammar(eagerPermutation)
+      const inputs = allStrings(["a", "b", "c", "x"], 4)
+      lazy.forEach((p, i) =>
+        inputs.forEach((input) =>
+          expect(Parser.parse(p, input), `grammar ${i} on "${input}"`).toEqual(Parser.parse(eager[i], input))
+        )
+      )
+    }, 60_000)
   })
 
   describe("repetition", () => {

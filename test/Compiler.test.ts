@@ -497,6 +497,27 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
     )
   ],
   ["permutation", Parser.permutation(a, b, digit)],
+  // Permutation and expression rounds whose attempts tie: merged lazily (#44)
+  [
+    "permutation of tied alts",
+    Parser.seq(
+      Parser.permutation(Parser.alt(ab, Parser.context(b, "b")), Parser.alt(a, digit), Token.literal(".")),
+      Parser.opt(Parser.permutation(Parser.alt(Parser.alt(a, b), digit), Token.literal("+")))
+    )
+  ],
+  [
+    "expression with tied operators",
+    Expression.make({
+      operand: Parser.alt(digit, Parser.context(Parser.seq(a, b), "ab")),
+      operators: [
+        Expression.prefix(Parser.alt(Token.literal("-"), Token.literal("~")), 3, (_, x) => `-${x}`),
+        Expression.postfix(Token.literal("!"), 4, (x) => `${x}!`),
+        Expression.postfix(Parser.alt(Token.literal("?"), Token.literal(".")), 4, (x) => `${x}?`),
+        Expression.infixLeft(Parser.alt(Token.literal("+"), Token.literal("-")), 1, (l, _, r) => `(${l}+${r})`),
+        Expression.infixRight(Token.literal("^"), 2, (l, _, r) => `(${l}^${r})`)
+      ]
+    })
+  ],
   ["mapParser", Token.take(2).pipe(Parser.mapParser(Parser.repeat(a)))],
   [
     "expression",

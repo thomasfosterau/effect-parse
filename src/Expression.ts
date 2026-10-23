@@ -35,10 +35,10 @@
  * @since 0.1.0
  */
 import type { Input, State } from "./Input.js"
-import { Fail, mergeFailures } from "./Input.js"
-import type { Failure } from "./Input.js"
+import { Fail } from "./Input.js"
 import type { Parser } from "./Parser.js"
 import { make as makeParser } from "./Parser.js"
+import { TiedFailures } from "./internal/ties.js"
 
 /**
  * An operator in an expression grammar.
@@ -160,9 +160,11 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
 
   // Attempts each operator in turn. Returns the index of the first match
   // (with its output in `matched`), -1 if none matched, or -2 on a fatal
-  // failure. Expectations of failed attempts are accumulated in `failure`.
+  // failure. Failed attempts are folded into `failures`, merged only when
+  // read (#44): a round in which an operator matches discards them unmerged.
+  // Like `matched`, it is shared by nested expressions, which clear it.
   let matched: unknown
-  let failure: Failure | undefined
+  const failures = new TiedFailures()
   const tryOps = (state: State<any>, ops: ReadonlyArray<OperatorBase<any, any, any>>, mustConsume: boolean): number => {
     const start = state.pos
     for (let i = 0; i < ops.length; i++) {
@@ -177,15 +179,15 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
         return i
       }
       if (state.mode !== "Backtrack") return -2
-      failure = failure === undefined ? state.failure : mergeFailures(failure, state.failure)
       state.pos = start
+      failures.add(state)
     }
     return -1
   }
 
   const expr = (state: State<any>, minPower: number): A | Fail => {
     let lhs: A | Fail
-    failure = undefined
+    failures.clear()
     const p = tryOps(state, prefixes, true)
     if (p === -2) return Fail
     if (p >= 0) {
@@ -195,11 +197,18 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
       if (operandValue === Fail) return Fail
       lhs = op.fold(opOut, operandValue)
     } else {
-      const prefixFailure = failure
+      const prefixFailure = failures.failure
+      const prefixTie1 = failures.tie1
+      const prefixTie2 = failures.tie2
       lhs = operand(state)
       if (lhs === Fail) {
         if (prefixFailure !== undefined && state.mode === "Backtrack") {
-          state.failWith("Backtrack", mergeFailures(prefixFailure, state.failure))
+          // The operand may have parsed nested expressions, which reuse `failures`
+          failures.failure = prefixFailure
+          failures.tie1 = prefixTie1
+          failures.tie2 = prefixTie2
+          failures.add(state)
+          failures.fail(state)
         }
         return Fail
       }
@@ -207,7 +216,7 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
 
     while (true) {
       const start = state.pos
-      failure = undefined
+      failures.clear()
       const q = tryOps(state, postfixes, true)
       if (q === -2) return Fail
       if (q >= 0) {
@@ -219,17 +228,11 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
         lhs = op.fold(lhs, matched)
         continue
       }
-      const postfixFailure = failure
+      // The infix attempts are folded on top of the postfix ones
       const i = tryOps(state, infixes, false)
       if (i === -2) return Fail
       if (i < 0) {
-        const f =
-          postfixFailure === undefined
-            ? failure
-            : failure === undefined
-              ? postfixFailure
-              : mergeFailures(postfixFailure, failure)
-        if (f !== undefined && f.offset === state.pos) state.setHint(f.offset, f.expected)
+        failures.hint(state)
         break
       }
       const op = infixes[i]

@@ -48,6 +48,7 @@ import * as Entries from "./internal/entries.js"
 import * as Resume from "./internal/resume.js"
 import * as Run from "./internal/run.js"
 import * as Stack from "./internal/stack.js"
+import { TiedFailures } from "./internal/ties.js"
 import type { Node } from "./internal/node.js"
 import { bounds, NodeId } from "./internal/node.js"
 
@@ -1940,11 +1941,13 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
   const steps = parsers.map((p) => p.step)
   const n = steps.length
   return make((state: State<any>) => {
-    const out = new Array(n)
+    // A round's failures, merged only if no parser matches in it (#44)
+    const ties = new TiedFailures()
     const done = new Array<boolean>(n).fill(false)
+    const out = new Array(n)
     let remaining = n
     while (remaining > 0) {
-      let failure: Failure | undefined
+      ties.clear()
       let matched = false
       for (let i = 0; i < n; i++) {
         if (done[i]) continue
@@ -1958,11 +1961,11 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
           break
         }
         if (state.mode !== "Backtrack") return Fail
-        failure = failure === undefined ? state.failure : mergeFailures(failure, state.failure)
         state.pos = start
+        ties.add(state)
       }
-      // `failure` is set: some parser is not done yet, and each one that fails sets it
-      if (!matched) return state.failWith("Backtrack", failure ?? state.failure)
+      // Some parser is not done yet, and each one that fails is folded in
+      if (!matched) return ties.fail(state)
     }
     return out as any
   }, "permutation")
