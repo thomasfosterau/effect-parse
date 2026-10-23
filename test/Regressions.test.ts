@@ -233,7 +233,7 @@ describe("deeply nested input reports TooDeep instead of throwing (#14)", () => 
     expect(recoverable.errors.at(-1)?.kind).toBe("TooDeep")
   })
 
-  for (const backend of ["closure", "jit"] as const) {
+  ;(["closure", "jit"] as const).forEach((backend) => {
     it(`compiled (${backend})`, () => {
       const p = Compiler[backend](braced())
       expect(Result.isSuccess(Parser.parse(p, "{".repeat(500) + "}".repeat(500)))).toBe(true)
@@ -241,7 +241,7 @@ describe("deeply nested input reports TooDeep instead of throwing (#14)", () => 
       expectTooDeep(Parser.parsePeek(p, deep))
       expectTooDeep(Parser.parsePartial(p, deep))
     })
-  }
+  })
 
   it("streaming", () => {
     const p = Compiler.jit(braced())

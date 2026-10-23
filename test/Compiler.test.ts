@@ -125,7 +125,7 @@ const same = (p: Parser.Parser.Any, input: Input.Input, context?: Context.Contex
   const options = context === undefined ? undefined : { context }
   const expected = outcome(Parser.parse(p, input as never, options as never))
   const expectedPeek = outcome(Parser.parsePeek(p, input as never, options as never))
-  for (const backend of backends) {
+  backends.forEach((backend) => {
     const c = twin(p, backend)
     const label = `${backend} on ${JSON.stringify(Predicate.isString(input) ? input : Array.from(input as any))}`
     expect(outcome(Parser.parse(c, input as never, options as never)), label).toEqual(expected)
@@ -136,13 +136,13 @@ const same = (p: Parser.Parser.Any, input: Input.Input, context?: Context.Contex
     if (f !== undefined && expected.ok) assert.strictEqual(f.pos, f.end, label)
     // The resumable build agrees with the interpreter on partial and on complete input
     const resumable = resumableStep(c, input)
-    for (const partial of [true, false]) {
+    ;[true, false].forEach((partial) => {
       expect(stepOutcome(resumable, input, partial, context), `${label}, resumable, partial: ${partial}`).toEqual(
         stepOutcome(p.step, input, partial, context)
       )
-    }
+    })
     checked++
-  }
+  })
 }
 
 const jsonAlphabet = '{}[],:"\\0123456789.eE+-tfnulrsa \n\tuéx😀'
@@ -171,7 +171,7 @@ const jsonInputs = [
 
 describe("compiled examples", () => {
   it("json (Token/Ascii)", () => {
-    for (const input of jsonInputs) same(Json.json, input)
+    jsonInputs.forEach((input) => same(Json.json, input))
   })
 
   it.each([
@@ -181,7 +181,7 @@ describe("compiled examples", () => {
     ["Text.utf16be", Text.utf16be, (s: string) => Encoding.utf16be.encode(s)]
   ] as const)("json-text with %s", (_, T, encode) => {
     const p = jsonGrammar(T as Text.TextParsers<any>)
-    for (const input of jsonInputs) same(p, (encode as (s: string) => Input.Input)(input))
+    jsonInputs.forEach((input) => same(p, (encode as (s: string) => Input.Input)(input)))
   })
 
   it.each([
@@ -200,28 +200,28 @@ describe("compiled examples", () => {
       '"\\ud83d"',
       '"\\ud83d\\x"'
     ]
-    for (const input of inputs) {
+    inputs.forEach((input) => {
       const bytes = (encode as (s: string) => Input.Input)(input)
       same(fast, bytes)
       const a = Parser.parse(fast, bytes as never)
       const b = Parser.parse(text, bytes as never)
       expect(Result.isSuccess(a), input).toBe(Result.isSuccess(b))
       expect(Result.getSuccess(a), input).toEqual(Result.getSuccess(b))
-    }
+    })
   })
 
   it("json-text on malformed bytes", () => {
     const p = jsonGrammar(Text.utf8)
     const random = rng(7)
     const base = Encoding.utf8.encode('["aé😀", {"k": "v"}, 12]')
-    for (let i = 0; i < 300; i++) {
+    Array.from({ length: 300 }).forEach((_, i) => {
       const bytes = base.slice()
       const at = Math.floor(random() * bytes.length)
       bytes[at] = [0x80, 0xc0, 0xe0, 0xed, 0xf0, 0xf5, 0xff, 0x22, 0x5c][i % 9]
       same(p, bytes.subarray(0, i % 3 === 0 ? bytes.length : at + 1))
-    }
+    })
     const latin = jsonGrammar(Text.latin1)
-    for (let b = 0; b < 256; b++) same(latin, new Uint8Array([0x22, b, 0x22]))
+    Array.from({ length: 256 }).forEach((_, b) => same(latin, new Uint8Array([0x22, b, 0x22])))
   })
 
   it("a parser derived from a schema", () => {
@@ -254,13 +254,13 @@ describe("compiled examples", () => {
       "1 ++ 2"
     ]
     const inputs = [...docs, ...docs.flatMap((d, i) => mutations(d, "0123456789+-*/() x", 15, 100 + i))]
-    for (const input of inputs) {
+    inputs.forEach((input) => {
       same(Arithmetic.evaluate, input)
       same(Arithmetic.ast, input)
       same(Arithmetic.lex, input)
       const lexed = Parser.parse(Arithmetic.lex, input)
       if (Result.isSuccess(lexed)) same(Arithmetic.tokens, lexed.success)
-    }
+    })
   })
 
   it("ini", () => {
@@ -270,16 +270,16 @@ describe("compiled examples", () => {
       ...mutations(doc, "[]=\n abc", 120, 5),
       ...Array.from({ length: doc.length + 1 }, (_, i) => doc.slice(0, i))
     ]
-    for (const input of inputs) same(Ini.ini, input)
+    inputs.forEach((input) => same(Ini.ini, input))
   })
 
   it("sexpr", () => {
     const docs = ["(+ 1 2)", "(if (= 1 1) (* 2 3) 4)", "((lambda x) 1)", "(- 10 #t)", "(+ 1", "  (* (+ 1 2) (- 5 3) ) "]
     const inputs = [...docs, ...docs.flatMap((d, i) => mutations(d, "()+-*/=# 0123456789iftx", 20, 200 + i))]
-    for (const input of inputs) {
+    inputs.forEach((input) => {
       same(Sexpr.expr, input)
       same(Sexpr.program, input)
-    }
+    })
   })
 
   it("http", () => {
@@ -289,7 +289,7 @@ describe("compiled examples", () => {
       ...mutations(doc, "\r\n :/GETHP1.x", 150, 9),
       ...Array.from({ length: doc.length + 1 }, (_, i) => doc.slice(0, i))
     ]
-    for (const input of inputs) same(Http.request, new TextEncoder().encode(input))
+    inputs.forEach((input) => same(Http.request, new TextEncoder().encode(input)))
   })
 })
 
@@ -627,13 +627,13 @@ describe("compiled combinators", () => {
   })()
 
   it.each(grammars)("%s", (_, p) => {
-    for (const input of inputs) same(p, input)
+    inputs.forEach((input) => same(p, input))
   })
 
   // In void position (output unused) parsers compile differently
   it.each(grammars)("%s, output unused", (_, p) => {
     const unused = Parser.seq(Parser.taken(p), Parser.asVoid(Parser.opt(p)))
-    for (const input of allStrings(alphabet, 3)) same(unused, input)
+    allStrings(alphabet, 3).forEach((input) => same(unused, input))
   })
 
   const textGrammars = (T: Text.TextParsers<any>, x = "😀") => [
@@ -664,14 +664,14 @@ describe("compiled combinators", () => {
     ["Text.latin1", Text.latin1]
   ] as const)("%s parsers", (name, T) => {
     const inputs = allStrings(textAlphabet, 3)
-    for (const p of textGrammars(T as Text.TextParsers<any>, name === "Text.latin1" ? "þ" : "😀")) {
-      for (const input of inputs) {
-        if (name === "Text.latin1" && beyondLatin1(input)) continue
+    textGrammars(T as Text.TextParsers<any>, name === "Text.latin1" ? "þ" : "😀").forEach((p) => {
+      inputs.forEach((input) => {
+        if (name === "Text.latin1" && beyondLatin1(input)) return
         same(p, (T.encoding as Encoding.Encoding<any>).encode(input))
-      }
+      })
       if (name !== "Text.string") {
         const random = rng(3)
-        for (let i = 0; i < 200; i++) {
+        Array.from({ length: 200 }).forEach(() => {
           same(
             p,
             Uint8Array.from(
@@ -679,9 +679,9 @@ describe("compiled combinators", () => {
               () => [0x61, 0x30, 0xc3, 0xa9, 0xf0, 0x9f, 0x98, 0x80, 0xff, 0x00, 0x5c][Math.floor(random() * 11)]
             )
           )
-        }
+        })
       }
-    }
+    })
   })
 
   it("byte inputs", () => {
@@ -695,7 +695,7 @@ describe("compiled combinators", () => {
       Parser.alt(Binary.u8, Parser.eof)
     )
     const random = rng(11)
-    for (let i = 0; i < 2000; i++) {
+    Array.from({ length: 2000 }).forEach(() => {
       same(
         p as any,
         Uint8Array.from(
@@ -703,19 +703,19 @@ describe("compiled combinators", () => {
           () => [1, 2, 0x30, 0x39, 0x41, 0x61, 0x62, 0xff][Math.floor(random() * 8)]
         )
       )
-    }
+    })
   })
 
   it("Text.taken validates what lenient parsers consumed", () => {
     const str = Parser.seq(Text.string.taken(Token.take(2)), Token.rest)
-    for (const input of allStrings(["a", "\ud800", "\udc00", "😀"], 3)) same(str, input)
+    allStrings(["a", "\ud800", "\udc00", "😀"], 3).forEach((input) => same(str, input))
     const bytes = Parser.seq(Text.utf8.taken(Token.take<Uint8Array>(2)), Token.restOf<Uint8Array>())
-    for (const input of allStrings(["a", "\xff", "\xc3", "\xa9"], 3)) {
+    allStrings(["a", "\xff", "\xc3", "\xa9"], 3).forEach((input) => {
       same(
         bytes,
         Uint8Array.from(input, (c) => c.charCodeAt(0))
       )
-    }
+    })
   })
 
   it("escapes whose normal part can match nothing", () => {
@@ -724,12 +724,12 @@ describe("compiled combinators", () => {
       Ascii.escaped(Ascii.alpha0, "\\", Token.literal("n").pipe(Parser.as("\n"))),
       Token.rest
     )
-    for (const input of allStrings(["a", "\\", "n", "0"], 4)) same(p, input)
+    allStrings(["a", "\\", "n", "0"], 4).forEach((input) => same(p, input))
   })
 
   it("caseless literals with other characters", () => {
     const p = Parser.seq(Parser.opt(Ascii.caseless("+0a")), Parser.opt(Ascii.caseless("@")), Token.rest)
-    for (const input of allStrings(["+", "\u000b", "0", "\u0010", "a", "A", "@", "`"], 3)) same(p, input)
+    allStrings(["+", "\u000b", "0", "\u0010", "a", "A", "@", "`"], 3).forEach((input) => same(p, input))
   })
 
   // Sets compile to comparisons on their accepted or rejected ranges, or to a
@@ -758,30 +758,30 @@ describe("compiled combinators", () => {
     ]
     const units = Array.from({ length: 0x104 }, (_, i) => String.fromCharCode(i))
     const inputs = [...units.map((c) => `${c}${c}a`), "é😀", "😀\u0000", "\ud800a", "Āÿ"]
-    for (const set of sets) {
+    sets.forEach((set) => {
       const token = Parser.seq(
         Parser.opt(Token.oneOf(set as never)),
         Parser.opt(Token.noneOf(set as never)),
         Token.takeWhile(set as never),
         Token.takeTill(set as never, { max: 2 })
       )
-      for (const input of inputs) same(token, input)
+      inputs.forEach((input) => same(token, input))
       const bytes = Parser.seq(Token.takeWhile<Uint8Array>(set as never), Token.takeTill<Uint8Array>(set as never))
-      for (let b = 0; b < 256; b++) same(bytes as any, new Uint8Array([b, b, 0x61]))
-      for (const T of [Text.string, Text.utf8, Text.latin1] as ReadonlyArray<Text.TextParsers<any>>) {
+      Array.from({ length: 256 }).forEach((_, b) => same(bytes as any, new Uint8Array([b, b, 0x61])))
+      ;([Text.string, Text.utf8, Text.latin1] as ReadonlyArray<Text.TextParsers<any>>).forEach((T) => {
         const text = Parser.seq(
           Parser.opt(T.oneOf(set as never)),
           Parser.opt(T.noneOf(set as never)),
           T.takeWhile(set as never),
           T.takeTill(set as never, { max: 2 })
         )
-        for (const input of inputs) {
-          if (T === Text.latin1 && beyondLatin1(input)) continue
-          if (T === Text.utf8 && /[\ud800-\udfff]/.test(input.replace("😀", ""))) continue
+        inputs.forEach((input) => {
+          if (T === Text.latin1 && beyondLatin1(input)) return
+          if (T === Text.utf8 && /[\ud800-\udfff]/.test(input.replace("😀", ""))) return
           same(text, (T.encoding as Encoding.Encoding<any>).encode(input))
-        }
-      }
-    }
+        })
+      })
+    })
   })
 
   // Compiled floats are read from the input without slicing it, when they
@@ -875,20 +875,20 @@ describe("compiled combinators", () => {
       ["Text.latin1", Text.latin1.float, (s: string) => Encoding.latin1.encode(s)],
       ["Text.utf16le", Text.utf16le.float, (s: string) => Encoding.utf16le.encode(s)]
     ] as const
-    for (const [, float, encode] of encodings) {
+    encodings.forEach(([, float, encode]) => {
       const p = Parser.seq(float as Parser.Parser<number, never, never, any>, Token.restLen)
-      for (const input of inputs) {
+      inputs.forEach((input) => {
         const bytes = (encode as (s: string) => Input.Input)(input)
         same(p, bytes)
         const expected = Parser.parse(p, bytes as never)
-        for (const backend of backends) {
+        backends.forEach((backend) => {
           const actual = Parser.parse(twin(p, backend), bytes as never)
           // `toEqual` does not tell 0 from -0
           const first = (r: typeof actual) => Result.map(r, (values) => Object.is(values[0], -0))
           expect(first(actual), `${backend} on ${input}`).toEqual(first(expected))
-        }
-      }
-    }
+        })
+      })
+    })
   })
 
   // Compiled parsers assign plain keys and define the others, as
@@ -914,12 +914,14 @@ describe("compiled combinators", () => {
       values: Reflect.ownKeys(o).map((k) => o[k]),
       descriptors: Reflect.ownKeys(o).map((k) => Object.getOwnPropertyDescriptor(o, k))
     })
-    for (const input of allStrings(["pa", "tb", "xa", "oc", "sb", "1a", "nb"], 3).map((s) => s)) {
-      const expected = describe(Parser.parseSync(entries, input))
-      for (const backend of backends) {
-        expect(describe(Parser.parseSync(twin(entries, backend), input)), `${backend} on ${input}`).toEqual(expected)
-      }
-    }
+    allStrings(["pa", "tb", "xa", "oc", "sb", "1a", "nb"], 3)
+      .map((s) => s)
+      .forEach((input) => {
+        const expected = describe(Parser.parseSync(entries, input))
+        backends.forEach((backend) => {
+          expect(describe(Parser.parseSync(twin(entries, backend), input)), `${backend} on ${input}`).toEqual(expected)
+        })
+      })
   })
 
   it("cut and lookahead errors (#21)", () => {
@@ -936,12 +938,12 @@ describe("compiled combinators", () => {
       Parser.terminated(notReserved, Token.literal(";")),
       Parser.preceded(Parser.not(Parser.seq(Token.literal("a"), Token.literal(":"))), Parser.cut(Token.literal("c;")))
     )
-    for (const input of allStrings(["x", "a", "b", "c", ":", ";"], 4)) same(p, input)
+    allStrings(["x", "a", "b", "c", ":", ";"], 4).forEach((input) => same(p, input))
   })
 
   it("array inputs", () => {
     const p = Parser.separated(Token.oneOf<ReadonlyArray<string>>(["x", "y"]), Token.literal(["+"]))
-    for (const input of allStrings(["x", "y", "+", "z"], 5)) same(p as any, Array.from(input))
+    allStrings(["x", "y", "+", "z"], 5).forEach((input) => same(p as any, Array.from(input)))
   })
 
   it("token parsers on array inputs", () => {
@@ -968,7 +970,7 @@ describe("compiled combinators", () => {
     class Limit extends Context.Service<Limit, number>()("Limit") {}
     const p = Parser.service(Limit).pipe(Parser.flatMap((n) => Parser.repeat(a, { max: n })))
     const q = Parser.seq(p, Parser.provideService(p, Limit, 1))
-    for (const input of allStrings(["a", "b"], 5)) same(q, input, Context.make(Limit, 2))
+    allStrings(["a", "b"], 5).forEach((input) => same(q, input, Context.make(Limit, 2)))
   })
 
   it("checked many inputs", () => {
@@ -1114,7 +1116,7 @@ const sameAtOffset = (
       Parser.parsePartial(q, i as never, o as never)
   }
   const label = JSON.stringify(Predicate.isString(input) ? input : Array.from(input as any))
-  for (const [runner, run] of Object.entries(runners)) {
+  Object.entries(runners).forEach(([runner, run]) => {
     const expected: any = outcome(run(p, whole, { offset }))
     // Values that are positions (spans, `location`) are positions in the whole input
     if (!options?.positions) {
@@ -1124,7 +1126,7 @@ const sameAtOffset = (
         `${runner}, interpreted on ${label}`
       )
     }
-    for (const backend of backends) {
+    backends.forEach((backend) => {
       const w = watched(p, backend)
       expect(outcome(run(w.parser, whole, { offset })), `${runner}, ${backend} on ${label}`).toEqual(expected)
       // Unless the root itself runs interpreted (`permutation`, say)
@@ -1132,11 +1134,11 @@ const sameAtOffset = (
       const rootFallback = defined(Registry.compiled(w.parser, kind, runner === "partial")).fallbacks.some(
         (f) => f.name === "watched"
       )
-      if (rootFallback || (runner === "partial" && options?.leafRoot)) continue
+      if (rootFallback || (runner === "partial" && options?.leafRoot)) return
       const rerun = !expected.ok || expected.value?._tag === "Incomplete"
       expect(w.interpreted, `${runner}, ${backend} on ${label}: interpreted runs`).toBe(rerun ? 1 : 0)
-    }
-  }
+    })
+  })
 }
 
 /** Runs a parser on a fresh state with `run`: its value and position, or its failure. */
@@ -1268,22 +1270,22 @@ describe("ParserStream.parseMany", () => {
 
 describe("running from an offset", () => {
   it("json (Token/Ascii)", () => {
-    for (const input of jsonInputs) sameAtOffset(Json.json, "[1, 2] ", input)
+    jsonInputs.forEach((input) => sameAtOffset(Json.json, "[1, 2] ", input))
   })
 
   it("json-text with Text.utf8", () => {
     const p = jsonGrammar(Text.utf8)
     const prefix = Encoding.utf8.encode("é😀{")
-    for (const input of jsonInputs) sameAtOffset(p, prefix, Encoding.utf8.encode(input))
+    jsonInputs.forEach((input) => sameAtOffset(p, prefix, Encoding.utf8.encode(input)))
   })
 
   // Every grammar on every short string, in every runner and backend: about
   // 5 s, which is vitest's default timeout
   it("combinators", () => {
-    for (const [name, g] of grammars) {
+    grammars.forEach(([name, g]) => {
       const positions = name === "taken and spans" || name === "eof, location, rest"
-      for (const input of allStrings(alphabet, 2)) sameAtOffset(g, "ab\n", input, { positions, leafRoot: true })
-    }
+      allStrings(alphabet, 2).forEach((input) => sameAtOffset(g, "ab\n", input, { positions, leafRoot: true }))
+    })
   }, 30_000)
 
   it.each(backends)("takes the compiled path with the %s backend, in complete and partial mode", (backend) => {
@@ -1292,14 +1294,13 @@ describe("running from an offset", () => {
     const buffer = "let x = 10;"
     // A lexer loop: one token at a time, in partial mode, until the buffer runs out
     const tokens: Array<string> = []
-    let offset = 0
-    for (;;) {
+    const lex = (offset: number): number => {
       const r = Parser.parsePartial(w.parser, buffer, { offset })
-      if (Result.isFailure(r)) break
-      if (r.success._tag === "Incomplete") break
+      if (Result.isFailure(r) || r.success._tag === "Incomplete") return offset
       tokens.push(r.success.value)
-      offset = r.success.offset
+      return lex(r.success.offset)
     }
+    const offset = lex(0)
     expect(tokens).toEqual(["let", "x", "=", "10"])
     expect(offset).toBe(10)
     // Only the final failure (at ";") ran interpreted
@@ -1329,9 +1330,9 @@ describe("running from an offset", () => {
   })
 
   it("rejects offsets outside the input", () => {
-    for (const offset of [-1, 4, 1.5, Number.NaN]) {
+    ;[-1, 4, 1.5, Number.NaN].forEach((offset) => {
       expect(() => Parser.parse(Token.rest, "abc", { offset })).toThrow(RangeError)
-    }
+    })
     expect(Parser.parse(Token.rest, "abc", { offset: 3 })).toEqual(Result.succeed(""))
   })
 })

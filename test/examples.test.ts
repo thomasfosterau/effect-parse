@@ -33,7 +33,7 @@ describe("examples/json", () => {
 
   it("agrees with JSON.parse", () => {
     const docs = ["[]", "{}", "[1,[2,[3]]]", '""', "0", '{"k":{"k":[{}]}}', " [ 1 , 2 ] "]
-    for (const doc of docs) expectSuccess(Json.json, doc, JSON.parse(doc))
+    docs.forEach((doc) => expectSuccess(Json.json, doc, JSON.parse(doc)))
   })
 
   it("reports precise errors", () => {
@@ -90,10 +90,10 @@ describe("examples/json-fast", () => {
       " [ {} , [ ] ] "
     ]
     const compiled = Compiler.jit(Parser.named(JsonFast.json, "json-fast"))
-    for (const doc of docs) {
+    docs.forEach((doc) => {
       expectSuccess(JsonFast.json, doc, JSON.parse(doc))
       expectSuccess(compiled, doc, JSON.parse(doc))
-    }
+    })
   })
 
   it("requires a low surrogate after a high one", () => {
@@ -221,8 +221,7 @@ describe("examples/http", () => {
 
   it("parses a stream of requests split at arbitrary points", () => {
     const bytes = encode(raw + raw + raw)
-    const chunks: Array<Uint8Array> = []
-    for (let i = 0; i < bytes.length; i += 7) chunks.push(bytes.subarray(i, i + 7))
+    const chunks = Array.from({ length: Math.ceil(bytes.length / 7) }, (_, i) => bytes.subarray(i * 7, i * 7 + 7))
     const program = Stream.fromIterable(chunks).pipe(ParserStream.parseMany(Http.request), Stream.runCollect)
     expect(Effect.runSync(program)).toEqual([expected, expected, expected])
   })

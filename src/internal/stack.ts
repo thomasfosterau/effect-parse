@@ -7,6 +7,7 @@
  * engine's overflow error and report a `TooDeep` failure instead, keeping
  * their `Result` contract on untrusted input.
  */
+import * as Predicate from "effect/Predicate"
 import type { Fail, State } from "../Input.js"
 
 /** The message of a `TooDeep` failure. */
@@ -19,7 +20,11 @@ const tooDeepMessage = "input is nested too deeply: parsing exhausted the call s
  */
 export const isStackOverflow = (e: unknown): boolean =>
   (e instanceof RangeError && /call stack/i.test(e.message)) ||
-  (e instanceof Error && e.name === "InternalError" && /recursion/i.test(e.message))
+  (Predicate.hasProperty(e, "name") &&
+    Predicate.hasProperty(e, "message") &&
+    e.name === "InternalError" &&
+    Predicate.isString(e.message) &&
+    /recursion/i.test(e.message))
 
 /**
  * Runs `step`, turning a call-stack overflow into an unrecoverable
