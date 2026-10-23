@@ -198,9 +198,9 @@ it("README hoisted generator example behaves like the inline one", () => {
   })
 
   expect(Parser.parse(header, "Host: example.com\r\n")).toEqual(Result.succeed({ name: "Host", value: "example.com" }))
-  for (const input of ["Host: example.com\n", "Host example.com\n", ": x\n"]) {
+  ;["Host: example.com\n", "Host example.com\n", ": x\n"].forEach((input) => {
     expect(Parser.parse(header, input)).toEqual(Parser.parse(inline, input))
-  }
+  })
 })
 
 it("Syntax examples behave as documented", () => {

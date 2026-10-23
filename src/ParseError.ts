@@ -289,7 +289,7 @@ export const inspectToken = (u: unknown): string => {
 const causeMessage = (cause: unknown): string | undefined => {
   if (cause === undefined) return undefined
   if (Predicate.isString(cause)) return cause
-  if (cause instanceof Error) return cause.message
+  // An `Error`'s message, or any other object's string `message`
   if (Predicate.isObjectOrArray(cause) && "message" in cause && Predicate.isString(cause.message)) {
     return cause.message
   }

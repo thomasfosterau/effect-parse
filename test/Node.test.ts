@@ -15,7 +15,7 @@ const tags = (root: ParserLike): Record<string, number> => {
     seen.add(p)
     const node = nodeOf(p)
     out[node._tag] = (out[node._tag] ?? 0) + 1
-    for (const c of children(node)) visit(c)
+    children(node).forEach((c) => visit(c))
   }
   visit(root)
   return out
@@ -25,12 +25,12 @@ const tagOf = (p: ParserLike): Node["_tag"] => nodeOf(p)._tag
 
 describe("parser descriptions", () => {
   it("describes the JSON grammars completely", () => {
-    for (const root of [Json.json, jsonGrammar(Text.string), jsonGrammar(Text.utf8)]) {
+    ;[Json.json, jsonGrammar(Text.string), jsonGrammar(Text.utf8)].forEach((root) => {
       const t = tags(root)
       expect(t.Opaque).toBeUndefined()
       expect(t.Dispatch).toBe(2)
       expect(t.Suspend).toBeGreaterThan(0)
-    }
+    })
   })
 
   it("marks undescribable parsers as opaque", () => {

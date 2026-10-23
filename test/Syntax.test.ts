@@ -228,15 +228,15 @@ describe("Syntax", () => {
   describe("annotations outside Syntax", () => {
     it("change nothing, interpreted or compiled", () => {
       const docs = ["[1, tru, 3]", '{"a": [1, {"b": null}], "c": "x"}', "[1,,2]", "[", " 12 "]
-      for (const backend of ["closure", "jit"] as const) {
+      ;(["closure", "jit"] as const).forEach((backend) => {
         const compiled = Compiler[backend](Parser.named(Json.json, "json"))
-        for (const doc of docs) {
+        docs.forEach((doc) => {
           const interpreted = Parser.parse(Json.json, doc)
           const fast = Parser.parse(compiled, doc)
           const message = (e: { readonly message: string }) => e.message
           expect(Result.mapError(fast, message)).toEqual(Result.mapError(interpreted, message))
-        }
-      }
+        })
+      })
       expect(Parser.parse(list, "[1,2]")).toEqual(Result.succeed([1, 2]))
     })
   })
@@ -292,14 +292,14 @@ describe("Syntax", () => {
         [Ascii.tillLineEnding, "ab\r\n", 3, "x"],
         [T.tillLineEnding, "ab\r\n", 3, "x"]
       ]
-      for (const [p, input, at, text] of cases) {
+      cases.forEach(([p, input, at, text]) => {
         const grammar = Parser.seq(Syntax.node(p, "x"), Token.rest)
         const edited = Syntax.replace(Syntax.parse(grammar, input), at, at + 1, text)
         expect(snapshot(edited), `${p.name} on ${JSON.stringify(input)}`).toEqual(
           snapshot(Syntax.parse(grammar, edited.input))
         )
         expect(edited.reused).toBe(0)
-      }
+      })
     })
 
     it("applies several edits in order", () => {
@@ -357,10 +357,10 @@ describe("Syntax", () => {
     ) => {
       const random = rng(seed)
       let reused = 0
-      for (const doc of docs) {
+      docs.forEach((doc) => {
         let tree = Syntax.parse(grammar, doc)
         expect(snapshot(tree)).toEqual(snapshot(Syntax.parse(grammar, doc)))
-        for (let i = 0; i < 12; i++) {
+        Array.from({ length: 12 }).forEach((_, i) => {
           const text = tree.input
           const start = Math.floor(random() * (text.length + 1))
           const end = Math.min(text.length, start + Math.floor(random() * 4) * Math.floor(random() * 2))
@@ -384,8 +384,8 @@ describe("Syntax", () => {
           expect(again?.reparsed).toEqual(again?.parsed)
           reused += next.reused
           tree = next
-        }
-      }
+        })
+      })
       return reused
     }
 
@@ -430,7 +430,7 @@ describe("Syntax", () => {
         "/**/let y = 12;"
       ]
       const alphabet = ["/", "*", "\r", "\n", "f", "u", "n", "c", "t", "i", "o", "l", "e", " ", "=", ";", "1", "x"]
-      for (let seed = 0; seed < 25; seed++) differential(program, docs, alphabet, seed)
+      Array.from({ length: 25 }).forEach((_, seed) => differential(program, docs, alphabet, seed))
     })
 
     it("re-parses little of a large document", () => {

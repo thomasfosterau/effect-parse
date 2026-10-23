@@ -128,11 +128,11 @@ describe("State.reset", () => {
 
   it("a reused state gives the same results and errors as a fresh one", () => {
     const reused = new Input.State(input)
-    for (const run of runs) {
+    runs.forEach((run) => {
       const options = { partial: run.partial ?? false }
       const fresh = observe(new Input.State(input, { ...options, offset: run.offset }), run.parser.step)
       expect(observe(reused.reset(run.offset, options), run.parser.step)).toEqual(fresh)
-    }
+    })
     // The runs above did fail, return Incomplete and succeed
     const outcomes = runs.map((run) =>
       observe(new Input.State(input, { partial: run.partial ?? false, offset: run.offset }), run.parser.step)
@@ -159,9 +159,9 @@ describe("State.reset", () => {
 
     state.reset(2)
     const fresh = new Input.State(bytes, { offset: 2 })
-    for (const key of Object.keys(fresh) as Array<keyof Input.State>) {
+    ;(Object.keys(fresh) as Array<keyof Input.State>).forEach((key) => {
       expect([key, state[key]]).toEqual([key, fresh[key]])
-    }
+    })
     expect(state.context).toBe(fresh.context)
     expect(state.failure).toBe(fresh.failure)
 
@@ -172,14 +172,16 @@ describe("State.reset", () => {
 
   it("returns the same results as the runners", () => {
     const state = new Input.State(input)
-    for (const [offset, expected] of [
-      [4, 123],
-      [24, 99]
-    ] as const) {
+    ;(
+      [
+        [4, 123],
+        [24, 99]
+      ] as const
+    ).forEach(([offset, expected]) => {
       expect(Ascii.decUint.step(state.reset(offset))).toBe(expected)
       expect(Parser.parsePeek(Ascii.decUint, input.slice(offset))).toEqual(
         Result.succeed([input.slice(state.pos), expected])
       )
-    }
+    })
   })
 })

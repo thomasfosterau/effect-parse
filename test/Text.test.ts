@@ -200,7 +200,7 @@ describe("Token.codePoints in Text parsers", () => {
 
 describe("Text over bytes", () => {
   it("rejects malformed UTF-8", () => {
-    for (const bad of [
+    ;[
       [0xff],
       [0xc0, 0x80], // overlong
       [0xe0, 0x80, 0x80], // overlong
@@ -208,9 +208,7 @@ describe("Text over bytes", () => {
       [0xf4, 0x90, 0x80, 0x80], // above U+10FFFF
       [0xc3], // truncated
       [0xe2, 0x82] // truncated
-    ]) {
-      expectFailure(Text.utf8.any, new Uint8Array(bad))
-    }
+    ].forEach((bad) => expectFailure(Text.utf8.any, new Uint8Array(bad)))
   })
 
   it("rejects unpaired UTF-16 surrogates", () => {

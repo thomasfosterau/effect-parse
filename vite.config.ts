@@ -96,7 +96,6 @@ export default defineConfig({
       // effect-parse#35. Flip a rule back to the
       // preset's `error` and delete its line when its count reaches zero.
       "effect/require-safety-comment-for-type-assertion": "warn", // 306
-      "effect/imperative-loops": "warn", // 75, all in test/ (src/ is off below, measured)
       "effect/avoid-any": "warn", // 62
       "effect/avoid-direct-tag-checks": "warn", // 59
       "effect/avoid-direct-json": "warn", // 35 outside bench/
@@ -107,7 +106,6 @@ export default defineConfig({
       "effect/prefer-match-over-switch": "warn", // 23
       "effect/no-chained-type-assertions": "warn", // 13
       "effect/avoid-try-catch": "warn", // 11
-      "effect/avoid-untagged-errors": "warn", // 6 outside bench/
       "effect/no-unsafe-dictionary-type": "warn", // 3 outside bench/
       "effect/use-console-service": "warn", // 2 outside bench/ (`Parser.debug`'s console tracer)
       // ---- Effect preset: rules this library's conventions cut across ------

@@ -36,12 +36,13 @@ const outcome = (r: Result.Result<unknown, any>) =>
 /** Splits an input into chunks of random sizes (at most `max`). */
 const split = <I extends string | Uint8Array>(input: I, random: () => number, max: number): Array<I> => {
   const out: Array<I> = []
-  for (let i = 0; i < input.length;) {
+  const take = (i: number): Array<I> => {
+    if (i >= input.length) return out
     const n = 1 + Math.floor(random() * max)
     out.push(input.slice(i, i + n) as I)
-    i += n
+    return take(i + n)
   }
-  return out
+  return take(0)
 }
 
 const streamed = (
@@ -69,13 +70,13 @@ const same = <I extends string | Uint8Array>(p: Parser.Parser<any, any, never, I
   const expected = outcome(Parser.parse(p, input as never))
   const random = rng(seed)
   const empty = Predicate.isString(input) ? "" : new Uint8Array(0)
-  for (const max of [1, 3, 17, 4096]) {
+  ;[1, 3, 17, 4096].forEach((max) => {
     const chunks = split(input, random, max)
-    for (const [i, v] of variants(p).entries()) {
+    variants(p).forEach((v, i) => {
       expect(outcome(streamed(v, chunks, empty)), `variant ${i}, chunks of up to ${max}`).toEqual(expected)
       checked++
-    }
-  }
+    })
+  })
 }
 
 const jsonDocs = (() => {
@@ -111,25 +112,25 @@ describe("streaming parses", () => {
     const p = jsonGrammar(Text.utf8)
     const random = rng(8)
     const base = Encoding.utf8.encode('["aé😀", {"k": "v\\n"}, 12, [true]]')
-    for (let i = 0; i < 100; i++) {
+    Array.from({ length: 100 }).forEach((_, i) => {
       const bytes = base.slice()
       bytes[Math.floor(random() * bytes.length)] = [0x80, 0xc3, 0xf0, 0xff, 0x22, 0x5c][i % 6]
       same(p, bytes, i)
-    }
+    })
   })
 
   it("the other examples", () => {
     const ini = "[owner]\nname=John Doe\norganization=Acme\n\n[database]\nserver=192.0.2.62\nport=143\n"
-    for (const [i, input] of [ini, ...mutations(ini, "[]=\n ab", 40, 3)].entries()) same(Ini.ini, input, i)
+    ;[ini, ...mutations(ini, "[]=\n ab", 40, 3)].forEach((input, i) => same(Ini.ini, input, i))
     const http = "GET /index.html HTTP/1.1\r\nHost: example.com\r\nAccept: */*\r\n continued\r\n\r\n"
-    for (const [i, input] of [http, ...mutations(http, "\r\n :/GE", 40, 4)].entries()) {
+    ;[http, ...mutations(http, "\r\n :/GE", 40, 4)].forEach((input, i) => {
       same(Http.request, new TextEncoder().encode(input), i)
-    }
+    })
     const sums = ["1 + 2*3 - 4 / 2", " 2* (  3 + 4 ) ", "1 +", "(1 + 2"]
-    for (const [i, input] of [...sums, ...sums.flatMap((d, j) => mutations(d, "0123456789+-*/() ", 10, j))].entries()) {
+    ;[...sums, ...sums.flatMap((d, j) => mutations(d, "0123456789+-*/() ", 10, j))].forEach((input, i) => {
       same(Arithmetic.evaluate, input, i)
       same(Sexpr.program, `(+ ${input.replace(/[^0-9 ]/g, " ")})`, i)
-    }
+    })
   })
 
   it("repetitions of every kind", () => {
@@ -161,15 +162,15 @@ describe("streaming parses", () => {
     ]
     const random = rng(9)
     const alphabet = 'ab+1\\"n;c'
-    for (const p of grammars) {
-      for (let i = 0; i < 300; i++) {
+    grammars.forEach((p) => {
+      Array.from({ length: 300 }).forEach((_, i) => {
         const input = Array.from(
           { length: Math.floor(random() * 12) },
           () => alphabet[Math.floor(random() * alphabet.length)]
         ).join("")
         same(p, input, i)
-      }
-    }
+      })
+    })
   })
 
   it("checked many splits", () => {
@@ -260,7 +261,8 @@ describe("parseReadable and parseResponse", () => {
 
   it("fails with a ReadError when the stream fails", async () => {
     const body = new ReadableStream<Uint8Array>({
-      pull: (c) => c.error(new Error("connection reset"))
+      // How `fetch` reports a dropped connection
+      pull: (c) => c.error(new TypeError("connection reset"))
     })
     const exit = await Effect.runPromise(Effect.result(ParserStream.parseReadable(body, json)))
     expect(Result.isFailure(exit) && exit.failure._tag).toBe("ReadError")

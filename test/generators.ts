@@ -12,36 +12,35 @@ export const rng = (seed: number) => () => {
 export const mutations = (doc: string, alphabet: string, count: number, seed: number): Array<string> => {
   const random = rng(seed)
   const chars = Array.from(alphabet)
-  const out: Array<string> = []
-  for (let i = 0; i < count; i++) {
+  return Array.from({ length: count }, (_, i) => {
     const at = Math.floor(random() * (doc.length + 1))
     const c = chars[Math.floor(random() * chars.length)]
     switch (i % 4) {
       case 0:
-        out.push(doc.slice(0, at) + doc.slice(at + 1))
-        break
+        return doc.slice(0, at) + doc.slice(at + 1)
       case 1:
-        out.push(doc.slice(0, at) + c + doc.slice(at))
-        break
+        return doc.slice(0, at) + c + doc.slice(at)
       case 2:
-        out.push(doc.slice(0, at) + c + doc.slice(at + 1))
-        break
+        return doc.slice(0, at) + c + doc.slice(at + 1)
       default:
-        out.push(doc.slice(0, at))
+        return doc.slice(0, at)
     }
-  }
-  return out
+  })
 }
 
 /** Every string over `alphabet` up to length `max`. */
 export const allStrings = (alphabet: ReadonlyArray<string>, max: number): Array<string> => {
-  const out: Array<string> = [""]
-  let layer = [""]
-  for (let n = 1; n <= max; n++) {
-    layer = layer.flatMap((s) => alphabet.map((c) => s + c))
-    out.push(...layer)
-  }
-  return out
+  const layers = (layer: Array<string>, n: number): Array<string> =>
+    n > max
+      ? []
+      : [
+          ...layer,
+          ...layers(
+            layer.flatMap((s) => alphabet.map((c) => s + c)),
+            n + 1
+          )
+        ]
+  return layers([""], 0)
 }
 
 export const randomJson = (random: () => number, depth = 0): string => {

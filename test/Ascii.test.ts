@@ -123,7 +123,7 @@ describe("Ascii", () => {
         ["-Infinity", -Infinity],
         ["INF", Infinity]
       ]
-      for (const [input, expected] of cases) expectSuccess(Ascii.float, input, expected)
+      cases.forEach(([input, expected]) => expectSuccess(Ascii.float, input, expected))
       expect(Number.isNaN(Parser.parseSync(Ascii.float, "NaN"))).toBe(true)
       expectFailure(Ascii.float, "abc")
       expectFailure(Ascii.float, ".")
