@@ -318,6 +318,20 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
   ["alt with cut", Parser.alt(Parser.preceded(a, Parser.cut(b)), Parser.seq(a, a), Token.any)],
   ["alt with backtrack", Parser.alt(Parser.backtrack(Parser.preceded(a, Parser.cut(b))), Parser.seq(a, a))],
   ["alt of optional", Parser.alt(Parser.opt(a), b)],
+  // Nested alts whose branches tie: the ties are merged lazily (#38)
+  [
+    "alt of tied alts",
+    Parser.alt(
+      Parser.alt(a, Parser.context(b, "b"), ab),
+      Parser.alt(digit, Parser.seq(b, a)),
+      Parser.alt(Parser.alt(Token.literal("+"), a), Token.literal(".")),
+      Parser.preceded(Token.literal("e"), Parser.failMessage("no e"))
+    )
+  ],
+  [
+    "repeat of tied alts",
+    Parser.seq(Parser.repeat(Parser.alt(Parser.alt(ab, a, b), digit, Parser.opt(a))), Token.literal("."))
+  ],
   [
     "opt and optional",
     Parser.seq(

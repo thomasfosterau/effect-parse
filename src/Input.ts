@@ -213,8 +213,31 @@ export class State<I extends Input = Input> {
   context: Context.Context<never>
   /** Mode of the latest failure. Only meaningful after a step returned {@link Fail}. */
   mode: ErrMode = "Backtrack"
-  /** Details of the latest failure. Only meaningful after a step returned {@link Fail}. */
-  failure: Failure
+  /**
+   * The latest failure, kept unmerged: the failure is `failureHead` merged
+   * (as `mergeFailures` does) with `failureTie1` and then `failureTie2`, all
+   * at the same offset. `Parser.alt` records its tied branch failures here
+   * with {@link failTies} instead of merging them, so that an enclosing `alt`
+   * whose next branch succeeds never pays for the merge. Reading
+   * {@link failure} performs the merge, once.
+   *
+   * @internal
+   */
+  failureHead: Failure
+  /** @internal */
+  failureTie1: Failure | undefined = undefined
+  /** @internal */
+  failureTie2: Failure | undefined = undefined
+  /** Backs {@link deepest}. @internal */
+  deepestFailure: Failure | undefined = undefined
+  /**
+   * Whether the furthest failure is the latest failure, still unmerged, so
+   * that {@link deepest} is that failure once merged. Only set while
+   * `failureTie1` is.
+   *
+   * @internal
+   */
+  deepestIsLatest = false
   /**
    * The offset of a recoverable failure that occurred without consuming
    * input (for example the last attempt of a `repeat`). Its
@@ -233,7 +256,14 @@ export class State<I extends Input = Input> {
    * recorded inside it when it commits, and `Parser.peek` and `Parser.not`
    * forget the failures of a lookahead that succeeded.
    */
-  deepest: Failure | undefined = undefined
+  get deepest(): Failure | undefined {
+    if (this.deepestIsLatest) this.settleFailure()
+    return this.deepestFailure
+  }
+  set deepest(failure: Failure | undefined) {
+    this.deepestIsLatest = false
+    this.deepestFailure = failure
+  }
   /** When defined, `Parser.resumeAfter`/`retryAfter` record failures here. */
   recovered: Array<Failure> | undefined = undefined
   /** When defined, `Parser.trace` reports events here. */
@@ -274,7 +304,37 @@ export class State<I extends Input = Input> {
     this.partial = options?.partial ?? false
     this.context = options?.context ?? Context.empty()
     this.inputKind = Predicate.isString(input) ? 0 : input instanceof Uint8Array ? 1 : 2
-    this.failure = initialFailure
+    this.failureHead = initialFailure
+  }
+
+  /** Details of the latest failure. Only meaningful after a step returned {@link Fail}. */
+  get failure(): Failure {
+    if (this.failureTie1 !== undefined) this.settleFailure()
+    return this.failureHead
+  }
+  set failure(failure: Failure) {
+    if (this.deepestIsLatest) this.settleFailure()
+    this.failureHead = failure
+    this.failureTie1 = undefined
+    this.failureTie2 = undefined
+  }
+
+  /** Merges the latest failure's ties into it (see {@link failureHead}). */
+  private settleFailure(): void {
+    let failure = this.failureHead
+    const tie1 = this.failureTie1
+    if (tie1 !== undefined) {
+      failure = mergeTiedFailures(failure, tie1, mergeExpected(failure.expected, tie1.expected))
+      const tie2 = this.failureTie2
+      if (tie2 !== undefined) failure = mergeTiedFailures(failure, tie2, mergeExpected(failure.expected, tie2.expected))
+      this.failureHead = failure
+      this.failureTie1 = undefined
+      this.failureTie2 = undefined
+    }
+    if (this.deepestIsLatest) {
+      this.deepestFailure = failure
+      this.deepestIsLatest = false
+    }
   }
 
   /**
@@ -317,10 +377,13 @@ export class State<I extends Input = Input> {
     this.partial = options?.partial ?? false
     this.context = options?.context ?? Context.empty()
     this.mode = "Backtrack"
-    this.failure = initialFailure
+    this.failureHead = initialFailure
+    this.failureTie1 = undefined
+    this.failureTie2 = undefined
     this.hintOffset = -1
     this.hintExpected = empty
-    this.deepest = undefined
+    this.deepestFailure = undefined
+    this.deepestIsLatest = false
     this.recovered = undefined
     this.tracer = undefined
     this.depth = 0
@@ -410,10 +473,34 @@ export class State<I extends Input = Input> {
    */
   failWith(mode: ErrMode, failure: Failure): Fail {
     this.mode = mode
-    this.failure = failure
-    if (mode === "Backtrack" && (this.deepest === undefined || failure.offset >= this.deepest.offset)) {
-      this.deepest = failure
+    if (this.deepestIsLatest) {
+      // The furthest failure is the latest one: it is replaced below, unmerged, if `failure` is as far
+      if (mode === "Backtrack" && failure.offset >= this.failureHead.offset) this.deepestIsLatest = false
+      else this.settleFailure()
     }
+    this.failureHead = failure
+    this.failureTie1 = undefined
+    this.failureTie2 = undefined
+    if (mode === "Backtrack" && (this.deepestFailure === undefined || failure.offset >= this.deepestFailure.offset)) {
+      this.deepestFailure = failure
+    }
+    return Fail
+  }
+
+  /**
+   * Records a recoverable failure made of tied failures, merged only when
+   * read: `failWith("Backtrack", f)` where `f` merges `head` with `tie1`
+   * and then `tie2` (all at the same offset), as `mergeFailures` would.
+   *
+   * @internal
+   */
+  failTies(head: Failure, tie1: Failure, tie2: Failure | undefined): Fail {
+    this.mode = "Backtrack"
+    if (this.deepestIsLatest && head.offset < this.failureHead.offset) this.settleFailure()
+    this.failureHead = head
+    this.failureTie1 = tie1
+    this.failureTie2 = tie2
+    this.deepestIsLatest = this.deepestFailure === undefined || head.offset >= this.deepestFailure.offset
     return Fail
   }
 
@@ -492,7 +579,17 @@ export const mergeExpected = (a: ReadonlyArray<string>, b: ReadonlyArray<string>
 export const mergeFailures = (a: Failure, b: Failure): Failure => {
   if (a.offset > b.offset) return a
   if (b.offset > a.offset) return b
-  const expected = mergeExpected(a.expected, b.expected)
+  return mergeTiedFailures(a, b, mergeExpected(a.expected, b.expected))
+}
+
+/**
+ * {@link mergeFailures} for two failures at the same offset, given their
+ * merged expectations (`mergeExpected(a.expected, b.expected)`, possibly
+ * memoised by the caller).
+ *
+ * @internal
+ */
+export const mergeTiedFailures = (a: Failure, b: Failure, expected: ReadonlyArray<string>): Failure => {
   if (expected === b.expected) return b
   return new Failure(
     b.offset,

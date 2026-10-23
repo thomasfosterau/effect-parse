@@ -40,7 +40,7 @@ import { pipeArguments } from "effect/Pipeable"
 import * as Result from "effect/Result"
 import type { Contravariant, Covariant, Simplify } from "effect/Types"
 import type { ErrMode, Input, Slice, Source, TraceEvent } from "./Input.js"
-import { Fail, Failure, mergeExpected, mergeFailures, State } from "./Input.js"
+import { Fail, Failure, mergeExpected, mergeFailures, mergeTiedFailures, State } from "./Input.js"
 import type { ErrorKind } from "./ParseError.js"
 import * as ParseError from "./ParseError.js"
 import * as Registry from "./internal/compiler/registry.js"
@@ -1785,19 +1785,48 @@ export const alt = <const Ps extends ReadonlyArray<Parser.Any>>(
   return described(
     (state: State<any>) => {
       const start = state.pos
+      // The branches' failures merged left to right, as `mergeFailures` would,
+      // except that the last two failures tied with `failure` wait in `tie1`
+      // and `tie2` and are merged only when needed: when a third tie arrives,
+      // when a succeeding branch stops where they failed (for the hint), or
+      // when the merge is read from the state after `failTies`. An `alt` whose
+      // later branch consumes input discards them unmerged.
       let failure: Failure | undefined
+      let tie1: Failure | undefined
+      let tie2: Failure | undefined
       for (let i = 0; i < n; i++) {
         const a = steps[i](state)
         if (a !== Fail) {
-          if (failure !== undefined && failure.offset === state.pos) state.setHint(failure.offset, failure.expected)
+          if (failure !== undefined && failure.offset === state.pos) {
+            let expected = failure.expected
+            if (tie1 !== undefined) expected = mergeExpected(expected, tie1.expected)
+            if (tie2 !== undefined) expected = mergeExpected(expected, tie2.expected)
+            state.setHint(failure.offset, expected)
+          }
           return a
         }
         if (state.mode !== "Backtrack") return Fail
-        failure = failure === undefined ? state.failure : mergeFailures(failure, state.failure)
         state.pos = start
+        // The branch's failure, whose own ties (from a nested `alt`) can be taken over unmerged
+        const head = state.failureHead
+        if (failure === undefined || head.offset > failure.offset) {
+          failure = head
+          tie1 = state.failureTie1
+          tie2 = state.failureTie2
+        } else if (head.offset === failure.offset) {
+          const f = state.failure
+          if (tie1 === undefined) tie1 = f
+          else if (tie2 === undefined) tie2 = f
+          else {
+            failure = mergeTiedFailures(failure, tie1, mergeExpected(failure.expected, tie1.expected))
+            tie1 = tie2
+            tie2 = f
+          }
+        }
       }
       // `failure` is set: there are at least two alternatives, and each one that fails sets it
-      return state.failWith("Backtrack", failure ?? state.failure)
+      if (failure === undefined) return state.failWith("Backtrack", state.failure)
+      return tie1 === undefined ? state.failWith("Backtrack", failure) : state.failTies(failure, tie1, tie2)
     },
     "alt",
     { _tag: "Alt", parsers }
