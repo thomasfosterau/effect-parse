@@ -228,7 +228,7 @@ describe("Parser", () => {
       // `alt` leaves ties unmerged until they are read (#38). `eagerAlt` is
       // the algorithm it replaced, merging every failure as it happens: both
       // must report the same failure, furthest failure and hint.
-      type Alt = (...parsers: Array<Parser.Parser<unknown>>) => Parser.Parser<unknown>
+      type Alt = (...parsers: Array<Parser.Parser<unknown, unknown>>) => Parser.Parser<unknown, unknown>
       const eagerAlt: Alt = (...ps) =>
         Parser.make((state) => {
           const start = state.pos
@@ -248,7 +248,7 @@ describe("Parser", () => {
         })
       const grammar = (alt: Alt) => {
         const c = Token.literal("c")
-        const leaves: ReadonlyArray<Parser.Parser<unknown>> = [
+        const leaves: ReadonlyArray<Parser.Parser<unknown, unknown>> = [
           a,
           ab,
           Parser.context(b, "b"),
