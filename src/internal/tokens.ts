@@ -1,6 +1,7 @@
 // fallow-ignore-file duplicate-export -- `End` and `scan` here are the token-set versions of the text
 // helpers in ./text.ts; both are internal modules, imported by path, never re-exported from one barrel.
 import * as Predicate from "effect/Predicate"
+import * as Result from "effect/Result"
 import type { Input, State } from "../Input.js"
 import { charOf, firstCodePoint } from "./text.js"
 
@@ -160,11 +161,10 @@ const compileCodeSafe = (set: unknown, kind: "string" | "code"): ((code: number)
       return false
     }
   }
-  try {
-    return compileCode(set)
-  } catch {
-    return () => false
-  }
+  return Result.getOrElse(
+    Result.try(() => compileCode(set)),
+    (): ((code: number) => boolean) => () => false
+  )
 }
 
 /**

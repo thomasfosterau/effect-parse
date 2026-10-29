@@ -1601,12 +1601,12 @@ const compileClosure = (
 
 /** The closure compiler as a backend. */
 export const backend: Backend = {
-  build: (p, kind, resumable) => {
-    try {
-      const { fallbacks, step } = compileClosure(p, kind, resumable)
-      return { backend: "closure", step, fallbacks, error: undefined }
-    } catch (error) {
-      return { backend: undefined, step: undefined, fallbacks: [], error }
-    }
-  }
+  build: (p, kind, resumable) =>
+    Result.match(
+      Result.try(() => compileClosure(p, kind, resumable)),
+      {
+        onSuccess: ({ fallbacks, step }) => ({ backend: "closure" as const, step, fallbacks, error: undefined }),
+        onFailure: (error) => ({ backend: undefined, step: undefined, fallbacks: [], error })
+      }
+    )
 }
