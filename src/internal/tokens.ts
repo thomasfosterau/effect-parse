@@ -379,7 +379,7 @@ export const indexOf = (state: State<Input>, needle: Input, from: number): numbe
     case 1: {
       const hay = state.input as Uint8Array
       const n = needle as Uint8Array
-      if (n.length === 0) return from
+      if (n.byteLength === 0) return from
       const first = n[0]
       let i = hay.indexOf(first, from)
       while (i !== -1 && i <= last) {

@@ -6,6 +6,7 @@
  * `Parser.fail` / `Parser.tryMap` and surface as the `cause` of the
  * `ParseError`, typed in the parser's `E` channel.
  */
+import * as Arr from "effect/Array"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Result from "effect/Result"
@@ -119,15 +120,14 @@ export const evaluate = (e: Expr): Result.Result<Atom, EvalError> => {
         case "-":
         case "/": {
           const ns = nums()
-          if (ns === undefined || ns.length === 0) return fail("arithmetic on non-numbers")
-          const [first, ...rest] = ns as [number, ...Array<number>]
+          if (ns === undefined || !Arr.isArrayNonEmpty(ns)) return fail("arithmetic on non-numbers")
+          const [first, ...rest] = ns
           if (op === "/" && rest.includes(0)) return fail("division by zero")
-          const value =
-            rest.length === 0
-              ? op === "-"
-                ? -first
-                : 1 / first
-              : rest.reduce((a, b) => (op === "-" ? a - b : Math.trunc(a / b)), first)
+          const value = Arr.isArrayEmpty(rest)
+            ? op === "-"
+              ? -first
+              : 1 / first
+            : rest.reduce((a, b) => (op === "-" ? a - b : Math.trunc(a / b)), first)
           return Result.succeed({ _tag: "Num", value })
         }
         case "=":

@@ -1,3 +1,6 @@
+import * as Arr from "effect/Array"
+import * as Predicate from "effect/Predicate"
+import * as Str from "effect/String"
 import type { Encoding } from "../Encoding.js"
 import type { Fail, State } from "../Input.js"
 
@@ -21,6 +24,17 @@ export const End = -3
  * skip `decode`. Defaults to 0x80 for ASCII compatible encodings.
  */
 const FastLimit: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/Encoding/FastLimit")
+
+/**
+ * Whether an input, a literal or a chunk has no units (characters, bytes or
+ * tokens).
+ */
+export const isEmptyUnits = (units: string | Uint8Array | ReadonlyArray<unknown>): boolean =>
+  Predicate.isString(units)
+    ? Str.isEmpty(units)
+    : units instanceof Uint8Array
+      ? units.byteLength === 0
+      : Arr.isReadonlyArrayEmpty(units)
 
 /** @internal */
 export const fastLimit = (enc: Encoding<any>): number =>

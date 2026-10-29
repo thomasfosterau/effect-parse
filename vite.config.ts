@@ -95,14 +95,12 @@ export default defineConfig({
       // a defect, not headroom. The remaining sites are listed in
       // effect-parse#35. Flip a rule back to the
       // preset's `error` and delete its line when its count reaches zero.
-      "effect/require-safety-comment-for-type-assertion": "warn", // 306
+      "effect/require-safety-comment-for-type-assertion": "warn", // 305
       "effect/avoid-any": "warn", // 62
       "effect/avoid-direct-tag-checks": "warn", // 59
       "effect/avoid-direct-json": "warn", // 35 outside bench/
       "effect/avoid-native-object-helpers": "warn", // 43 outside bench/
       "effect/no-known-value-widening": "warn", // 33
-      "effect/no-length-comparison": "warn", // 24
-      "effect/prefer-arr-match": "warn", // 24
       "effect/prefer-match-over-switch": "warn", // 23
       "effect/no-chained-type-assertions": "warn", // 13
       "effect/avoid-try-catch": "warn", // 11

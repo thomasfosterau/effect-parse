@@ -36,6 +36,7 @@ import * as Registry from "./internal/compiler/registry.js"
 import type * as Resume from "./internal/resume.js"
 import * as Run from "./internal/run.js"
 import * as Stack from "./internal/stack.js"
+import { isEmptyUnits } from "./internal/text.js"
 import type { Parser } from "./Parser.js"
 
 /**
@@ -49,7 +50,7 @@ export type Chunkable = string | Uint8Array | ReadonlyArray<unknown>
 const concat = <I extends Chunkable>(a: I, b: I): I => {
   if (Predicate.isString(a)) return (a + (b as string)) as I
   if (a instanceof Uint8Array) {
-    if (a.length === 0) return b
+    if (a.byteLength === 0) return b
     const out = new Uint8Array(a.length + (b as Uint8Array).length)
     out.set(a)
     out.set(b as Uint8Array, a.length)
@@ -221,7 +222,7 @@ class Incremental<A, E, I extends Chunkable> {
   }
 
   push(chunk: I): void {
-    if (chunk.length === 0) return
+    if (isEmptyUnits(chunk)) return
     this.append(chunk)
     if (this.settled !== undefined) return
     // An attempt re-reads what the last one could not finish, from `restart`;
