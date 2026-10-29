@@ -15,11 +15,12 @@
  * Skipping a parser that is certain to fail also skips the callbacks it
  * would have run before failing, which is why callbacks must be pure.
  */
+import * as Arr from "effect/Array"
 import * as Predicate from "effect/Predicate"
 import type { Encoding } from "../../Encoding.js"
 import type { Node, ParserLike } from "../node.js"
 import { nodeOf } from "../node.js"
-import { fastLimit } from "../text.js"
+import { fastLimit, isEmptyUnits } from "../text.js"
 import type { CharSet } from "./sets.js"
 import { kindOfEncoding, reachesAbove, TableSize, textSet, tokenSet } from "./sets.js"
 
@@ -109,12 +110,12 @@ export class FirstSets {
         const lit = node.literal
         if (node.encoding !== undefined) {
           if (kindOfEncoding(node.encoding) !== kind) return unknown
-          if (node.caseless) return lit.length === 0 ? unknown : anyUnit
+          if (node.caseless) return isEmptyUnits(lit) ? unknown : anyUnit
           const encoded = node.encoding.encode(lit as string)
-          if (encoded.length === 0) return emptyOptional
+          if (isEmptyUnits(encoded)) return emptyOptional
           return ofUnits([Predicate.isString(encoded) ? encoded.charCodeAt(0) : encoded[0]])
         }
-        if (lit.length === 0) return emptyOptional
+        if (isEmptyUnits(lit)) return emptyOptional
         let first: number
         if (Predicate.isString(lit)) {
           first = kind === 0 ? lit.charCodeAt(0) : new TextEncoder().encode(lit)[0]
@@ -176,7 +177,7 @@ export class FirstSets {
       case "ZipWith":
         return this.sequence([node.self, node.that])
       case "Alt": {
-        if (node.parsers.length === 0) return failing
+        if (Arr.isReadonlyArrayEmpty(node.parsers)) return failing
         let acc: First | undefined
         let mode: 0 | 1 | 2 = Strict
         for (const p of node.parsers) {

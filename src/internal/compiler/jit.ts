@@ -16,6 +16,7 @@
  * the interpreter for what they can't compile) on the shared state, with
  * `state.pos` kept in sync.
  */
+import * as Arr from "effect/Array"
 import * as Predicate from "effect/Predicate"
 import * as Option from "effect/Option"
 import type { Encoding } from "../../Encoding.js"
@@ -141,7 +142,7 @@ const runsOf = (table: Uint8Array): Array<[number, number]> => {
 
 /** A JavaScript expression testing `v` against ranges, or `undefined` if too long. */
 const rangeTest = (runs: ReadonlyArray<readonly [number, number]>, v: string): string | undefined => {
-  if (runs.length === 0) return "false"
+  if (Arr.isReadonlyArrayEmpty(runs)) return "false"
   if (runs.length > 4) return undefined
   return runs.map(([a, b]) => (a === b ? `${v}===${a}` : `(${v}>=${a}&&${v}<=${b})`)).join("||")
 }
@@ -172,8 +173,8 @@ const runCost = ([a, b]: readonly [number, number], size: number): number =>
 const tableTest = (table: Uint8Array, v: string, size: number): string | undefined => {
   const accept = runsWhere(table, size, 1)
   const reject = runsWhere(table, size, 0)
-  if (accept.length === 0) return "false"
-  if (reject.length === 0) return "true"
+  if (Arr.isReadonlyArrayEmpty(accept)) return "false"
+  if (Arr.isReadonlyArrayEmpty(reject)) return "true"
   const cost = (runs: ReadonlyArray<readonly [number, number]>) => runs.reduce((n, r) => n + runCost(r, size), 0)
   const acceptCost = cost(accept)
   const rejectCost = cost(reject)
@@ -309,7 +310,7 @@ class Emitter {
     const done = this.label()
     const body = this.inline(p, used, out, `break ${done};`, fn, 0)
     this.functions.push(
-      `function ${name}(p){const I=$I,E=$E;${fn.vars.length > 0 ? `let ${fn.vars.join(",")};` : ""}` +
+      `function ${name}(p){const I=$I,E=$E;${Arr.isArrayNonEmpty(fn.vars) ? `let ${fn.vars.join(",")};` : ""}` +
         `${done}:{${body}P=p;return ${out ?? "void 0"}}return F}`
     )
     return name
@@ -681,7 +682,7 @@ class Emitter {
 
   alt(node: NodeOf<"Alt">, used: boolean, out: string | null, fail: string, fn: Fn, d: number): string {
     const parsers = node.parsers
-    if (parsers.length === 0) return `${BT}${fail}`
+    if (Arr.isReadonlyArrayEmpty(parsers)) return `${BT}${fail}`
     if (parsers.length === 1) return this.gen(parsers[0], used, out, fail, fn, d)
     const firsts = this.kind === 2 ? undefined : parsers.map((q) => this.closure.firsts.of(q))
     const prune = firsts !== undefined && planAlt(firsts) !== undefined

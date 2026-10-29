@@ -46,6 +46,7 @@
  *
  * @since 0.2.0
  */
+import * as Str from "effect/String"
 import * as Predicate from "effect/Predicate"
 import type * as Context from "effect/Context"
 import { dual } from "effect/Function"
@@ -577,7 +578,7 @@ export class SyntaxNode<I extends Input = string> {
     let out = ""
     const visit = (green: Green, field: string | undefined) => {
       if (green.named || green === this.green) {
-        if (out.length > 0) out += " "
+        if (Str.isNonEmpty(out)) out += " "
         if (field !== undefined) out += `${field}: `
         out += `(${green.kind}`
         for (let i = 0; i < green.children.length; i++) visit(green.children[i], green.fields?.[i])

@@ -26,6 +26,7 @@
  * the input it looked at, plus a margin for the tokens that read a little
  * past where they stop, is unchanged.
  */
+import * as Arr from "effect/Array"
 import * as Predicate from "effect/Predicate"
 import type * as Context from "effect/Context"
 import type { Encoding } from "../Encoding.js"
@@ -189,7 +190,7 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
         if (p < this.cursor) {
           // An attempt was abandoned (or a lookahead finished): drop its nodes
           const stack = this.stack
-          while (stack.length > 0 && stack[stack.length - 1].end > p) stack.pop()
+          while (Arr.isArrayNonEmpty(stack) && Arr.lastNonEmpty(stack).end > p) stack.pop()
         }
         if (p > this.highWater) this.highWater = p
         this.cursor = p
@@ -330,7 +331,7 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
     const entries = this.stack.splice(0)
     const end = this.end
     if (fatal !== undefined) {
-      const last = entries.length > 0 ? entries[entries.length - 1].end : 0
+      const last = Arr.isArrayNonEmpty(entries) ? Arr.lastNonEmpty(entries).end : 0
       const start = Math.max(Math.min(errorStart, end), last)
       const error = build(errorKind, true, undefined, start, end, end, [], undefined, {
         failure: rebase(fatal.failure, start),

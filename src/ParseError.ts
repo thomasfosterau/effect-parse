@@ -19,6 +19,7 @@
  *
  * @since 0.1.0
  */
+import * as Arr from "effect/Array"
 import * as Predicate from "effect/Predicate"
 import * as Data from "effect/Data"
 import * as Option from "effect/Option"
@@ -245,7 +246,7 @@ const codePointCount = (s: string, start: number, end: number): number => {
  * @category utils
  */
 export const formatExpected = (expected: ReadonlyArray<string>): string => {
-  if (expected.length === 0) return ""
+  if (Arr.isReadonlyArrayEmpty(expected)) return ""
   if (expected.length === 1) return expected[0]
   return `${expected.slice(0, -1).join(", ")} or ${expected[expected.length - 1]}`
 }
@@ -366,7 +367,7 @@ const render = (error: ParseError<unknown>): string => {
   if (error.description !== undefined) lines.push(error.description)
   if (error.mode === "Incomplete") {
     lines.push("unexpected end of input (incomplete)")
-  } else if (error.expected.length > 0) {
+  } else if (Arr.isReadonlyArrayNonEmpty(error.expected)) {
     lines.push(`expected ${formatExpected(error.expected)}, found ${describeFound(input, offset, encoding)}`)
   } else if (cause === undefined && error.description === undefined) {
     lines.push(`unexpected ${describeFound(input, offset, encoding)} (${error.kind})`)

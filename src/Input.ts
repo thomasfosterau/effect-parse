@@ -13,6 +13,7 @@
  *
  * @since 0.1.0
  */
+import * as Arr from "effect/Array"
 import * as Predicate from "effect/Predicate"
 import * as Context from "effect/Context"
 import type { Encoding } from "./Encoding.js"
@@ -531,8 +532,9 @@ export class State<I extends Input = Input> {
     ) {
       return f
     }
-    const context =
-      d.context.length === 0 ? f.context : [...d.context, ...f.context.filter((l) => !d.context.includes(l))]
+    const context = Arr.isReadonlyArrayEmpty(d.context)
+      ? f.context
+      : [...d.context, ...f.context.filter((l) => !d.context.includes(l))]
     return new Failure(d.offset, d.kind, d.expected, context, d.hasCause, d.cause, d.message, d.needed)
   }
 
@@ -552,7 +554,7 @@ export class State<I extends Input = Input> {
 
   /** @internal */
   makeFailure(offset: number, kind: ErrorKind, expected: ReadonlyArray<string>): Failure {
-    if (this.hintOffset === offset && this.hintExpected.length > 0) {
+    if (this.hintOffset === offset && Arr.isReadonlyArrayNonEmpty(this.hintExpected)) {
       expected = mergeExpected(this.hintExpected, expected)
     }
     return new Failure(offset, kind, expected, empty, false, undefined, undefined, 0)
@@ -561,8 +563,8 @@ export class State<I extends Input = Input> {
 
 /** @internal */
 export const mergeExpected = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): ReadonlyArray<string> => {
-  if (a.length === 0) return b
-  if (b.length === 0) return a
+  if (Arr.isReadonlyArrayEmpty(a)) return b
+  if (Arr.isReadonlyArrayEmpty(b)) return a
   const out = a.slice()
   for (const e of b) {
     if (!out.includes(e)) out.push(e)
@@ -595,7 +597,7 @@ export const mergeTiedFailures = (a: Failure, b: Failure, expected: ReadonlyArra
     b.offset,
     b.kind,
     expected,
-    b.context.length > 0 ? b.context : a.context,
+    Arr.isReadonlyArrayNonEmpty(b.context) ? b.context : a.context,
     b.hasCause || a.hasCause,
     b.hasCause ? b.cause : a.cause,
     b.message ?? a.message,
