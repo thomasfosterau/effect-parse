@@ -24,7 +24,7 @@ import type { State } from "../../Input.js"
 import { Fail } from "../../Input.js"
 import type { Node, NodeOf, ParserLike } from "../node.js"
 import { addEntry, flushEntries, fromEntries, isPlainKey } from "../entries.js"
-import { children, nodeOf } from "../node.js"
+import { children, nodeOf, scansFloat } from "../node.js"
 import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from "../numbers.js"
 import { compileAny } from "../tokens.js"
 import * as Resume from "../resume.js"
@@ -648,12 +648,7 @@ class Emitter {
    */
   private float(node: NodeOf<"Map">, out: string, fail: string, fn: Fn, d: number): string | undefined {
     if (!floatTexts.has(node.self) || this.kind === 2) return undefined
-    let taken = nodeOf(node.self)
-    while (Predicate.isTagged(taken, "Expected")) taken = nodeOf(taken.self)
-    if (!Predicate.isTagged(taken, "Taken")) return undefined
-    const enc = taken.encoding
-    // Decimal notation is ASCII, which these encodings read unit by unit
-    if (enc !== undefined && !(this.native(enc) && enc.unit === 1 && enc.asciiCompatible)) return undefined
+    if (!scansFloat(node.self, (enc) => this.native(enc))) return undefined
     const t = this.v(fn)
     const scan = this.const(floatScan)
     // Near the end of a partial input, the parser may have to report `Incomplete`

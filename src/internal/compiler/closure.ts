@@ -15,7 +15,7 @@ import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import type { Node, NodeOf, ParserLike } from "../node.js"
 import { addEntry, flushEntries, fromEntries, isPlainKey } from "../entries.js"
-import { nodeOf } from "../node.js"
+import { nodeOf, scansFloat } from "../node.js"
 import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from "../numbers.js"
 import { charOf, fastLimit, firstCodePoint, fold, validate } from "../text.js"
 import { countTokens, indexOf } from "../tokens.js"
@@ -1364,11 +1364,7 @@ class Compiler {
    */
   private float(node: NodeOf<"Map">): Step | undefined {
     if (!floatTexts.has(node.self) || this.kind === 2) return undefined
-    let taken = nodeOf(node.self)
-    while (Predicate.isTagged(taken, "Expected")) taken = nodeOf(taken.self)
-    if (!Predicate.isTagged(taken, "Taken")) return undefined
-    const enc = taken.encoding
-    if (enc !== undefined && !(this.native(enc) && enc.unit === 1 && enc.asciiCompatible)) return undefined
+    if (!scansFloat(node.self, (enc) => this.native(enc))) return undefined
     const c = this.compile(node.self, true)
     const scan = (this.kind === 0 ? scanFloatString : scanFloatBytes) as (
       input: unknown,
