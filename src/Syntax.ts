@@ -134,7 +134,7 @@ export const token: {
 
 const defaultTokenKind = (self: Parser.Any): string => {
   const n = nodeOf(self)
-  if (n._tag === "Literal" && Predicate.isString(n.literal) && !n.caseless) return n.literal
+  if (Predicate.isTagged(n, "Literal") && Predicate.isString(n.literal) && !n.caseless) return n.literal
   return self.name ?? "token"
 }
 
@@ -757,7 +757,7 @@ export const parse: {
   options?: ParseOptions & { readonly context?: Context.Context<R> }
 ): Tree<A, E, I> => {
   const n = nodeOf(grammar)
-  const isRoot = n._tag === "Syntax" && n.kind !== undefined && n.named
+  const isRoot = Predicate.isTagged(n, "Syntax") && n.kind !== undefined && n.named
   const config: Config = {
     kind: isRoot ? n.kind : (options?.kind ?? "document"),
     inner: isRoot ? (n.self as Parser.Any) : grammar,

@@ -2708,7 +2708,7 @@ const preview = (state: State<any>, offset: number): string => {
  */
 export const consoleTracer = (event: TraceEvent): void => {
   const indent = "  ".repeat(event.depth)
-  if (event._tag === "Enter") {
+  if (Predicate.isTagged(event, "Enter")) {
     console.log(`${indent}> ${event.name} @${event.offset} | ${preview(event.state, event.offset)}`)
   } else {
     const consumed = (event.endOffset ?? event.offset) - event.offset

@@ -7,6 +7,8 @@
  * `Suspend` is just a reference.
  */
 import * as Predicate from "effect/Predicate"
+import type * as Option from "effect/Option"
+import type * as Result from "effect/Result"
 import type { Encoding } from "../Encoding.js"
 import type { ErrMode, Input, State } from "../Input.js"
 
@@ -67,8 +69,8 @@ export type Node =
   | { readonly _tag: "Map"; readonly self: P; readonly f: (a: any) => unknown }
   | { readonly _tag: "As"; readonly self: P; readonly value: unknown }
   | { readonly _tag: "Tap"; readonly self: P; readonly f: (a: any) => void }
-  | { readonly _tag: "TryMap"; readonly self: P; readonly f: (a: any) => unknown }
-  | { readonly _tag: "FilterMap"; readonly self: P; readonly f: (a: any) => unknown }
+  | { readonly _tag: "TryMap"; readonly self: P; readonly f: (a: any) => Result.Result<unknown, unknown> }
+  | { readonly _tag: "FilterMap"; readonly self: P; readonly f: (a: any) => Option.Option<unknown> }
   | { readonly _tag: "Filter"; readonly self: P; readonly predicate: (a: any) => boolean }
   | { readonly _tag: "FlatMap"; readonly self: P; readonly f: (a: any) => P }
   // Consumed input
@@ -158,6 +160,21 @@ export const bounds = (
   if (range === undefined) return { min: 0, max: Infinity }
   if (Predicate.isNumber(range)) return { min: range, max: range }
   return { min: range.min ?? 0, max: range.max ?? Infinity }
+}
+
+/**
+ * Whether the compilers' one-pass float scan applies to `p`, the text
+ * parser of `Ascii.float` / `Text.float`: a `taken` (under any `expected`
+ * labels) in an encoding that `native` accepts, reading one ASCII-compatible
+ * unit at a time, or in no encoding at all.
+ */
+export const scansFloat = (p: ParserLike, native: (enc: Encoding<any>) => boolean): boolean => {
+  let taken = nodeOf(p)
+  while (Predicate.isTagged(taken, "Expected")) taken = nodeOf(taken.self)
+  if (!Predicate.isTagged(taken, "Taken")) return false
+  const enc = taken.encoding
+  // Decimal notation is ASCII, which these encodings read unit by unit
+  return enc === undefined || (native(enc) && enc.unit === 1 && enc.asciiCompatible)
 }
 
 /** The child parsers of a node, in evaluation order. */

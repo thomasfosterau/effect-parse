@@ -24,7 +24,7 @@ import type { State } from "../../Input.js"
 import { Fail } from "../../Input.js"
 import type { Node, NodeOf, ParserLike } from "../node.js"
 import { addEntry, flushEntries, fromEntries, isPlainKey } from "../entries.js"
-import { children, nodeOf } from "../node.js"
+import { children, nodeOf, scansFloat } from "../node.js"
 import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from "../numbers.js"
 import { compileAny } from "../tokens.js"
 import * as Resume from "../resume.js"
@@ -322,7 +322,7 @@ class Emitter {
    */
   gen(p: ParserLike, used: boolean, out: string | null, fail: string, fn: Fn, depth: number): string {
     const node = nodeOf(p)
-    if (node._tag === "Suspend") return this.call(this.rule(node.resolve(), used), out, fail)
+    if (Predicate.isTagged(node, "Suspend")) return this.call(this.rule(node.resolve(), used), out, fail)
     if (!isLeaf(node) && (((this.refs.get(p) ?? 0) > 1 && !this.small(p)) || depth > 32)) {
       return this.call(this.rule(p, used), out, fail)
     }
@@ -334,7 +334,13 @@ class Emitter {
     let budget = 6
     const visit = (q: ParserLike): boolean => {
       const node = nodeOf(q)
-      if (--budget < 0 || node._tag === "Suspend" || node._tag === "Escaped" || node._tag === "Dispatch") return false
+      if (
+        --budget < 0 ||
+        Predicate.isTagged(node, "Suspend") ||
+        Predicate.isTagged(node, "Escaped") ||
+        Predicate.isTagged(node, "Dispatch")
+      )
+        return false
       return children(node).every(visit)
     }
     return visit(p)
@@ -505,7 +511,7 @@ class Emitter {
       case "FilterMap": {
         const t = this.v(fn)
         const r = this.v(fn)
-        const [tag, field] = node._tag === "TryMap" ? ["Success", "success"] : ["Some", "value"]
+        const [tag, field] = Predicate.isTagged(node, "TryMap") ? ["Success", "success"] : ["Some", "value"]
         return (
           this.gen(node.self, true, t, fail, fn, d) +
           `${r}=${this.const(node.f)}(${t});if(${r}._tag!=="${tag}"){${BT}${fail}}${set(`${r}.${field}`)}`
@@ -543,7 +549,7 @@ class Emitter {
       case "WithSpan": {
         const st = this.v(fn)
         const t = this.v(fn)
-        const extra = node._tag === "WithSpan" ? `{start:${st},end:p}` : `$S.slice(${st},p)`
+        const extra = Predicate.isTagged(node, "WithSpan") ? `{start:${st},end:p}` : `$S.slice(${st},p)`
         return `${st}=p;` + this.gen(node.self, true, t, fail, fn, d) + set(`[${t},${extra}]`)
       }
       case "Span": {
@@ -577,8 +583,8 @@ class Emitter {
         const ok = this.label()
         const bad = this.label()
         const t = out === null ? null : this.v(fn)
-        const some = node._tag === "Opt" ? `R.some(${t})` : `${t}`
-        const orElse = node._tag === "Opt" ? "R.none()" : `${this.const(node.value)}()`
+        const some = Predicate.isTagged(node, "Opt") ? `R.some(${t})` : `${t}`
+        const orElse = Predicate.isTagged(node, "Opt") ? "R.none()" : `${this.const(node.value)}()`
         return (
           `${st}=p;${ok}:{${bad}:{${this.gen(node.self, used, t, `break ${bad};`, fn, d)}${set(some)}break ${ok};}` +
           `if($S.mode!=="Backtrack"){${fail}}p=${st};${set(orElse)}}`
@@ -642,12 +648,7 @@ class Emitter {
    */
   private float(node: NodeOf<"Map">, out: string, fail: string, fn: Fn, d: number): string | undefined {
     if (!floatTexts.has(node.self) || this.kind === 2) return undefined
-    let taken = nodeOf(node.self)
-    while (taken._tag === "Expected") taken = nodeOf(taken.self)
-    if (taken._tag !== "Taken") return undefined
-    const enc = taken.encoding
-    // Decimal notation is ASCII, which these encodings read unit by unit
-    if (enc !== undefined && !(this.native(enc) && enc.unit === 1 && enc.asciiCompatible)) return undefined
+    if (!scansFloat(node.self, (enc) => this.native(enc))) return undefined
     const t = this.v(fn)
     const scan = this.const(floatScan)
     // Near the end of a partial input, the parser may have to report `Incomplete`
@@ -756,9 +757,9 @@ class Emitter {
       return code + `default:{$S.pos=p;${r}=${q}.step($S);if(${r}===F){${fail}}p=$S.pos;}}`
     }
     let sel = nodeOf(node.selector)
-    const peek = sel._tag === "Peek"
+    const peek = Predicate.isTagged(sel, "Peek")
     if (peek) sel = nodeOf((sel as NodeOf<"Peek">).self)
-    if (sel._tag !== "Any" || !this.native(sel.encoding)) return general(true)
+    if (!Predicate.isTagged(sel, "Any") || !this.native(sel.encoding)) return general(true)
     const enc = sel.encoding
     const r = enc === undefined ? undefined : this.reader(enc)
     const limit = r === undefined ? (this.kind === 0 ? 0xd800 : TableSize) : Math.min(r.fast, 0xd800)
@@ -803,7 +804,7 @@ class Emitter {
     const bad = this.label()
     const n = this.v(fn)
     const st = this.v(fn)
-    const isFold = node._tag === "Fold"
+    const isFold = Predicate.isTagged(node, "Fold")
     const cond = isFold ? (node as NodeOf<"Fold">).while : undefined
     const keep = out !== null && used && collect === undefined
     // `while` needs the accumulator even when the output is unused
@@ -971,7 +972,7 @@ class Emitter {
             `else ${deferred}=R.addEntry(${out},${deferred},${key},${value});`,
           finish: `if(${deferred}!==void 0)R.flushEntries(${out},${deferred});`
         }
-        return node._tag === "Repeat"
+        return Predicate.isTagged(node, "Repeat")
           ? this.repeat(node, true, out, fail, fn, d, collect)
           : this.separated(node, true, out, fail, fn, d, collect)
       }
