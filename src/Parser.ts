@@ -746,12 +746,10 @@ export const tryMapUnknown: {
   2,
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, unknown, R, I> =>
     tryMap(self, (a) => {
-      try {
-        return Result.succeed(f(a))
-      } catch (e) {
-        if (Stack.isStackOverflow(e)) throw e
-        return Result.fail(e)
-      }
+      const result = Result.try(() => f(a))
+      // A call-stack overflow is not `f`'s failure: the runner reports it
+      if (Result.isFailure(result) && Stack.isStackOverflow(result.failure)) throw result.failure
+      return result
     })
 )
 

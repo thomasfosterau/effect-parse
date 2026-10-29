@@ -8,6 +8,7 @@
  * their `Result` contract on untrusted input.
  */
 import * as Predicate from "effect/Predicate"
+import * as Result from "effect/Result"
 import type { Fail, State } from "../Input.js"
 
 /** The message of a `TooDeep` failure. */
@@ -31,11 +32,11 @@ export const isStackOverflow = (e: unknown): boolean =>
  * `TooDeep` failure at the offset parsing had reached. Other exceptions
  * propagate.
  */
-export const run = <S extends State<any>, A>(step: (state: S) => A, state: S): A | Fail => {
-  try {
-    return step(state)
-  } catch (e) {
-    if (!isStackOverflow(e)) throw e
-    return state.failMessage("Cut", "TooDeep", tooDeepMessage)
-  }
-}
+export const run = <S extends State<any>, A>(step: (state: S) => A, state: S): A | Fail =>
+  Result.getOrElse(
+    Result.try(() => step(state)),
+    (e): Fail => {
+      if (!isStackOverflow(e)) throw e
+      return state.failMessage("Cut", "TooDeep", tooDeepMessage)
+    }
+  )

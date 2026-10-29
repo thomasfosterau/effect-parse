@@ -19,6 +19,7 @@
 import * as Arr from "effect/Array"
 import * as Predicate from "effect/Predicate"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import type { Encoding } from "../../Encoding.js"
 import type { State } from "../../Input.js"
 import { Fail } from "../../Input.js"
@@ -78,11 +79,11 @@ let supported = false
 const jitSupported = (): boolean => {
   if (checked !== globalThis.Function) {
     checked = globalThis.Function
-    try {
-      supported = checked("return true")() === true
-    } catch {
-      supported = false
-    }
+    const fn = checked
+    supported = Result.getOrElse(
+      Result.try(() => fn("return true")() === true),
+      () => false
+    )
   }
   return supported
 }
@@ -1285,12 +1286,19 @@ const compileJit = (
 export const backend: Backend = {
   build: (p, kind, resumable) => {
     if (!jitSupported()) return closureBackend.build(p, kind, resumable)
-    try {
-      const { fallbacks, source, step } = compileJit(p, kind, resumable)
-      return { backend: "jit", step, fallbacks, error: undefined, source }
-    } catch (error) {
-      // Fall back to the closure compiler, remembering why
-      return { ...closureBackend.build(p, kind, resumable), jitError: error }
-    }
+    return Result.match(
+      Result.try(() => compileJit(p, kind, resumable)),
+      {
+        onSuccess: ({ fallbacks, source, step }) => ({
+          backend: "jit" as const,
+          step,
+          fallbacks,
+          error: undefined,
+          source
+        }),
+        // Fall back to the closure compiler, remembering why
+        onFailure: (error) => ({ ...closureBackend.build(p, kind, resumable), jitError: error })
+      }
+    )
   }
 }

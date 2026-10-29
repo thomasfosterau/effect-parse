@@ -23,6 +23,7 @@ import * as Arr from "effect/Array"
 import * as Predicate from "effect/Predicate"
 import * as Data from "effect/Data"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import type { Encoding } from "./Encoding.js"
 import type { ErrMode, Failure, Input } from "./Input.js"
 import * as text from "./internal/text.js"
@@ -278,11 +279,11 @@ const describeFound = (input: Input, offset: number, encoding: Encoding<any> | u
 export const inspectToken = (u: unknown): string => {
   if (Predicate.isString(u)) return JSON.stringify(u)
   if (Predicate.isObjectOrArray(u)) {
-    try {
-      return JSON.stringify(u)
-    } catch {
-      return String(u)
-    }
+    // `JSON.stringify` throws on cycles and `BigInt`s
+    return Result.getOrElse(
+      Result.try(() => JSON.stringify(u)),
+      () => String(u)
+    )
   }
   return String(u)
 }
