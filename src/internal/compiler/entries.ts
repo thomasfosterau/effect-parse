@@ -17,7 +17,7 @@ export interface EntryPair {
 export const pairOf = (p: ParserLike): EntryPair | undefined => {
   let node = nodeOf(p)
   while (isDiagnostic(node)) node = nodeOf(node.self)
-  if (node._tag !== "Seq") return undefined
+  if (!Predicate.isTagged(node, "Seq")) return undefined
   const output = node.output
   if (output === "tuple") return node.parsers.length === 2 ? { parsers: node.parsers, key: 0, value: 1 } : undefined
   if (Predicate.isNumber(output) || output[0] === output[1]) return undefined
@@ -27,13 +27,13 @@ export const pairOf = (p: ParserLike): EntryPair | undefined => {
 const isDiagnostic = (
   node: Node
 ): node is NodeOf<"Context" | "Expected" | "MapError" | "OrFail" | "Trace" | "Syntax" | "RetryAfter"> =>
-  node._tag === "Context" ||
-  node._tag === "Expected" ||
-  node._tag === "MapError" ||
-  node._tag === "OrFail" ||
-  node._tag === "Trace" ||
-  node._tag === "Syntax" ||
-  node._tag === "RetryAfter"
+  Predicate.isTagged(node, "Context") ||
+  Predicate.isTagged(node, "Expected") ||
+  Predicate.isTagged(node, "MapError") ||
+  Predicate.isTagged(node, "OrFail") ||
+  Predicate.isTagged(node, "Trace") ||
+  Predicate.isTagged(node, "Syntax") ||
+  Predicate.isTagged(node, "RetryAfter")
 
 /**
  * Whether `map(p, Object.fromEntries)` can build its object directly: `p`
@@ -43,7 +43,10 @@ const isDiagnostic = (
  */
 export const buildsEntries = (p: ParserLike): boolean => {
   const node = nodeOf(p)
-  if (isDiagnostic(node) || node._tag === "Mode") return buildsEntries(node.self)
-  if (node._tag === "Seq") return Predicate.isNumber(node.output) && buildsEntries(node.parsers[node.output])
-  return (node._tag === "Repeat" || node._tag === "Separated") && pairOf(node.self) !== undefined
+  if (isDiagnostic(node) || Predicate.isTagged(node, "Mode")) return buildsEntries(node.self)
+  if (Predicate.isTagged(node, "Seq"))
+    return Predicate.isNumber(node.output) && buildsEntries(node.parsers[node.output])
+  return (
+    (Predicate.isTagged(node, "Repeat") || Predicate.isTagged(node, "Separated")) && pairOf(node.self) !== undefined
+  )
 }

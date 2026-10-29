@@ -8,6 +8,7 @@
  * - `lex` + `tokens`: a separate lexer producing tokens, and a parser over
  *   the token array (`parser_lexer.rs`, winnow's `TokenSlice`)
  */
+import * as Match from "effect/Match"
 import { Ascii, Expression, Parser, Token } from "@thomasfosterau/effect-parse"
 
 const ws = <A, E>(p: Parser.Parser<A, E>) => Parser.delimited(Ascii.space0, p, Ascii.space0)
@@ -61,18 +62,13 @@ export const ast: Parser.Parser<Expr, string> = Expression.make({
 })
 
 /** Renders an expression with explicit parentheses, as winnow's example does. */
-export const show = (e: Expr): string => {
-  switch (e._tag) {
-    case "Value":
-      return String(e.value)
-    case "Neg":
-      return `-${show(e.expr)}`
-    case "Paren":
-      return `(${show(e.expr)})`
-    case "Binary":
-      return `${e.op} ${show(e.left)} ${show(e.right)}`
-  }
-}
+export const show = (e: Expr): string =>
+  Match.valueTags(e, {
+    Value: (v) => String(v.value),
+    Neg: (n) => `-${show(n.expr)}`,
+    Paren: (p) => `(${show(p.expr)})`,
+    Binary: (b) => `${b.op} ${show(b.left)} ${show(b.right)}`
+  })
 
 // -----------------------------------------------------------------------------
 // Lexer + token parser

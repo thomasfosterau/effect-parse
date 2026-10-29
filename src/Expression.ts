@@ -34,6 +34,7 @@
  *
  * @since 0.1.0
  */
+import * as Predicate from "effect/Predicate"
 import type { Input, State } from "./Input.js"
 import { Fail } from "./Input.js"
 import type { Parser } from "./Parser.js"
@@ -154,9 +155,9 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
   readonly operators: Ops
 }): Parser<A, E | OpError<Ops[number]>, R | OpServices<Ops[number]>, I & OpInput<Ops[number]>> => {
   const operand = options.operand.step
-  const prefixes = options.operators.filter((o): o is Prefix<A, any, any, any> => o._tag === "Prefix")
-  const postfixes = options.operators.filter((o): o is Postfix<A, any, any, any> => o._tag === "Postfix")
-  const infixes = options.operators.filter((o): o is Infix<A, any, any, any> => o._tag === "Infix")
+  const prefixes = options.operators.filter((o): o is Prefix<A, any, any, any> => Predicate.isTagged(o, "Prefix"))
+  const postfixes = options.operators.filter((o): o is Postfix<A, any, any, any> => Predicate.isTagged(o, "Postfix"))
+  const infixes = options.operators.filter((o): o is Infix<A, any, any, any> => Predicate.isTagged(o, "Infix"))
 
   // Attempts each operator in turn. Returns the index of the first match
   // (with its output in `matched`), -1 if none matched, or -2 on a fatal

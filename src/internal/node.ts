@@ -7,6 +7,8 @@
  * `Suspend` is just a reference.
  */
 import * as Predicate from "effect/Predicate"
+import type * as Option from "effect/Option"
+import type * as Result from "effect/Result"
 import type { Encoding } from "../Encoding.js"
 import type { ErrMode, Input, State } from "../Input.js"
 
@@ -67,8 +69,8 @@ export type Node =
   | { readonly _tag: "Map"; readonly self: P; readonly f: (a: any) => unknown }
   | { readonly _tag: "As"; readonly self: P; readonly value: unknown }
   | { readonly _tag: "Tap"; readonly self: P; readonly f: (a: any) => void }
-  | { readonly _tag: "TryMap"; readonly self: P; readonly f: (a: any) => unknown }
-  | { readonly _tag: "FilterMap"; readonly self: P; readonly f: (a: any) => unknown }
+  | { readonly _tag: "TryMap"; readonly self: P; readonly f: (a: any) => Result.Result<unknown, unknown> }
+  | { readonly _tag: "FilterMap"; readonly self: P; readonly f: (a: any) => Option.Option<unknown> }
   | { readonly _tag: "Filter"; readonly self: P; readonly predicate: (a: any) => boolean }
   | { readonly _tag: "FlatMap"; readonly self: P; readonly f: (a: any) => P }
   // Consumed input

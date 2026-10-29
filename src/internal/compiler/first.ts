@@ -129,8 +129,8 @@ export class FirstSets {
       case "OneOf":
       case "TakeWhile": {
         if (node.encoding !== undefined && kindOfEncoding(node.encoding) !== kind) return unknown
-        const min = node._tag === "OneOf" ? 1 : node.min
-        if (node._tag === "TakeWhile" && node.max === 0) return emptyOptional
+        const min = Predicate.isTagged(node, "OneOf") ? 1 : node.min
+        if (Predicate.isTagged(node, "TakeWhile") && node.max === 0) return emptyOptional
         const mode = min > 0 ? Strict : Optional
         if (node.negate) return mode === Strict ? anyUnit : withMode(anyUnit, Optional)
         const set = node.encoding === undefined ? tokenSet(node.set, kind) : textSet(node.set)
@@ -159,7 +159,7 @@ export class FirstSets {
       case "FlatMap":
       case "SeparatedFold":
       case "Dispatch": {
-        const f = this.of(node._tag === "Dispatch" ? node.selector : node.self)
+        const f = this.of(Predicate.isTagged(node, "Dispatch") ? node.selector : node.self)
         return f.mode === Strict ? f : unknown
       }
       case "Mode": {

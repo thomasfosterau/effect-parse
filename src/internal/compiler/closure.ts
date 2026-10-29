@@ -12,6 +12,7 @@ import type { Encoding } from "../../Encoding.js"
 import type { ErrMode, State } from "../../Input.js"
 import { Fail } from "../../Input.js"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import type { Node, NodeOf, ParserLike } from "../node.js"
 import { addEntry, flushEntries, fromEntries, isPlainKey } from "../entries.js"
 import { nodeOf } from "../node.js"
@@ -52,9 +53,6 @@ const INC: ErrMode = "Incomplete"
 const Margin = 4
 
 const lowerAscii = (c: number): number => (c >= 65 && c <= 90 ? c + 32 : c)
-
-const isSuccess = (r: any): boolean => r._tag === "Success"
-const isSome = (o: any): boolean => o._tag === "Some"
 
 interface Slot {
   fn: Step | undefined
@@ -183,7 +181,9 @@ class Compiler {
         return this.partialSafe(
           p,
           node.encoding === undefined ? this.token(p, node, used) : this.text(p, node, node.encoding, used),
-          node._tag === "Literal" || node._tag === "TakeUntil" ? node.literal.length * 4 : Margin
+          Predicate.isTagged(node, "Literal") || Predicate.isTagged(node, "TakeUntil")
+            ? node.literal.length * 4
+            : Margin
         )
       case "TillLineEnding":
       case "Identifier":
@@ -228,8 +228,8 @@ class Compiler {
         return (s) => {
           const a = c(s)
           if (a === Fail) return Fail
-          const r = f(a) as any
-          if (isSuccess(r)) return r.success
+          const r = f(a)
+          if (Result.isSuccess(r)) return r.success
           s.mode = BT
           return Fail
         }
@@ -240,8 +240,8 @@ class Compiler {
         return (s) => {
           const a = c(s)
           if (a === Fail) return Fail
-          const o = f(a) as any
-          if (isSome(o)) return o.value
+          const o = f(a)
+          if (Option.isSome(o)) return o.value
           s.mode = BT
           return Fail
         }
@@ -326,8 +326,8 @@ class Compiler {
       case "Opt":
       case "OrElseSucceed": {
         const c = this.compile(node.self, used)
-        const orElse = !used ? undefined : node._tag === "Opt" ? Option.none : node.value
-        const some = used && node._tag === "Opt"
+        const orElse = !used ? undefined : Predicate.isTagged(node, "Opt") ? Option.none : node.value
+        const some = used && Predicate.isTagged(node, "Opt")
         return (s) => {
           const start = s.pos
           const a = c(s)
@@ -558,9 +558,9 @@ class Compiler {
     }
     // Switch on the next unit when the selector is `any` or `peek(any)`
     let sel = nodeOf(node.selector)
-    const peek = sel._tag === "Peek"
+    const peek = Predicate.isTagged(sel, "Peek")
     if (peek) sel = nodeOf((sel as NodeOf<"Peek">).self)
-    if (sel._tag !== "Any" || !this.native(sel.encoding)) return general
+    if (!Predicate.isTagged(sel, "Any") || !this.native(sel.encoding)) return general
     const enc = sel.encoding
     // Units below `limit` are whole tokens, so the key is known in advance
     const limit = enc === undefined ? (this.kind === 0 ? 0xd800 : TableSize) : Math.min(fastLimit(enc), 0xd800)
@@ -596,7 +596,7 @@ class Compiler {
   repeat(node: NodeOf<"Repeat"> | NodeOf<"Fold">, used: boolean): Step {
     const { max, min } = node
     const checkLoop = max === Infinity
-    const isFold = node._tag === "Fold"
+    const isFold = Predicate.isTagged(node, "Fold")
     const cond = isFold ? (node as NodeOf<"Fold">).while : undefined
     const c = this.compile(node.self, used)
     const resumable = this.resumable
@@ -715,7 +715,7 @@ class Compiler {
     }
     const { max, min } = node
     const checkLoop = max === Infinity
-    if (node._tag === "Repeat") {
+    if (Predicate.isTagged(node, "Repeat")) {
       return (s) => {
         const acc = new EntriesAcc()
         for (let count = 0; count < max; count++) {
@@ -1365,8 +1365,8 @@ class Compiler {
   private float(node: NodeOf<"Map">): Step | undefined {
     if (!floatTexts.has(node.self) || this.kind === 2) return undefined
     let taken = nodeOf(node.self)
-    while (taken._tag === "Expected") taken = nodeOf(taken.self)
-    if (taken._tag !== "Taken") return undefined
+    while (Predicate.isTagged(taken, "Expected")) taken = nodeOf(taken.self)
+    if (!Predicate.isTagged(taken, "Taken")) return undefined
     const enc = taken.encoding
     if (enc !== undefined && !(this.native(enc) && enc.unit === 1 && enc.asciiCompatible)) return undefined
     const c = this.compile(node.self, true)
