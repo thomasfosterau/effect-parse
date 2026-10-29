@@ -103,7 +103,12 @@ export default defineConfig({
       "effect/no-known-value-widening": "warn", // 33
       "effect/prefer-match-over-switch": "warn", // 22
       "effect/no-chained-type-assertions": "warn", // 13
-      "effect/avoid-try-catch": "warn", // 4, all `try`/`finally`: `provideService` / `provide` restoring `state.context`, and two tests
+      // `avoid-try-catch`: 6. Four are `try`/`finally` (`provideService` /
+      // `provide` restoring `state.context`, and two tests), which `Result.try`
+      // cannot express. Two are on the parse path, where `Result.try`'s closure
+      // measured ~12x slower than an inline `try` (effect-parse#53):
+      // `tryMapUnknown` (per call of `f`) and `Stack.run` (per parse).
+      "effect/avoid-try-catch": "warn",
       "effect/no-unsafe-dictionary-type": "warn", // 3 outside bench/
       "effect/use-console-service": "warn", // 2 outside bench/ (`Parser.debug`'s console tracer)
       // ---- Effect preset: rules this library's conventions cut across ------
