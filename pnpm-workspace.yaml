@@ -36,7 +36,7 @@ catalog:
   # Must equal the vitest that vite-plus bundles (see `vitest` below); vite-plus
   # refuses to run coverage on a mismatch.
   "@vitest/coverage-istanbul": 5.0.5
-  effect: 4.0.6
+  effect: 4.1.0
   fallow: 3.36.0
   # `scripts/check-dist.mjs` parses the built `dist/` with `rolldown/parseAst`.
   rolldown: ^1.2.14
