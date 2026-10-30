@@ -1,7 +1,7 @@
 {
   "$schema": "https://www.schemastore.org/package",
   "name": "@thomasfosterau/effect-parse",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Parser combinators for Effect, ported from Rust's nom and winnow: text, bytes, bits and token streams, streaming input, compiled parsers and Schema integration",
   "keywords": [
     "effect",
