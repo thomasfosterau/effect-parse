@@ -28,16 +28,17 @@ import { addEntry, flushEntries, fromEntries, isPlainKey } from "../entries.js"
 import { children, nodeOf, scansFloat } from "../node.js"
 import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from "../numbers.js"
 import { compileAny } from "../tokens.js"
+import { Key } from "../key.js"
 import * as Resume from "../resume.js"
 import { charOf, fastLimit, latin1, string, utf16be, utf16le, utf8, validate } from "../text.js"
-import type { ClosureCompiler, Fallback, Step } from "./closure.js"
+import type { ClosureCompiler, CompiledRoot, Fallback, Step } from "./closure.js"
 import { backend as closureBackend, createClosureCompiler } from "./closure.js"
 import { buildsEntries, pairOf } from "./entries.js"
 import type { Backend } from "./registry.js"
 import type { First } from "./first.js"
 import { planAlt, Strict } from "./first.js"
 import type { CharSet } from "./sets.js"
-import { kindOfEncoding, reachesAbove, TableSize, textSet, tokenSet } from "./sets.js"
+import { acceptTable, kindOfEncoding, reachesAbove, TableSize, textSet, tokenSet } from "./sets.js"
 
 /** Helpers available to generated code as `R`. */
 const runtime = {
@@ -45,7 +46,7 @@ const runtime = {
   save: Resume.save,
   Done: Resume.Done,
   /** Records the result of a resumed repetition (see `Resume.done`). */
-  done: (state: State<any>, key: object, entry: number, value: unknown, pos: number): void =>
+  done: (state: State<any>, key: Key, entry: number, value: unknown, pos: number): void =>
     Resume.save(state, key, entry, new Resume.Done(value, pos)),
   some: Option.some,
   none: Option.none,
@@ -850,7 +851,7 @@ class Emitter {
    * of a `Done` one; a resumed repetition records its result when it ends.
    */
   private resumePoint(fn: Fn) {
-    const key = this.const({})
+    const key = this.const(new Key())
     const entry = this.v(fn)
     const resumed = this.v(fn)
     const done = this.label()
@@ -1252,23 +1253,15 @@ class Emitter {
 /** The UTF-16 code units of a string. */
 const unitsOf = (s: string): Array<number> => Array.from({ length: s.length }, (_, i) => s.charCodeAt(i))
 
-/** 1 where a small code is accepted (taking `negate` into account). */
-const acceptTable = (set: CharSet, negate: boolean): Uint8Array => {
-  const t = new Uint8Array(TableSize)
-  for (let c = 0; c < TableSize; c++) t[c] = (set.table[c] === 1) !== negate ? 1 : 0
-  return t
-}
-
-/** Generates the source of a compiled parser, without building it. */
-const generate = (
-  root: ParserLike,
-  kind: 0 | 1 | 2,
-  resumable = false
-): {
+/** The source of a compiled parser, with the values it reads as `C`. */
+interface Generated {
   readonly source: string
   readonly constants: ReadonlyArray<unknown>
   readonly fallbacks: ReadonlyArray<Fallback>
-} => {
+}
+
+/** Generates the source of a compiled parser, without building it. */
+const generate = (root: ParserLike, kind: 0 | 1 | 2, resumable = false): Generated => {
   const e = new Emitter(root, kind, resumable)
   const main = e.rule(root, true)
   const source =
@@ -1278,16 +1271,13 @@ const generate = (
   return { source, constants: e.constants, fallbacks: e.fallbacks }
 }
 
-/** Compiles a root parser for one input kind with `new Function`. */
-const compileJit = (
-  root: ParserLike,
-  kind: 0 | 1 | 2,
-  resumable = false
-): {
-  readonly step: Step
-  readonly fallbacks: ReadonlyArray<Fallback>
+/** A root parser compiled with `new Function`, with its generated source. */
+interface JitCompiled extends CompiledRoot {
   readonly source: string
-} => {
+}
+
+/** Compiles a root parser for one input kind with `new Function`. */
+const compileJit = (root: ParserLike, kind: 0 | 1 | 2, resumable = false): JitCompiled => {
   const { constants, fallbacks, source } = generate(root, kind, resumable)
   const run = globalThis.Function("C", "F", "R", source)(constants, Fail, runtime) as Step
   // Generated code reads past `end` expecting nothing to match there, which

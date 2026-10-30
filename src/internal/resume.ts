@@ -19,12 +19,13 @@
  * it all again. `Done` checkpoints stay in place when taken.
  */
 import type { State } from "../Input.js"
+import type { Key } from "./key.js"
 
 /** The checkpoints of a resumable parse. */
-export type Checkpoints = Map<object, Map<number, unknown>>
+export type Checkpoints = Map<Key, Map<number, unknown>>
 
 /** Takes (and removes) the checkpoint of `key` entered at `offset`, if any. */
-export const take = (state: State<any>, key: object, offset: number): unknown => {
+export const take = (state: State<any>, key: Key, offset: number): unknown => {
   const byKey = state.resume?.get(key)
   if (byKey === undefined) return undefined
   const checkpoint = byKey.get(offset)
@@ -44,13 +45,13 @@ export class Done {
  * Returns `value`, the result of a repetition entered at `entry`; when the
  * repetition was resumed from a checkpoint, records it as {@link Done}.
  */
-export const done = <A>(state: State<any>, key: object, entry: number, resumed: boolean, value: A): A => {
+export const done = <A>(state: State<any>, key: Key, entry: number, resumed: boolean, value: A): A => {
   if (resumed && state.resume !== undefined) save(state, key, entry, new Done(value, state.pos))
   return value
 }
 
 /** Records the checkpoint of `key` entered at `offset`. */
-export const save = (state: State<any>, key: object, offset: number, checkpoint: unknown): void => {
+export const save = (state: State<any>, key: Key, offset: number, checkpoint: unknown): void => {
   const resume = state.resume
   if (resume === undefined) return
   let byKey = resume.get(key)

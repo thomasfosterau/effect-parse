@@ -16,7 +16,7 @@
  * attempt moves the cursor back to (or before) where the attempt started,
  * with `State.rewind`, and every node has a positive width, so the nodes of
  * an abandoned attempt are exactly those that end after the position the
- * cursor moves back to: {@link SyntaxState}'s `rewind` drops them. This also
+ * cursor moves back to: {@link SyntaxBuilder} drops them when told of the rewind. This also
  * covers lookahead (`peek`, `not`) and custom parsers written with
  * `Parser.make`, which rewind the same way.
  *
@@ -39,6 +39,7 @@ import * as Predicate from "effect/Predicate"
 import type { Encoding } from "../Encoding.js"
 import type { ErrMode, Input } from "../Input.js"
 import { Fail, Failure, State } from "../Input.js"
+import type { Key } from "./key.js"
 
 /** What a failure inside an `ERROR` node was. Offsets are relative to the node. */
 export interface ErrorInfo {
@@ -52,7 +53,7 @@ export class Green {
     readonly kind: string,
     readonly named: boolean,
     /** The `Syntax.node` that built it; `undefined` for roots and errors, which are never reused alone. */
-    readonly key: object | undefined,
+    readonly key: Key | undefined,
     readonly width: number,
     /** How far its parse looked, relative to its start (at least `width`). */
     readonly lookahead: number,
@@ -111,7 +112,7 @@ export const absolute = (f: Failure, start: number): Failure => rebase(f, -start
 const build = (
   kind: string,
   named: boolean,
-  key: object | undefined,
+  key: Key | undefined,
   start: number,
   end: number,
   lookahead: number,
@@ -161,7 +162,7 @@ export interface Previous {
 
 /** The hooks that `Syntax` combinators and `Parser.resumeAfter`/`retryAfter` call. */
 export interface Builder {
-  node(state: State<any>, step: (state: State<any>) => unknown, key: object, kind: string, named: boolean): unknown
+  node(state: State<any>, step: (state: State<any>) => unknown, key: Key, kind: string, named: boolean): unknown
   field(state: State<any>, step: (state: State<any>) => unknown, name: string): unknown
   /** After error recovery: `[start, pos)` was skipped after `failure`. */
   skipped(start: number, failure: Failure, mode: ErrMode): void
@@ -223,7 +224,7 @@ export class SyntaxBuilder implements Builder {
     return this.state.pos > this.highWater ? this.state.pos : this.highWater
   }
 
-  node(state: State<any>, step: (state: State<any>) => unknown, key: object, kind: string, named: boolean): unknown {
+  node(state: State<any>, step: (state: State<any>) => unknown, key: Key, kind: string, named: boolean): unknown {
     const start = this.state.pos
     const stack = this.stack
     if (this.previous !== undefined) {
@@ -337,7 +338,7 @@ export class SyntaxBuilder implements Builder {
    * so the search starts from the parent of the last one found when
    * `offset` lies inside it: no ancestor of that parent can start there.
    */
-  private find(root: Green, offset: number, key: object): Green | undefined {
+  private find(root: Green, offset: number, key: Key): Green | undefined {
     let node = root
     let start = 0
     const last = this.lastParent
@@ -375,7 +376,7 @@ export class SyntaxBuilder implements Builder {
   }
 
   /** The node of the previous tree built by `key` at `pos` (in the new input), if it can be reused. */
-  private reusable(previous: Previous, key: object, pos: number): Green | undefined {
+  private reusable(previous: Previous, key: Key, pos: number): Green | undefined {
     const segments = previous.segments
     // The segment containing `pos`
     let lo = 0

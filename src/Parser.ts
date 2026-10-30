@@ -45,6 +45,7 @@ import type { ErrorKind } from "./ParseError.js"
 import * as ParseError from "./ParseError.js"
 import * as Registry from "./internal/compiler/registry.js"
 import * as Entries from "./internal/entries.js"
+import { Key } from "./internal/key.js"
 import * as Resume from "./internal/resume.js"
 import * as Run from "./internal/run.js"
 import * as Stack from "./internal/stack.js"
@@ -1997,7 +1998,7 @@ interface FoldCheckpoint<B> {
   readonly pos: number
 }
 
-const saveFold = <B>(state: State<any>, key: object, entry: number, acc: B, pos: number): void =>
+const saveFold = <B>(state: State<any>, key: Key, entry: number, acc: B, pos: number): void =>
   Resume.save(state, key, entry, { acc, count: 0, pos } satisfies FoldCheckpoint<B>)
 
 const foldImpl = <A, B, E, R, I extends Input>(
@@ -2012,7 +2013,7 @@ const foldImpl = <A, B, E, R, I extends Input>(
   const [min, max] = normalizeRange(range)
   const step = self.step
   const checkLoop = max === Infinity
-  const key = {}
+  const key = new Key()
   return described(
     (state) => {
       const entry = state.pos
@@ -2254,7 +2255,7 @@ export const separated: {
     const step = self.step
     const sepStep = separator.step
     const checkLoop = max === Infinity
-    const key = {}
+    const key = new Key()
     return described(
       (state) => {
         const entry = state.pos
@@ -2338,7 +2339,7 @@ export const separatedFoldl1 = <A, E, R, I extends Input, S, E2, R2, I2 extends 
 ): Parser<A, E | E2, R | R2, I & I2> => {
   const step = self.step
   const sepStep = separator.step
-  const key = {}
+  const key = new Key()
   return described(
     (state) => {
       const entry = state.pos

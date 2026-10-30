@@ -100,7 +100,12 @@ export default defineConfig({
       "effect/avoid-direct-tag-checks": "warn", // 11, all `switch (x._tag)`: the compilers, `children` and examples/sexpr
       "effect/avoid-direct-json": "warn", // 35 outside bench/
       "effect/avoid-native-object-helpers": "warn", // 43 outside bench/
-      "effect/no-known-value-widening": "warn", // 33
+      // 17: eleven are overloaded exports written as `const f: { …signatures } = impl`
+      // (`Parser.parse` and its runners, `dispatch`, `Input.fromSource`, …) and one
+      // is `SyntaxNode.toJSON(): unknown`; each needs a change to the published
+      // `.d.ts` (a named exported interface, or `function` overloads). Five are
+      // `bench/json-fused.ts`'s `let v: unknown`.
+      "effect/no-known-value-widening": "warn",
       "effect/prefer-match-over-switch": "warn", // 22
       "effect/no-chained-type-assertions": "warn", // 13
       // `avoid-try-catch`: 6. Four are `try`/`finally` (`provideService` /
@@ -122,8 +127,8 @@ export default defineConfig({
       // `unknown` is the honest type at the interpreter's erased boundary: a
       // step returns the value of whatever parser it runs, and the compilers
       // walk parser nodes whose values they never inspect. 43 + 45 sites.
-      // `object` keys are identity keys (the parser or node a checkpoint or a
-      // syntax node belongs to), compared by reference in `Map`s. 15 sites.
+      // Identity keys are the nominal `internal/key.ts` `Key`; the 3 `object`
+      // sites left are the targets of `internal/entries.ts`.
       "effect/no-unknown-parameters": "warn",
       "effect/no-unknown-returns": "warn",
       "effect/no-object-parameters": "warn",

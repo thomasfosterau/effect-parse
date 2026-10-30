@@ -20,13 +20,13 @@ import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from 
 import { charOf, fastLimit, firstCodePoint, fold, utf16be, utf16le, validate } from "../text.js"
 import { countTokens, indexOf } from "../tokens.js"
 import type { AltPlan } from "./first.js"
+import { Key } from "../key.js"
 import * as Resume from "../resume.js"
 import type { Backend } from "./registry.js"
 import type { EntryPair } from "./entries.js"
 import { buildsEntries, pairOf } from "./entries.js"
 import { FirstSets, planAlt } from "./first.js"
-import type { CharSet } from "./sets.js"
-import { kindOfEncoding, TableSize, textSet, tokenSet } from "./sets.js"
+import { acceptTable, kindOfEncoding, TableSize, textSet, tokenSet } from "./sets.js"
 
 export type Step = (state: State<any>) => any
 
@@ -600,7 +600,7 @@ class Compiler {
     const cond = isFold ? (node as NodeOf<"Fold">).while : undefined
     const c = this.compile(node.self, used)
     const resumable = this.resumable
-    const key = {}
+    const key = new Key()
     // The accumulator: an array, the fold's value, or nothing when unused (and unneeded by `while`)
     const tracked = used || cond !== undefined
     const init: () => unknown = !tracked ? () => undefined : isFold ? (node as NodeOf<"Fold">).init : () => []
@@ -812,7 +812,7 @@ class Compiler {
     const c = this.compile(node.self, used)
     const sep = this.compile(node.separator, false)
     const resumable = this.resumable
-    const key = {}
+    const key = new Key()
     return (s) => {
       const entry = s.pos
       let acc: Array<unknown> | undefined
@@ -878,7 +878,7 @@ class Compiler {
     const sep = this.compile(node.separator, true)
     const op = node.op
     const resumable = this.resumable
-    const key = {}
+    const key = new Key()
     if (!node.right) {
       return (s) => {
         const entry = s.pos
@@ -1405,7 +1405,7 @@ class Compiler {
       }
     }
     const resumable = this.resumable
-    const key = {}
+    const key = new Key()
     /** Fails as incomplete, keeping a checkpoint in a streaming parse. */
     const incomplete = (s: State<any>, start: number, checkpoint: unknown): typeof Fail => {
       if (s.resume !== undefined) Resume.save(s, key, start, checkpoint)
@@ -1645,13 +1645,6 @@ const failAt = (s: State<any>, pos: number): typeof Fail => {
   return Fail
 }
 
-/** 1 where a small code is accepted (taking `negate` into account). */
-const acceptTable = (set: CharSet, negate: boolean): Uint8Array => {
-  const t = new Uint8Array(TableSize)
-  for (let c = 0; c < TableSize; c++) t[c] = (set.table[c] === 1) !== negate ? 1 : 0
-  return t
-}
-
 /** A literal matched against a string input, returning `value`. */
 const stringLiteral = (str: string, value: unknown): Step => {
   const len = str.length
@@ -1709,12 +1702,14 @@ export const createClosureCompiler = (kind: 0 | 1 | 2, resumable = false): Closu
   }
 }
 
+/** A compiled root parser, with the parts of it that run interpreted. */
+export interface CompiledRoot {
+  readonly step: Step
+  readonly fallbacks: ReadonlyArray<Fallback>
+}
+
 /** Compiles a root parser for one input kind. */
-const compileClosure = (
-  root: ParserLike,
-  kind: 0 | 1 | 2,
-  resumable = false
-): { readonly step: Step; readonly fallbacks: ReadonlyArray<Fallback> } => {
+const compileClosure = (root: ParserLike, kind: 0 | 1 | 2, resumable = false): CompiledRoot => {
   const compiler = new Compiler(kind, resumable)
   const step = compiler.compile(root, true)
   return { step, fallbacks: compiler.fallbacks }

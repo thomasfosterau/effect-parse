@@ -55,6 +55,7 @@ import type { Input, Slice, Source } from "./Input.js"
 import { Fail, fromSource, State } from "./Input.js"
 import * as ParseError from "./ParseError.js"
 import { nodeOf } from "./internal/node.js"
+import { Key } from "./internal/key.js"
 import * as Stack from "./internal/stack.js"
 import type { ErrorInfo, Green, Previous, Segment } from "./internal/syntax.js"
 import { absolute, errorKind, SyntaxBuilder } from "./internal/syntax.js"
@@ -68,7 +69,7 @@ import { described, isParser } from "./Parser.js"
 const syntaxNode = (self: Parser.Any, kind: string, named: boolean): Parser.Any => {
   const step = self.step
   // Identifies the nodes this parser builds, so a reparse can reuse them
-  const key = {}
+  const key = new Key()
   return described<unknown, unknown, unknown, Input>(
     (state) => {
       const builder = state.syntax

@@ -7,9 +7,9 @@ import type { Node, ParserLike } from "../src/internal/node.js"
 import { children, nodeOf } from "../src/internal/node.js"
 
 /** Counts the description nodes reachable from a parser, by tag. */
-const tags = (root: ParserLike): Record<string, number> => {
+const tags = (root: ParserLike): Partial<Record<Node["_tag"], number>> => {
   const seen = new Set<ParserLike>()
-  const out: Record<string, number> = {}
+  const out: Partial<Record<Node["_tag"], number>> = {}
   const visit = (p: ParserLike) => {
     if (seen.has(p)) return
     seen.add(p)
