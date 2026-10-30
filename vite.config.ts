@@ -14,7 +14,7 @@
 
 import { fileURLToPath } from "node:url"
 import { recommended } from "@effect/tsgo/oxlint-presets"
-import effect from "@mpsuesser/oxlint-plugin-effect"
+import effect from "@enfect/oxlint"
 import { defineConfig } from "vite-plus"
 
 /**
@@ -61,6 +61,10 @@ export default defineConfig({
   lint: {
     ignorePatterns: ["**/dist/**", "**/coverage/**", "**/node_modules/**"],
     extends: [recommended, effect.configs.recommended],
+    // oxlint's defaults (eslint, typescript, unicorn, oxc) plus the import,
+    // promise, vitest and node rule sets; `categories` turns on each one's
+    // correctness rules.
+    plugins: ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "vitest", "node"],
     categories: {
       correctness: "error"
     },
@@ -140,7 +144,17 @@ export default defineConfig({
       "typescript/no-empty-object-type": "off",
       "typescript/ban-ts-comment": "off",
       "unicorn/no-empty-file": "off",
-      "vite-plus/prefer-vite-plus-imports": "error"
+      "vite-plus/prefer-vite-plus-imports": "error",
+      // The suites assert through local helpers (`expectSuccess`,
+      // `ok` / `fails`, the differential `same*` / `differential` runners) and
+      // Node's `assert`, which the rule cannot see through by default.
+      "vitest/expect-expect": [
+        "error",
+        { assertFunctionNames: ["expect*", "assert*", "*.assert*", "ok", "fails", "same*", "differential"] }
+      ],
+      // `expect(actual, message)`: the second argument is Vitest's own
+      // failure message, which the suites use to name the failing input.
+      "vitest/valid-expect": ["error", { maxArgs: 2 }]
     },
     overrides: [
       // The parser runtime: every step function scans input a unit at a time
@@ -187,7 +201,9 @@ export default defineConfig({
           "effect/effect-run-in-body": "off",
           "effect/avoid-untagged-errors": "off",
           "effect/avoid-native-object-helpers": "off",
-          "effect/no-unsafe-dictionary-type": "off"
+          "effect/no-unsafe-dictionary-type": "off",
+          // Times each backend picked by name (`Compiler[backend]`).
+          "import/namespace": "off"
         }
       },
       // A test body is the harness boundary the rule itself names as the
@@ -195,7 +211,12 @@ export default defineConfig({
       {
         files: ["test/**"],
         rules: {
-          "effect/effect-run-in-body": "off"
+          "effect/effect-run-in-body": "off",
+          // The differential suites pick a compiler backend by name
+          // (`Compiler[backend]` over `["closure", "jit"]`) to run every case
+          // through each; the computed access is the point, and tsc already
+          // checks the key against the namespace's exports.
+          "import/namespace": "off"
         }
       },
       // Type-level tests: the expect-error directives ARE the assertions (a

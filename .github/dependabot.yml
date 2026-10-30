@@ -9,8 +9,8 @@
 #   hard-errors (UnsupportedTargetPackageVersionError) on any pairing it has
 #   no artifact for. A PR moving one of them alone fails `pnpm install`, so
 #   they move as ONE group, with the TS6 alias (`typescript`, published as
-#   `@typescript/typescript6`) and the Effect lint plugin that loads inside
-#   oxlint. Check the `components` table in
+#   `@typescript/typescript6`) and the Effect lint plugin (`@enfect/oxlint`)
+#   that loads inside oxlint. Check the `components` table in
 #   node_modules/@effect/tsgo/dist/effect-tsgo.cjs before merging.
 #
 #   Dependabot does not update `npm:` alias specifiers, and the catalog has
@@ -34,8 +34,25 @@
 # There is no benchmark-library group: the benchmarks compare against the
 # native `JSON.parse` only, and nothing else is benchmarked against.
 #
-# `cooldown` mirrors pnpm-workspace.yaml's `minimumReleaseAge` (1 day), with
-# the first-party `@thomasfosterau/*` packages exempt, as there.
+# `cooldown` covers pnpm-workspace.yaml's `minimumReleaseAge` (480 minutes,
+# 8 hours) with the first-party `@thomasfosterau/*` packages exempt, as there.
+# Dependabot counts cooldown in whole days only, so it is 1 day: longer than
+# pnpm's 8 hours, so a Dependabot PR never proposes a version pnpm would still
+# refuse to install.
+#
+# Hand moves Dependabot cannot make (also listed in AGENTS.md):
+# - `vite`, `vitest`, `@vitest/coverage-istanbul`: derived from vite-plus by
+#   `node scripts/check-toolchain.mjs --fix` (ignored below).
+# - `typescript` / `@typescript/native`: `npm:` aliases, moved with the
+#   @effect/tsgo release that supports them.
+# - the `overrides` keys in pnpm-workspace.yaml (`vite@*`, `vitest@*`,
+#   `effect`) follow their catalog entries and need no bump of their own.
+# - the `npm@11.20.0` that release.yml installs for OIDC publishing.
+#
+# The `github-actions` entry also scans the local composite action under
+# .github/actions/, whose `uses:` pins it would otherwise never see. Every
+# action is pinned to a full commit SHA with a `# vX.Y.Z` comment, which
+# Dependabot keeps current.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -72,7 +89,7 @@ updates:
           - "@typescript/native"
           - "typescript"
           - "@typescript/typescript6"
-          - "@mpsuesser/oxlint-plugin-effect"
+          - "@enfect/oxlint"
         update-types: ["major", "minor", "patch"]
       effect:
         applies-to: version-updates
@@ -98,12 +115,16 @@ updates:
           - "*"
         update-types: ["minor", "patch"]
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     target-branch: "trunk"
     schedule:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 1
     labels:
       - "dependencies"
     commit-message:

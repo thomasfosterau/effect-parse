@@ -231,7 +231,7 @@ describe("ParserSchema", () => {
 
   it("reports parse errors as issues", () => {
     expect(() => Schema.decodeUnknownSync(Version)("1.x")).toThrow(/expected digit/)
-    expect(() => Schema.decodeUnknownSync(Version)(12)).toThrow()
+    expect(() => Schema.decodeUnknownSync(Version)(12)).toThrow(/Expected string/)
   })
 
   it("forbids encoding without a printer", () => {
