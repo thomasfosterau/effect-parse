@@ -224,6 +224,35 @@ describe("compiled examples", () => {
     Array.from({ length: 256 }).forEach((_, b) => same(latin, new Uint8Array([0x22, b, 0x22])))
   })
 
+  it.each([
+    ["Text.utf16le", Text.utf16le, Encoding.utf16le],
+    ["Text.utf16be", Text.utf16be, Encoding.utf16be]
+  ] as const)("UTF-16 unit reader on malformed and truncated %s", (_, T, enc) => {
+    const parsers = [
+      jsonGrammar(T),
+      T.any,
+      Parser.repeat(T.oneOf("aé😀")),
+      T.take(3),
+      T.caseless("aÉ"),
+      Parser.taken(Parser.repeat(T.noneOf("x"))),
+      Parser.repeat(T.alpha1),
+      // A control character read as a unit, and one only `decode` reads
+      T.escaped(T.takeTill("é\\"), "é", T.oneOf("é\\")),
+      T.escaped(T.takeTill("😀\\"), "😀", T.oneOf("😀\\"))
+    ]
+    const random = rng(13)
+    const base = enc.encode('["aé😀", {"k": "v\\n"}, 12]')
+    Array.from({ length: 300 }).forEach((_, i) => {
+      const bytes = base.slice()
+      const at = Math.floor(random() * bytes.length)
+      // Lone and misordered surrogates, and units that are not the JSON syntax
+      bytes[at] = [0xd8, 0xdb, 0xdc, 0xdf, 0x00, 0x22, 0x5c][i % 7]
+      // Cutting after `at` leaves an odd length about half the time: a unit cut in two
+      const input = bytes.subarray(0, i % 3 === 0 ? bytes.length : at + 1)
+      parsers.forEach((p) => same(p, input))
+    })
+  })
+
   it("a parser derived from a schema", () => {
     const { annotate } = ParserSchema
     const Entry = Schema.Struct({

@@ -261,16 +261,16 @@ A differential suite runs every example grammar, compiled with each backend and 
 
 JSON benchmark (`vp run bench`, 0.58 M-character document, best of 40 interleaved runs; timings on this machine vary by 5–10% between runs):
 
-| Grammar and input                  | interpreted | closure        | JIT           |
-| ---------------------------------- | ----------- | -------------- | ------------- |
-| `json.ts` (Token/Ascii), string    | 39.7 ms     | 14.9 ms (2.7×) | 7.7 ms (5.1×) |
-| `json-text.ts`, `Text.string`      | 42.0 ms     | 18.6 ms (2.3×) | 7.4 ms (5.7×) |
-| `json-text.ts`, `Text.utf8`        | 46.8 ms     | 19.2 ms (2.4×) | 7.7 ms (6.1×) |
-| `json-text.ts`, `Text.utf16le`     | 54.9 ms     | 40.2 ms (1.4×) | 9.7 ms (5.6×) |
-| `json-fast.ts`, `Text.string`      | 43.3 ms     | 14.6 ms (3.0×) | 4.9 ms (8.8×) |
-| `json-fast.ts`, `Text.utf8`        | 47.4 ms     | 16.4 ms (2.9×) | 5.3 ms (8.9×) |
-| hand-fused (`bench/json-fused.ts`) |             |                | 4.6 ms        |
-| `JSON.parse`                       |             |                | 1.9 ms        |
+| Grammar and input                  | interpreted | closure        | JIT            |
+| ---------------------------------- | ----------- | -------------- | -------------- |
+| `json.ts` (Token/Ascii), string    | 40.9 ms     | 16.2 ms (2.5×) | 8.9 ms (4.6×)  |
+| `json-text.ts`, `Text.string`      | 45.3 ms     | 20.9 ms (2.2×) | 8.2 ms (5.5×)  |
+| `json-text.ts`, `Text.utf8`        | 51.8 ms     | 21.9 ms (2.4×) | 9.1 ms (5.7×)  |
+| `json-text.ts`, `Text.utf16le`     | 60.2 ms     | 24.9 ms (2.4×) | 11.7 ms (5.2×) |
+| `json-fast.ts`, `Text.string`      | 44.9 ms     | 16.6 ms (2.7×) | 5.3 ms (8.5×)  |
+| `json-fast.ts`, `Text.utf8`        | 51.0 ms     | 18.8 ms (2.7×) | 5.9 ms (8.7×)  |
+| hand-fused (`bench/json-fused.ts`) |             |                | 5.2 ms         |
+| `JSON.parse`                       |             |                | 2.1 ms         |
 
 Against `JSON.parse` on documents of different shapes (`vp run bench:native`; bytes are compared with `TextDecoder` then `JSON.parse`), the compiled parsers take:
 
@@ -288,7 +288,7 @@ Numbers come within 1.2× of `JSON.parse` because floats are converted without s
 
 The JIT's remaining gap to the hand-fused parser was mostly the grammar itself: `object` collects `[key, value]` tuples and calls `Object.fromEntries` in a lambda, about 90 ns per entry (three times a loop of assignments) and a third of the profile on records. `json-fast.ts` builds objects with `Parser.fromEntries`, which compiles to assignments (pipeline step 6), and parses records at the speed of the hand-fused parser.
 
-What runs interpreted in the JSON grammars: only the parser returned by the `flatMap` in `\uXXXX` escapes (its first parser, `hex4`, is compiled); `json-fast.ts` writes those escapes with `alt` and `cut` instead. The closure compiler leaves UTF-16 at 1.4× because it decodes every code point through `Encoding.decode`; the JIT's unit reader removes that.
+What runs interpreted in the JSON grammars: only the parser returned by the `flatMap` in `\uXXXX` escapes (its first parser, `hex4`, is compiled); `json-fast.ts` writes those escapes with `alt` and `cut` instead. Both compilers read UTF-16 bytes through a unit reader (a unit below 0xD800 is a whole code point, read inline; `decode` runs only for surrogates and a unit cut off by the end): before the closure compiler had one, it decoded every code point through `Encoding.decode` and ran UTF-16 at 1.4× over the interpreter (44 ms where it now takes 25 ms).
 
 ## 7. Streaming a document as it arrives
 

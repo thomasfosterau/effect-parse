@@ -17,7 +17,7 @@ import type { Node, NodeOf, ParserLike } from "../node.js"
 import { addEntry, flushEntries, fromEntries, isPlainKey } from "../entries.js"
 import { nodeOf, scansFloat } from "../node.js"
 import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from "../numbers.js"
-import { charOf, fastLimit, firstCodePoint, fold, validate } from "../text.js"
+import { charOf, fastLimit, firstCodePoint, fold, utf16be, utf16le, validate } from "../text.js"
 import { countTokens, indexOf } from "../tokens.js"
 import type { AltPlan } from "./first.js"
 import * as Resume from "../resume.js"
@@ -1169,22 +1169,19 @@ class Compiler {
   // ---------------------------------------------------------------------------
 
   text(p: ParserLike, node: TokenNode, enc: Encoding<any>, used: boolean): Step {
-    const kind = this.kind as 0 | 1
-    const fast = fastLimit(enc)
+    const { fast, unitAt, width: unitWidth } = unitReader(this.kind, enc)
     const decode = enc.decode
     const width = enc.width
     const toText = enc.text
-    const unitAt: (input: any, i: number) => number =
-      kind === 0 ? (input: string, i) => input.charCodeAt(i) : (input: Uint8Array, i) => input[i]
     switch (node._tag) {
       case "Any":
         return (s) => {
           const pos = s.pos
           const end = s.end
           if (pos >= end) return fail(s)
-          const c = unitAt(s.input, pos)
+          const c = unitAt(s.input, pos, end)
           if (c < fast) {
-            s.pos = pos + 1
+            s.pos = pos + unitWidth
             return used ? charOf(c) : undefined
           }
           const cp = decode(s.input, pos, end)
@@ -1204,11 +1201,11 @@ class Compiler {
             let pos = start
             for (let i = 0; i < n; i++) {
               if (pos >= end) return failAt(s, pos)
-              const c = unitAt(input, pos)
+              const c = unitAt(input, pos, end)
               let cp: number
               if (c < fast) {
                 cp = c
-                pos++
+                pos += unitWidth
               } else {
                 cp = decode(input, pos, end)
                 if (cp < 0) return failAt(s, pos)
@@ -1253,15 +1250,15 @@ class Compiler {
           const pos = s.pos
           const end = s.end
           if (pos >= end) return fail(s)
-          const c = unitAt(s.input, pos)
+          const c = unitAt(s.input, pos, end)
           if (c < fast && c < TableSize) {
             if (accept[c] === 0) return fail(s)
-            s.pos = pos + 1
+            s.pos = pos + unitWidth
             return used ? charOf(c) : undefined
           }
           const cp = c < fast ? c : decode(s.input, pos, end)
           if (cp < 0 || test(cp) === negate) return fail(s)
-          s.pos = pos + (c < fast ? 1 : width(cp))
+          s.pos = pos + (c < fast ? unitWidth : width(cp))
           return used ? charOf(cp) : undefined
         }
       }
@@ -1274,8 +1271,8 @@ class Compiler {
           let pos = start
           for (let got = 0; got < count; got++) {
             if (pos >= end) return failAt(s, pos)
-            const c = unitAt(input, pos)
-            if (c < fast) pos++
+            const c = unitAt(input, pos, end)
+            if (c < fast) pos += unitWidth
             else {
               const cp = decode(input, pos, end)
               if (cp < 0) return failAt(s, pos)
@@ -1292,6 +1289,32 @@ class Compiler {
         const accept = acceptTable(set, negate)
         const test = set.test
         const small = Math.min(fast, TableSize)
+        // The step is a literal in each loop: one loop stepping by `unitWidth`
+        // measured 2-3% slower on the JSON benchmark's string bodies, and
+        // UTF-16 25 ms against 28 ms, even with the width in a local
+        if (unitWidth === 2) {
+          return (s) => {
+            const input = s.input
+            const start = s.pos
+            const end = s.end
+            let i = start
+            let count = 0
+            while (count < max && i < end) {
+              const c = unitAt(input, i, end)
+              if (c < fast ? (c < small ? accept[c] === 0 : test(c) === negate) : false) break
+              if (c < fast) i += 2
+              else {
+                const cp = decode(input, i, end)
+                if (cp < 0 || test(cp) === negate) break
+                i += width(cp)
+              }
+              count++
+            }
+            if (count < min) return failAt(s, i)
+            s.pos = i
+            return used ? toText(input, start, i) : undefined
+          }
+        }
         return (s) => {
           const input = s.input
           const start = s.pos
@@ -1299,7 +1322,7 @@ class Compiler {
           let i = start
           let count = 0
           while (count < max && i < end) {
-            const c = unitAt(input, i)
+            const c = unitAt(input, i, end)
             if (c < small) {
               if (accept[c] === 0) break
               i++
@@ -1341,17 +1364,15 @@ class Compiler {
       }
     }
     // `Text.taken` checks that the text is well formed, then decodes it
-    const fast = fastLimit(enc)
+    const { fast, unitAt, width } = unitReader(this.kind, enc)
     const toText = enc.text
-    const unitAt: (input: any, i: number) => number =
-      this.kind === 0 ? (input: string, i) => input.charCodeAt(i) : (input: Uint8Array, i) => input[i]
     return (s) => {
       const start = s.pos
       if (c(s) === Fail) return Fail
       const end = s.pos
       const input = s.input
       let i = start
-      while (i < end && unitAt(input, i) < fast) i++
+      while (i < end && unitAt(input, i, end) < fast) i += width
       if (i < end && validate(enc, s, i, end) < 0) return fail(s)
       return used ? toText(input, start, end) : undefined
     }
@@ -1411,6 +1432,15 @@ class Compiler {
               }
               return false
             }
+    } else if (ctrl < unitReader(kind, enc).fast) {
+      const { unitAt, width } = unitReader(kind, enc)
+      control = (s) => {
+        if (s.pos < s.end && unitAt(s.input, s.pos, s.end) === ctrl) {
+          s.pos += width
+          return true
+        }
+        return false
+      }
     } else {
       control = (s) => {
         if (s.pos >= s.end) return false
@@ -1518,6 +1548,38 @@ const fail = (s: State<any>): typeof Fail => {
 }
 
 /** Fails, leaving the cursor at `pos`: how far a token parser read (see `partialSafe`). */
+/**
+ * How a `Text` parser reads its encoding's code units: a unit below `fast`
+ * is a whole code point, `width` input units long. UTF-16 bytes get a unit
+ * reader, as in the JIT; a unit cut off by `end` reads as 0xFFFF, so it
+ * takes the `decode` path, which reports it truncated.
+ */
+interface UnitReader {
+  readonly width: 1 | 2
+  readonly fast: number
+  readonly unitAt: (input: any, i: number, end: number) => number
+}
+
+const unitReader = (kind: 0 | 1 | 2, enc: Encoding<any>): UnitReader => {
+  if (kind === 1 && (enc === utf16le || enc === utf16be)) {
+    return {
+      width: 2,
+      fast: 0xd800,
+      unitAt:
+        enc === utf16le
+          ? (input: Uint8Array, i, end) => (i + 1 < end ? input[i] | (input[i + 1] << 8) : 0xffff)
+          : (input: Uint8Array, i, end) => (i + 1 < end ? (input[i] << 8) | input[i + 1] : 0xffff)
+    }
+  }
+  // `end` is declared though unused: calls with more arguments than
+  // parameters measured 1-2% slower on the JSON benchmark
+  return {
+    width: 1,
+    fast: fastLimit(enc),
+    unitAt: kind === 0 ? (input: string, i, _end) => input.charCodeAt(i) : (input: Uint8Array, i, _end) => input[i]
+  }
+}
+
 const failAt = (s: State<any>, pos: number): typeof Fail => {
   s.pos = pos
   s.mode = BT
