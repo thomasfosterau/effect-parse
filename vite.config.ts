@@ -264,6 +264,13 @@ export default defineConfig({
         command: "tsc -p tsconfig.json",
         cache: { input: cacheInputs, output: [] }
       },
+      // The catalog entries that move in lockstep with `vite-plus`
+      // (scripts/check-toolchain.mjs; `--fix` rewrites them): Dependabot
+      // bumps vite-plus but not its `vite` alias or its vitest pin.
+      "check:toolchain": {
+        command: "node scripts/check-toolchain.mjs",
+        cache: false
+      },
       // The published artifact: one ESM module + declaration file per source
       // module (`vp pack` → tsdown; see `pack` below).
       build: {

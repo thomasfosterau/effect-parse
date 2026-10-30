@@ -54,7 +54,9 @@ catalog:
   # the @effect/tsgo note above): 1.4.0 carries oxlint 1.89.0 on vitest 5.0.5.
   # `vite` is the same release under its aliased core package, and `vitest`
   # must match vite-plus's exact pin because the `vitest: "catalog:"` override
-  # forces every resolution to the catalog singleton.
+  # forces every resolution to the catalog singleton. Dependabot moves
+  # neither (see .github/dependabot.yml): after bumping vite-plus, run
+  # `node scripts/check-toolchain.mjs --fix`, which CI's lockstep step checks.
   vite-plus: 1.4.0
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
   vitest: 5.0.5

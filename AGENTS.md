@@ -12,7 +12,7 @@ This repo publishes one package, `@thomasfosterau/effect-parse`: parser combinat
 
 ## Common pitfalls
 
-- **Never edit a version in `package.json`.** Versions live in the `pnpm-workspace.yaml` catalog (`catalogMode: strict` rejects anything else; published peer ranges are under `catalogs.peers`). After editing it, run `pnpm install` and commit `pnpm-lock.yaml`, or CI fails with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`. `@effect/tsgo`, `@typescript/native` and `vite-plus` move together (the tsgo patch hard-errors at install on an unsupported `tsc` or `oxlint`); read their catalog comments first.
+- **Never edit a version in `package.json`.** Versions live in the `pnpm-workspace.yaml` catalog (`catalogMode: strict` rejects anything else; published peer ranges are under `catalogs.peers`). After editing it, run `pnpm install` and commit `pnpm-lock.yaml`, or CI fails with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`. `@effect/tsgo`, `@typescript/native` and `vite-plus` move together (the tsgo patch hard-errors at install on an unsupported `tsc` or `oxlint`); read their catalog comments first. The `vite` alias, `vitest` and `@vitest/coverage-istanbul` are derived from `vite-plus` (Dependabot ignores them, as it cannot update `npm:` aliases): after a `vite-plus` bump, run `node scripts/check-toolchain.mjs --fix` and `pnpm install`; `vp run check:toolchain` checks them.
 - **`dist/` is the product, and `vp run check:dist` guards it.** `vp pack` emits one module per source module with relative imports left as written, so `dist/` mirrors `src/`. The guard imports every `exports` entry as a consumer does, requires each subpath to export exactly what its root namespace does, and checks that only `Compiler` reaches `internal/compiler/{closure,jit}` (so a program bundles only the compilers it uses).
 - **`"sideEffects": false` is load-bearing.** Every call that runs when a module loads (a top-level parser built from combinators, a `new Map()`) must carry `/*#__PURE__*/`, or bundlers keep it and everything it references. `check:dist` fails on an unmarked one.
 - **The step functions are hot loops.** A parser's `step` runs once per input position. Keep allocation, closures and megamorphic calls out of it; native loops and `new Array(n)` are deliberate there (the lint config records the measurements). Run the benchmarks before and after touching `src/Parser.ts`, `src/Token.ts`, `src/Text.ts`, `src/Ascii.ts`, `src/internal/**` or a compiler, and report the numbers.
@@ -48,15 +48,16 @@ Invoke everything through `vp` (`vp exec` for a binary, `vp run <task>` for a ta
 Before you report work as done, run the gates below in order and quote each command with its final pass/fail. If a gate can't run here, say which and why in the PR body; never imply it ran.
 
 1. From a clean install, which is what CI sees: `rm -rf node_modules dist coverage && pnpm install --frozen-lockfile`.
-2. `vp check`
-3. `vp run check`
-4. `vp run test:unit`
-5. `vp run build`
-6. `vp run check:dist`
-7. `pnpm audit --audit-level high` (network)
-8. `vp run test:coverage`, then `fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` (the fallow gate below; not a CI step).
+2. `vp run check:toolchain`
+3. `vp check`
+4. `vp run check`
+5. `vp run test:unit`
+6. `vp run build`
+7. `vp run check:dist`
+8. `pnpm audit --audit-level high` (network)
+9. `vp run test:coverage`, then `fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` (the fallow gate below; not a CI step).
 
-Steps 2–7 are CI's required `ci` job, in its order ([ci.yml](.github/workflows/ci.yml)). A change to a hot path also reports `vp run bench` (and the benchmark for the area touched) before and after. `CONTRIBUTING.md` and the PR template link here rather than restating the list.
+Steps 2–8 are CI's required `ci` job, in its order ([ci.yml](.github/workflows/ci.yml)). A change to a hot path also reports `vp run bench` (and the benchmark for the area touched) before and after. `CONTRIBUTING.md` and the PR template link here rather than restating the list.
 
 ## Branches and pull requests
 

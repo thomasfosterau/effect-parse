@@ -43,6 +43,10 @@ jobs:
           key: vp-task-v1-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             vp-task-v1-${{ runner.os }}-
+      # Before anything that runs the toolchain: a vite-plus bump that left
+      # its lockstep catalog entries behind installs cleanly, then fails later
+      - name: Toolchain lockstep
+        run: vp run check:toolchain
       - name: Format and lint
         run: vp check
       - name: Type gate (src, tests, examples, benchmarks)
