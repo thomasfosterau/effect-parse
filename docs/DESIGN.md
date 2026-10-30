@@ -308,7 +308,7 @@ Taking a progress checkpoint removes it, so its accumulator has a single owner. 
 
 - **Leaves.** A token parser that read within 4 units (the longest code point) of the end of a partial input re-runs interpreted. Elsewhere, partial and complete mode cannot disagree. Compiled token parsers leave the cursor where they stopped reading, even on failure, so the check is cheap. The one-pass float conversion records how far it read, and runs the float parser instead when that is within 4 units of the end.
 - **End of input.** `eof`, escapes, and the first-unit switches of `alt` and `dispatch` check `state.partial` themselves, and skip no branch near the end of the input.
-- **Loops.** Repetitions keep the same checkpoints as the interpreter.
+- **Loops.** Repetitions keep the same checkpoints as the interpreter, and so do escapes (`escaped`, `takeEscaped`): the JIT generates them in resumable builds too, rather than calling the closure compiler's, which made a resumable JSON parse about 13% faster (72 ms to 62 ms on a 2 MB document, against 60 ms for the ordinary build).
 
 The differential suite checks resumable builds against the interpreter, in partial and complete mode, on every input, and streams every example in chunks of many sizes, interpreted and compiled.
 
