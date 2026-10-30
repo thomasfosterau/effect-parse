@@ -37,6 +37,9 @@ const records = (n: number) =>
     nested: { x: i, y: [1, 2, 3], z: null }
   }))
 
+/** The values of the deep-nesting document. */
+type Nested = number | readonly [Nested, number] | { readonly k: Nested }
+
 interface Doc {
   readonly name: string
   readonly text: string
@@ -67,7 +70,7 @@ const docs: Array<Doc> = [
     name: "deep nesting, 100 KB",
     text: JSON.stringify(
       Array.from({ length: 200 }, () => {
-        let v: unknown = 1
+        let v: Nested = 1
         for (let d = 0; d < 100; d++) v = d % 2 === 0 ? [v, d] : { k: v }
         return v
       })

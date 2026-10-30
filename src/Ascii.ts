@@ -30,6 +30,7 @@ import type { ErrorKind } from "./ParseError.js"
 import type { Parser } from "./Parser.js"
 import * as P from "./Parser.js"
 import * as numbers from "./internal/numbers.js"
+import { Key } from "./internal/key.js"
 import * as Resume from "./internal/resume.js"
 import { codePointPredicate } from "./internal/tokens.js"
 import { literalImpl, range, takeWhileImpl } from "./Token.js"
@@ -570,7 +571,7 @@ const isIncomplete = (state: State<any>): boolean => state.mode === "Incomplete"
  * Fails with the current (`Incomplete`) failure, recording a checkpoint
  * first in a streaming parse.
  */
-const suspendAt = (state: State<any>, key: object, start: number, checkpoint: unknown): Fail => {
+const suspendAt = (state: State<any>, key: Key, start: number, checkpoint: unknown): Fail => {
   if (state.resume !== undefined) Resume.save(state, key, start, checkpoint)
   return Fail
 }
@@ -586,7 +587,7 @@ export const takeEscapedImpl = <A, E, R, I extends Input, B, E2, R2, I2 extends 
 ): Parser<S, E | E2, R | R2, I & I2> => {
   const normalStep = normal.step
   const escStep = escapable.step
-  const key = {}
+  const key = new Key()
   return P.described(
     (state: State<any>) => {
       const start = state.pos
@@ -693,7 +694,7 @@ export const escapedImpl = <E, R, I extends Input, E2, R2, I2 extends Input>(
 ): Parser<string, E | E2, R | R2, I & I2> => {
   const normalStep = normal.step
   const escStep = escape.step
-  const key = {}
+  const key = new Key()
   return P.described(
     (state: State<any>) => {
       const start = state.pos

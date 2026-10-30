@@ -19,9 +19,20 @@ const list = Syntax.node(
   "list"
 )
 
+/** Everything observable about a node and its descendants. */
+interface Outline {
+  readonly kind: string
+  readonly named: boolean
+  readonly field: Syntax.SyntaxNode<Input.Input>["field"]
+  readonly start: number
+  readonly end: number
+  readonly value: unknown
+  readonly children: ReadonlyArray<Outline>
+}
+
 /** Everything observable about a tree, for comparisons. */
 const snapshot = <I extends Input.Input>(tree: Syntax.Tree<unknown, unknown, I>) => {
-  const outline = (n: Syntax.SyntaxNode<I>): unknown => ({
+  const outline = (n: Syntax.SyntaxNode<I>): Outline => ({
     kind: n.kind,
     named: n.named,
     field: n.field,

@@ -21,6 +21,13 @@ export interface CharSet {
   readonly ranges: ReadonlyArray<readonly [number, number]> | undefined
 }
 
+/** 1 where a small code is accepted (taking `negate` into account). */
+export const acceptTable = (set: CharSet, negate: boolean): Uint8Array => {
+  const t = new Uint8Array(TableSize)
+  for (let c = 0; c < TableSize; c++) t[c] = (set.table[c] === 1) !== negate ? 1 : 0
+  return t
+}
+
 const isRange = (u: unknown): u is { readonly from: string | number; readonly to: string | number } =>
   Predicate.isObjectOrArray(u) && (u as any)._tag === "TokenRange"
 

@@ -81,7 +81,7 @@ export const fromSource: {
   return source
 }
 
-const isArrayBufferLike = (u: unknown): u is ArrayBufferLike =>
+const isArrayBufferLike = (u: Input | BinaryInput): u is ArrayBufferLike =>
   u instanceof ArrayBuffer || (globalThis.SharedArrayBuffer !== undefined && u instanceof SharedArrayBuffer)
 
 /**

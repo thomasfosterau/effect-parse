@@ -276,17 +276,18 @@ export const nextIf = (state: State<Input>, m: AnyMatcher, negate: boolean): unk
   }
 }
 
+/** How far a {@link scan} got. */
+export interface Scanned extends Advanced {
+  /** Whether the end of input was hit before `max` tokens. */
+  readonly hitEnd: boolean
+}
+
 /**
  * Scans forward while tokens satisfy the matcher (xor `negate`), up to `max`
  * tokens. Returns the offset reached, the number of tokens matched, and
  * whether the end of input was hit before `max` tokens.
  */
-export const scan = (
-  state: State<Input>,
-  m: AnyMatcher,
-  negate: boolean,
-  max: number
-): { readonly offset: number; readonly count: number; readonly hitEnd: boolean } => {
+export const scan = (state: State<Input>, m: AnyMatcher, negate: boolean, max: number): Scanned => {
   let i = state.pos
   const end = state.end
   let count = 0
@@ -335,8 +336,14 @@ export const scan = (
   }
 }
 
+/** The offset reached and the number of tokens passed. */
+export interface Advanced {
+  readonly offset: number
+  readonly count: number
+}
+
 /** Advances `n` tokens from `start`, returning the offset reached and the count. */
-export const advance = (state: State<Input>, start: number, n: number): { offset: number; count: number } => {
+export const advance = (state: State<Input>, start: number, n: number): Advanced => {
   if (state.inputKind !== 0) {
     const offset = Math.min(state.end, start + n)
     return { offset, count: offset - start }
