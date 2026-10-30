@@ -612,7 +612,7 @@ export const takeEscapedImpl = <A, E, R, I extends Input, B, E2, R2, I2 extends 
         }
         if (state.mode === "Incomplete") return suspendAt(state, key, start, before)
         if (state.mode !== "Backtrack") return Fail
-        state.pos = before
+        state.rewind(before)
         if (matchControl(state)) {
           if (escStep(state) === Fail) return isIncomplete(state) ? suspendAt(state, key, start, before) : Fail
         } else {
@@ -723,7 +723,7 @@ export const escapedImpl = <E, R, I extends Input, E2, R2, I2 extends Input>(
         } else {
           if (state.mode === "Incomplete") return suspendAt(state, key, start, { out, pos: before })
           if (state.mode !== "Backtrack") return Fail
-          state.pos = before
+          state.rewind(before)
         }
         if (matchControl(state)) {
           const b = escStep(state)

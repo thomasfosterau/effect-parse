@@ -243,7 +243,7 @@ describe("Parser", () => {
             }
             if (state.mode !== "Backtrack") return Input.Fail
             const merged = failure === undefined ? state.failure : Input.mergeFailures(failure, state.failure)
-            state.pos = start
+            state.rewind(start)
             return attempt(i + 1, merged)
           }
           return attempt(0, undefined)

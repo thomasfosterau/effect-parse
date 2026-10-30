@@ -273,6 +273,8 @@ const isTwoParserArgs = (args: IArguments) => isParser(args[0]) && isParser(args
  * The step function must either return the parsed value, having advanced
  * `state.pos` past the consumed input, or return the result of one of
  * `state.backtrack`, `state.cut`, `state.incomplete`, ... to signal failure.
+ * A step that moves the cursor backwards (to retry, or after a lookahead)
+ * calls `state.rewind(offset)` rather than assigning `state.pos`.
  *
  * @example
  * ```ts
@@ -723,7 +725,7 @@ export const tryMap: {
         if (a === Fail) return Fail
         const r = f(a)
         if (Result.isSuccess(r)) return r.success
-        state.pos = start
+        state.rewind(start)
         return state.failCause("Backtrack", "Verify", r.failure)
       },
       self.name,
@@ -777,7 +779,7 @@ export const filterMap: {
         if (a === Fail) return Fail
         const o = f(a)
         if (Option.isSome(o)) return o.value
-        state.pos = start
+        state.rewind(start)
         return state.backtrack("Verify")
       },
       self.name,
@@ -808,7 +810,7 @@ export const filter: {
       const a = step(state)
       if (a === Fail) return Fail
       if (predicate(a)) return a
-      state.pos = start
+      state.rewind(start)
       return state.backtrack("Verify")
     },
     self.name,
@@ -852,7 +854,7 @@ export const filterOrFail: {
         const a = step(state)
         if (a === Fail) return Fail
         if (predicate(a)) return a
-        state.pos = start
+        state.rewind(start)
         return state.failCause("Backtrack", "Verify", orFailWith(a))
       },
       self.name,
@@ -1032,7 +1034,7 @@ export const complete = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Pa
       const start = state.pos
       const a = step(state)
       if (a === Fail && state.mode === "Incomplete") {
-        state.pos = start
+        state.rewind(start)
         return state.backtrack("Complete")
       }
       return a
@@ -1223,7 +1225,7 @@ export const orElseSucceed: {
 
 /** Rewinds after a recoverable failure, remembering it as a hint. */
 const recover = (state: State<any>, start: number): void => {
-  state.pos = start
+  state.rewind(start)
   const f = state.failure
   if (f.offset === start) {
     state.hintOffset = start
@@ -1297,7 +1299,7 @@ export const peek = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser
       if (a !== Fail) {
         // Failures inside a lookahead that succeeded are about input that was
         // never consumed, so they are not reported as the furthest failure
-        state.pos = start
+        state.rewind(start)
         state.hintOffset = hintOffset
         state.hintExpected = hintExpected
         state.deepest = deepest
@@ -1327,12 +1329,12 @@ export const not = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<
       const a = step(state)
       if (a !== Fail) {
         // The failures inside `self` are not this parser's failure
-        state.pos = start
+        state.rewind(start)
         state.deepest = deepest
         return state.backtrack("Not")
       }
       if (state.mode !== "Backtrack") return Fail
-      state.pos = start
+      state.rewind(start)
       state.hintOffset = hintOffset
       state.hintExpected = hintExpected
       state.deepest = deepest
@@ -1807,7 +1809,7 @@ export const alt = <const Ps extends ReadonlyArray<Parser.Any>>(
           return a
         }
         if (state.mode !== "Backtrack") return Fail
-        state.pos = start
+        state.rewind(start)
         // The branch's failure, whose own ties (from a nested `alt`) can be taken over unmerged
         const head = state.failureHead
         if (failure === undefined || head.offset > failure.offset) {
@@ -1906,7 +1908,7 @@ export const dispatch: {
       if (key === Fail) return Fail
       const parser = choose(key)
       if (parser === undefined) {
-        state.pos = start
+        state.rewind(start)
         return state.backtrack("Dispatch")
       }
       return parser.step(state)
@@ -1961,7 +1963,7 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
           break
         }
         if (state.mode !== "Backtrack") return Fail
-        state.pos = start
+        state.rewind(start)
         ties.add(state)
       }
       // Some parser is not done yet, and each one that fails is folded in
@@ -2189,7 +2191,7 @@ export const repeatTill: {
             if (b !== Fail) return [acc, b]
             if (state.mode !== "Backtrack") return Fail
             endFailure = state.failure
-            state.pos = start
+            state.rewind(start)
             if (acc.length >= max) return Fail
           }
           const a = step(state)
@@ -2295,7 +2297,7 @@ export const separated: {
               Resume.save(state, key, entry, { acc, pos: start } satisfies SeparatedCheckpoint<A>)
             }
             if (state.mode !== "Backtrack" || acc.length < min) return Fail
-            state.pos = start
+            state.rewind(start)
             return Resume.done(state, key, entry, resumed !== undefined, acc)
           }
           acc.push(a)
@@ -2367,7 +2369,7 @@ export const separatedFoldl1 = <A, E, R, I extends Input, S, E2, R2, I2 extends 
         if (a === Fail) {
           if (state.mode === "Incomplete" && state.resume !== undefined) saveFold(state, key, entry, acc, start)
           if (state.mode !== "Backtrack") return Fail
-          state.pos = start
+          state.rewind(start)
           return Resume.done(state, key, entry, resumed !== undefined, acc as A)
         }
         acc = op(acc, s, a)
@@ -2412,7 +2414,7 @@ export const separatedFoldr1 = <A, E, R, I extends Input, S, E2, R2, I2 extends 
         const a = step(state)
         if (a === Fail) {
           if (state.mode !== "Backtrack") return Fail
-          state.pos = start
+          state.rewind(start)
           break
         }
         seps.push(s)
@@ -2584,7 +2586,7 @@ export const resumeAfter: {
         if (state.recovered === undefined || state.mode === "Incomplete") return Fail
         const failure = state.failure
         const mode = state.mode
-        state.pos = start
+        state.rewind(start)
         if (recoverStep(state) === Fail) return state.failWith(mode, failure)
         state.recovered.push(failure)
         state.syntax?.skipped(start, failure, mode)
@@ -2631,7 +2633,7 @@ export const retryAfter: {
           if (state.recovered === undefined || state.mode === "Incomplete") return Fail
           const failure = state.failure
           const mode = state.mode
-          state.pos = start
+          state.rewind(start)
           if (recoverStep(state) === Fail || state.pos === start) return state.failWith(mode, failure)
           state.recovered.push(failure)
           state.syntax?.skipped(start, failure, mode)

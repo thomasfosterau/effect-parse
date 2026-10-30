@@ -33,7 +33,7 @@ export const runOn = <A>(
         // SAFETY: the compiled step returns what the parser's step returns
         return a as A
       }
-      state.pos = start
+      state.rewind(start)
       if (!diagnostics) return Fail
     }
   }

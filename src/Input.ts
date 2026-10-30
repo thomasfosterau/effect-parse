@@ -201,9 +201,11 @@ export interface TraceEvent {
 export class State<I extends Input = Input> {
   /** The full input being parsed. */
   readonly input: I
-  /** The current offset. Advanced by parsers, rewound on backtracking. */
-  // Declared, not defined, so that a subclass can make it an accessor
-  declare pos: number
+  /**
+   * The current offset. Parsers advance it by assigning it; moving it back
+   * (backtracking, or after a lookahead) goes through {@link rewind}.
+   */
+  pos: number
   /** The end offset (the input's length; in bits inside `Bits.bits`). */
   end: number
   /** 0 = string, 1 = Uint8Array, 2 = array. */
@@ -284,7 +286,8 @@ export class State<I extends Input = Input> {
    */
   resume: Map<object, Map<number, unknown>> | undefined = undefined
   /**
-   * The tree builder of a `Syntax` parse; `undefined` otherwise.
+   * The tree builder of a `Syntax` parse; `undefined` otherwise. A builder
+   * rather than a subclass of `State`, so that every state has one shape.
    *
    * @internal
    */
@@ -394,6 +397,37 @@ export class State<I extends Input = Input> {
   }
 
   /**
+   * Moves the cursor back to `offset`, abandoning what was parsed after it:
+   * how a parser backtracks, or returns to where a lookahead started. A step
+   * that moves the cursor backwards must use this rather than assigning
+   * {@link pos}, so that a `Syntax` parse drops the nodes the abandoned
+   * attempt built. Moving forward is an assignment.
+   *
+   * @example
+   * ```ts
+   * import { Input, Parser } from "@thomasfosterau/effect-parse"
+   *
+   * // Like `Parser.opt`, for one parser
+   * const optional = <A>(p: Parser.Parser<A>) =>
+   *   Parser.make<A | undefined>((state) => {
+   *     const start = state.pos
+   *     const a = p.step(state)
+   *     if (a !== Input.Fail) return a
+   *     if (state.mode !== "Backtrack") return Input.Fail
+   *     state.rewind(start)
+   *     return undefined
+   *   })
+   * ```
+   *
+   * @since 0.4.0
+   */
+  rewind(offset: number): void {
+    const syntax = this.syntax
+    if (syntax !== undefined && offset < this.pos) syntax.rewound(this.pos, offset)
+    this.pos = offset
+  }
+
+  /**
    * The number of input units (code units, bytes or elements) remaining.
    */
   remaining(): number {
@@ -485,6 +519,7 @@ export class State<I extends Input = Input> {
     if (mode === "Backtrack" && (this.deepestFailure === undefined || failure.offset >= this.deepestFailure.offset)) {
       this.deepestFailure = failure
     }
+    if (this.syntax !== undefined) this.syntax.reach(failure.offset)
     return Fail
   }
 
@@ -502,6 +537,7 @@ export class State<I extends Input = Input> {
     this.failureTie1 = tie1
     this.failureTie2 = tie2
     this.deepestIsLatest = this.deepestFailure === undefined || head.offset >= this.deepestFailure.offset
+    if (this.syntax !== undefined) this.syntax.reach(head.offset)
     return Fail
   }
 
@@ -544,6 +580,7 @@ export class State<I extends Input = Input> {
    * `repeat` and `Ascii.digit1`.
    */
   setHint(offset: number, expected: ReadonlyArray<string>): void {
+    if (this.syntax !== undefined) this.syntax.reach(offset)
     if (this.hintOffset === offset) {
       this.hintExpected = mergeExpected(this.hintExpected, expected)
     } else {

@@ -276,6 +276,21 @@ describe("Syntax", () => {
       expect(appended.reused).toBe(0)
     })
 
+    it("re-parses nodes whose lookahead peeked past their end", () => {
+      // `a` is only a node before "bc": the peek reads two units further than the node ends,
+      // and records no failure, so only where the cursor went says how far the node looked
+      const a = Syntax.node(Parser.terminated(Token.literal("a"), Parser.peek(Token.literal("bc"))), "a")
+      const doc = Parser.seq(
+        Parser.alt(a, Token.literal("a")),
+        Token.takeWhile(() => true)
+      )
+      const tree = Syntax.parse(doc, "abc")
+      expect(tree.root.children.map((c) => c.kind)).toEqual(["a"])
+      const edited = Syntax.replace(tree, 2, 3, "x")
+      expect(edited.reused).toBe(0)
+      expect(snapshot(edited)).toEqual(snapshot(Syntax.parse(doc, "abx")))
+    })
+
     it("re-parses nodes whose tokens read past where they stopped", () => {
       const T = Text.string
       // [grammar, input, edit start, replacement]: each node's parse read the edited unit without consuming it

@@ -129,6 +129,7 @@ const decodeRange = (decoder: TextDecoder, b: Uint8Array, start: number, end: nu
 const utf8Encoder = /*#__PURE__*/ new TextEncoder()
 
 /** UTF-8 bytes. */
+// SAFETY: an `Encoding` with the internal `FastLimit` key, which its type doesn't declare
 export const utf8: Encoding<Uint8Array> = {
   name: "UTF-8",
   unit: 1,
@@ -151,13 +152,17 @@ export const utf8: Encoding<Uint8Array> = {
       }
     }
     return out
-  }
-}
+  },
+  // Every built-in encoding has the same keys in the same order, so code
+  // reading them sees one object shape
+  [FastLimit]: 0x80
+} as Encoding<Uint8Array>
 
 const makeUtf16 = (littleEndian: boolean): Encoding<Uint8Array> => {
   const lo = littleEndian ? 0 : 1
   const hi = 1 - lo
   let decoder: TextDecoder | undefined
+  // SAFETY: an `Encoding` with the internal `FastLimit` key, which its type doesn't declare
   return {
     name: littleEndian ? "UTF-16LE" : "UTF-16BE",
     unit: 2,
@@ -190,8 +195,9 @@ const makeUtf16 = (littleEndian: boolean): Encoding<Uint8Array> => {
       }
       decoder ??= new TextDecoder(littleEndian ? "utf-16le" : "utf-16be", { ignoreBOM: true })
       return decodeRange(decoder, b, start, end)
-    }
-  }
+    },
+    [FastLimit]: 0
+  } as Encoding<Uint8Array>
 }
 
 /** UTF-16 bytes, little endian. */
