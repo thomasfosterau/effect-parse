@@ -222,7 +222,7 @@ describe("ParserSchema", () => {
   )
 
   it("decodes", () => {
-    expect(Schema.decodeUnknownSync(Version)("1.2")).toEqual({ major: 1, minor: 2 })
+    expect(Schema.decodeSync(Version)("1.2")).toEqual({ major: 1, minor: 2 })
   })
 
   it("encodes", () => {
@@ -230,19 +230,19 @@ describe("ParserSchema", () => {
   })
 
   it("reports parse errors as issues", () => {
-    expect(() => Schema.decodeUnknownSync(Version)("1.x")).toThrow(/expected digit/)
+    expect(() => Schema.decodeSync(Version)("1.x")).toThrow(/expected digit/)
     expect(() => Schema.decodeUnknownSync(Version)(12)).toThrow(/Expected string/)
   })
 
   it("forbids encoding without a printer", () => {
     const S = ParserSchema.make(Ascii.decUint)
-    expect(Schema.decodeUnknownSync(S)("7")).toBe(7)
+    expect(Schema.decodeSync(S)("7")).toBe(7)
     expect(() => Schema.encodeSync(S)(7)).toThrow(/Encoding is not supported/)
   })
 
   it("composes with other schemas", () => {
     const Point = Schema.Struct({ at: Version })
-    expect(Schema.decodeUnknownSync(Point)({ at: "0.1" })).toEqual({ at: { major: 0, minor: 1 } })
+    expect(Schema.decodeSync(Point)({ at: "0.1" })).toEqual({ at: { major: 0, minor: 1 } })
   })
 })
 

@@ -83,6 +83,8 @@ export interface Parser<out A, out E = never, out R = never, in I extends Input 
   /** A human-readable name, used by `toString` and tracing. */
   readonly name: string | undefined
   [Symbol.iterator](): ParserIterator<Parser<A, E, R, I>>
+  /** Describes the parser: `Parser(<name>)`, or `Parser` when it has no name. */
+  toString(): string
 }
 
 /**
@@ -743,8 +745,8 @@ export const tryMap: {
  * @category mapping
  */
 export const tryMapUnknown: {
-  <A, B>(f: (a: A) => B): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<B, E | unknown, R, I>
-  <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, E | unknown, R, I>
+  <A, B>(f: (a: A) => B): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<B, unknown, R, I>
+  <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, unknown, R, I>
 } = /*#__PURE__*/ dual(
   2,
   <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B): Parser<B, unknown, R, I> =>

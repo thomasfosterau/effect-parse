@@ -47,7 +47,9 @@ import type { Parser } from "./Parser.js"
  */
 export type Chunkable = string | Uint8Array | ReadonlyArray<unknown>
 
-const concat = <I extends Chunkable>(a: I, b: I): I => {
+const concat = <I extends Chunkable>(first: I, b: I): I => {
+  // Widened so the checks below narrow it (a type parameter does not narrow).
+  const a: Chunkable = first
   if (Predicate.isString(a)) return (a + (b as string)) as I
   if (a instanceof Uint8Array) {
     if (a.byteLength === 0) return b

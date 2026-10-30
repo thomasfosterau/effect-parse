@@ -61,6 +61,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
+          # A pinned major (the `engines` floor), never `latest`, which
+          # setup-node resolves to pre-releases too: publish on a stable Node.
           node-version: 22.x
           cache: pnpm
           registry-url: https://registry.npmjs.org

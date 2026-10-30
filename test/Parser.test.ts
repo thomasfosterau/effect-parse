@@ -537,13 +537,7 @@ describe("Parser", () => {
     })
 
     it("ParseError is yieldable", () => {
-      const exit = Effect.runSyncExit(
-        Effect.flip(
-          Effect.gen(function* () {
-            return yield* Parser.parseEffect(Token.literal("x"), "y")
-          })
-        )
-      )
+      const exit = Effect.runSyncExit(Effect.flip(Parser.parseEffect(Token.literal("x"), "y")))
       expect(exit._tag).toBe("Success")
     })
   })

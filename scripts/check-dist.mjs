@@ -30,7 +30,7 @@ for (const subpath of Object.keys(pkg.exports)) {
     console.log(`ok: ${specifier} (${Object.keys(mod).length} exports)`)
   } catch (error) {
     failures++
-    console.error(`fail: ${specifier}: ${error instanceof Error ? error.message : error}`)
+    console.error(`fail: ${specifier}: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 

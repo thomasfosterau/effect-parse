@@ -78,7 +78,9 @@ it("README examples behave as documented", () => {
     Result.succeed("name=main;origin=(1,-2);color=#ff")
   )
 
-  class OutOfRange extends Schema.TaggedError<OutOfRange>()("OutOfRange", { value: Schema.Number }) {}
+  class OutOfRange extends Schema.TaggedError<OutOfRange, { readonly brand: unique symbol }>()("OutOfRange", {
+    value: Schema.Finite
+  }) {}
   const port: Parser.Parser<number, string | OutOfRange> = Ascii.decUint.pipe(
     Parser.filterOrFail(
       (n) => n < 65536,

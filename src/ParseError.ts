@@ -158,7 +158,7 @@ export const fromFailure = <E = never>(
   input: Input,
   failure: Failure,
   mode: ErrMode,
-  encoding?: Encoding<any> | undefined
+  encoding?: Encoding<any>
 ): ParseError<E> =>
   new ParseError<E>({
     input,
@@ -201,7 +201,7 @@ export interface LineColumn {
  * @since 0.1.0
  * @category utils
  */
-export const lineColumn = (input: Input, offset: number, encoding?: Encoding<any> | undefined): LineColumn => {
+export const lineColumn = (input: Input, offset: number, encoding?: Encoding<any>): LineColumn => {
   if (encoding !== undefined && input instanceof Uint8Array) {
     let line = 1
     let column = 1
@@ -279,10 +279,12 @@ const describeFound = (input: Input, offset: number, encoding: Encoding<any> | u
 export const inspectToken = (u: unknown): string => {
   if (Predicate.isString(u)) return JSON.stringify(u)
   if (Predicate.isObjectOrArray(u)) {
-    // `JSON.stringify` throws on cycles and `BigInt`s
+    // `JSON.stringify` throws on cycles and `BigInt`s. Fall back to what
+    // `String` gives an array (its elements joined) or an object's tag
+    // (`[object Map]`), never a user `toString` that might throw in turn.
     return Result.getOrElse(
       Result.try(() => JSON.stringify(u)),
-      () => String(u)
+      () => (Array.isArray(u) ? u.join(",") : Object.prototype.toString.call(u))
     )
   }
   return String(u)
