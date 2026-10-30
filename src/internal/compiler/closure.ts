@@ -1288,58 +1288,12 @@ class Compiler {
         const set = textSet(node.set)
         const accept = acceptTable(set, negate)
         const test = set.test
-        const small = Math.min(fast, TableSize)
-        // The step is a literal in each loop: one loop stepping by `unitWidth`
-        // measured 2-3% slower on the JSON benchmark's string bodies, and
-        // UTF-16 25 ms against 28 ms, even with the width in a local
-        if (unitWidth === 2) {
-          return (s) => {
-            const input = s.input
-            const start = s.pos
-            const end = s.end
-            let i = start
-            let count = 0
-            while (count < max && i < end) {
-              const c = unitAt(input, i, end)
-              if (c < fast ? (c < small ? accept[c] === 0 : test(c) === negate) : false) break
-              if (c < fast) i += 2
-              else {
-                const cp = decode(input, i, end)
-                if (cp < 0 || test(cp) === negate) break
-                i += width(cp)
-              }
-              count++
-            }
-            if (count < min) return failAt(s, i)
-            s.pos = i
-            return used ? toText(input, start, i) : undefined
-          }
-        }
-        return (s) => {
-          const input = s.input
-          const start = s.pos
-          const end = s.end
-          let i = start
-          let count = 0
-          while (count < max && i < end) {
-            const c = unitAt(input, i, end)
-            if (c < small) {
-              if (accept[c] === 0) break
-              i++
-            } else if (c < fast) {
-              if (test(c) === negate) break
-              i++
-            } else {
-              const cp = decode(input, i, end)
-              if (cp < 0 || test(cp) === negate) break
-              i += width(cp)
-            }
-            count++
-          }
-          if (count < min) return failAt(s, i)
-          s.pos = i
-          return used ? toText(input, start, i) : undefined
-        }
+        const loop: TextLoop = { max, min, negate, accept, test, small: Math.min(fast, TableSize), fast, used }
+        // One function per kind of unit read, from its own source: a loop
+        // shared by every encoding sees several readers once a program
+        // parses more than one, and stops inlining them
+        if (unitWidth === 2) return takeWhileUtf16(loop, enc === utf16le ? 0 : 1, enc)
+        return this.kind === 0 ? takeWhileString(loop, enc) : takeWhileBytes(loop, enc)
       }
       case "TakeUntil":
       case "Rest":
@@ -1548,6 +1502,111 @@ const fail = (s: State<any>): typeof Fail => {
 }
 
 /** Fails, leaving the cursor at `pos`: how far a token parser read (see `partialSafe`). */
+/** The settings of a compiled `Text` `takeWhile` loop. */
+interface TextLoop {
+  readonly max: number
+  readonly min: number
+  readonly negate: boolean
+  /** 1 where a code below `small` is accepted (see `acceptTable`). */
+  readonly accept: Uint8Array
+  readonly test: (code: number) => boolean
+  readonly small: number
+  /** Units below it are whole code points. */
+  readonly fast: number
+  readonly used: boolean
+}
+
+// `takeWhile` for each kind of unit read. The three loops differ only in
+// how they read a unit; they are written out because a single loop calling
+// a reader, or branching on one, measured slower (see `text`).
+
+const takeWhileString = (loop: TextLoop, enc: Encoding<string>): Step => {
+  const { accept, fast, max, min, negate, small, test, used } = loop
+  const { decode, text, width } = enc
+  return (s) => {
+    const input: string = s.input
+    const start = s.pos
+    const end = s.end
+    let i = start
+    let count = 0
+    while (count < max && i < end) {
+      const c = input.charCodeAt(i)
+      if (c < small) {
+        if (accept[c] === 0) break
+        i++
+      } else if (c < fast) {
+        if (test(c) === negate) break
+        i++
+      } else {
+        const cp = decode(input, i, end)
+        if (cp < 0 || test(cp) === negate) break
+        i += width(cp)
+      }
+      count++
+    }
+    if (count < min) return failAt(s, i)
+    s.pos = i
+    return used ? text(input, start, i) : undefined
+  }
+}
+
+const takeWhileBytes = (loop: TextLoop, enc: Encoding<Uint8Array>): Step => {
+  const { accept, max, min, negate, small, test, used } = loop
+  const { decode, text, width } = enc
+  return (s) => {
+    const input: Uint8Array = s.input
+    const start = s.pos
+    const end = s.end
+    let i = start
+    let count = 0
+    while (count < max && i < end) {
+      const c = input[i]
+      // A byte below `fast` is below `small` too, as `small` is `fast` or the table size
+      if (c < small) {
+        if (accept[c] === 0) break
+        i++
+      } else {
+        const cp = decode(input, i, end)
+        if (cp < 0 || test(cp) === negate) break
+        i += width(cp)
+      }
+      count++
+    }
+    if (count < min) return failAt(s, i)
+    s.pos = i
+    return used ? text(input, start, i) : undefined
+  }
+}
+
+/** For UTF-16 bytes; `lo` is the offset of a unit's low byte (0 for little endian). */
+const takeWhileUtf16 = (loop: TextLoop, lo: 0 | 1, enc: Encoding<Uint8Array>): Step => {
+  const { accept, fast, max, min, negate, small, test, used } = loop
+  const { decode, text, width } = enc
+  const hi = 1 - lo
+  return (s) => {
+    const input: Uint8Array = s.input
+    const start = s.pos
+    const end = s.end
+    let i = start
+    let count = 0
+    while (count < max && i < end) {
+      // A unit cut off by `end` reads as 0xFFFF, so `decode` reports it
+      const c = i + 1 < end ? input[i + lo] | (input[i + hi] << 8) : 0xffff
+      if (c < fast ? (c < small ? accept[c] === 0 : test(c) === negate) : false) break
+      if (c < fast) i += 2
+      else {
+        const cp = decode(input, i, end)
+        if (cp < 0 || test(cp) === negate) break
+        i += width(cp)
+      }
+      count++
+    }
+    if (count < min) return failAt(s, i)
+    s.pos = i
+    return used ? text(input, start, i) : undefined
+  }
+}
+
 /**
  * How a `Text` parser reads its encoding's code units: a unit below `fast`
  * is a whole code point, `width` input units long. UTF-16 bytes get a unit

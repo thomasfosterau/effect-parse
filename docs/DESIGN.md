@@ -241,7 +241,7 @@ Documented consequence: user callbacks should be pure. On failing inputs they ma
 
 ### Backends
 
-**(a) Closure compiler** (`internal/compiler/closure.ts`). Builds one specialized closure per node, with the step signature, so `Opaque` nodes are simply their own steps and the cursor is `state.pos` throughout. It never generates code, so it works under a CSP.
+**(a) Closure compiler** (`internal/compiler/closure.ts`). Builds one specialized closure per node, with the step signature, so `Opaque` nodes are simply their own steps and the cursor is `state.pos` throughout. It never generates code, so it works under a CSP. Closures made from one function literal share V8's type feedback, so a call inside a closure that sees different functions across the closures of its literal is not inlined; a test with six closures of one literal calling six different functions ran eight times slower than with one. The compiler therefore writes the hottest loop, `Text` `takeWhile`, once per kind of unit read (string, single bytes, UTF-16 bytes) rather than as one loop calling a reader: in a program that parses more than one input kind or encoding, the shared loop stopped inlining its reader, and the JSON benchmark (whose grammars share a process) ran about 17% slower. Per-grammar feedback is what the JIT adds: in the same mixed process its timings don't change, while the interpreter's and the closure compiler's rise with the number of grammars that share their literals.
 
 **(b) JIT** (`internal/compiler/jit.ts`). Emits one JavaScript function per rule (the root, every `Suspend` target, and shared nodes) and inlines everything else as straight-line code with labelled blocks for failure. The cursor is a local `p`; a rule returns its value and leaves the new position in a register. The input and end are hoisted into locals. Callbacks, sets and steps are passed in a constants array. `Opaque` nodes store `p` in `state.pos`, call the step and reload it. Generation is guarded: `new Function` is probed once, and if it or the generated code fails to build, the parser uses the closure compiler. The entry point saves and restores its registers, so a callback that runs another compiled parse is safe.
 
@@ -264,11 +264,11 @@ JSON benchmark (`vp run bench`, 0.58 M-character document, best of 40 interleave
 | Grammar and input                  | interpreted | closure        | JIT            |
 | ---------------------------------- | ----------- | -------------- | -------------- |
 | `json.ts` (Token/Ascii), string    | 40.9 ms     | 16.2 ms (2.5×) | 8.9 ms (4.6×)  |
-| `json-text.ts`, `Text.string`      | 45.3 ms     | 20.9 ms (2.2×) | 8.2 ms (5.5×)  |
-| `json-text.ts`, `Text.utf8`        | 51.8 ms     | 21.9 ms (2.4×) | 9.1 ms (5.7×)  |
+| `json-text.ts`, `Text.string`      | 45.3 ms     | 16.9 ms (2.7×) | 8.2 ms (5.5×)  |
+| `json-text.ts`, `Text.utf8`        | 51.8 ms     | 18.2 ms (2.8×) | 9.1 ms (5.7×)  |
 | `json-text.ts`, `Text.utf16le`     | 60.2 ms     | 24.9 ms (2.4×) | 11.7 ms (5.2×) |
-| `json-fast.ts`, `Text.string`      | 44.9 ms     | 16.6 ms (2.7×) | 5.3 ms (8.5×)  |
-| `json-fast.ts`, `Text.utf8`        | 51.0 ms     | 18.8 ms (2.7×) | 5.9 ms (8.7×)  |
+| `json-fast.ts`, `Text.string`      | 44.9 ms     | 13.0 ms (3.5×) | 5.3 ms (8.5×)  |
+| `json-fast.ts`, `Text.utf8`        | 51.0 ms     | 14.7 ms (3.5×) | 5.9 ms (8.7×)  |
 | hand-fused (`bench/json-fused.ts`) |             |                | 5.2 ms         |
 | `JSON.parse`                       |             |                | 2.1 ms         |
 
