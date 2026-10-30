@@ -37,7 +37,7 @@ catalog:
   # refuses to run coverage on a mismatch.
   "@vitest/coverage-istanbul": 5.0.5
   effect: 4.1.0
-  fallow: 3.36.0
+  fallow: 3.37.0
   # `scripts/check-dist.mjs` parses the built `dist/` with `rolldown/parseAst`.
   rolldown: ^1.2.14
   # TypeScript 6/7 side-by-side: TS7 (the native Go compiler) ships no JS API
