@@ -14,23 +14,30 @@
  * completes and adopts them. Nodes built by an attempt that is later
  * abandoned must not end up in the tree. Every combinator that abandons an
  * attempt moves the cursor back to (or before) where the attempt started,
- * and every node has a positive width, so the nodes of an abandoned attempt
- * are exactly those that end after the position the cursor moves back to:
- * the `pos` setter of {@link SyntaxState} drops them. This also covers
- * lookahead (`peek`, `not`) and custom parsers written with `Parser.make`.
+ * with `State.rewind`, and every node has a positive width, so the nodes of
+ * an abandoned attempt are exactly those that end after the position the
+ * cursor moves back to: {@link SyntaxState}'s `rewind` drops them. This also
+ * covers lookahead (`peek`, `not`) and custom parsers written with
+ * `Parser.make`, which rewind the same way.
+ *
+ * `pos` stays a plain field, not an accessor that would watch every move: a
+ * `pos` accessor on this subclass made every parser's cursor accesses
+ * polymorphic, slowing ordinary parses by about a fifth in any program that
+ * also built a syntax tree, and the syntax parse itself about twofold.
  *
  * For incremental parsing, every node records how far its parse looked: the
  * furthest position the cursor reached and the furthest failure recorded
- * while it was being parsed (its *lookahead*). A node from the previous tree
+ * while it was being parsed (its *lookahead*). The cursor only moves forward
+ * between rewinds, so the furthest position is where it was at a rewind, or
+ * where it is now. A node from the previous tree
  * is reused at a position when it was built by the same `Syntax.node`, and
  * the input it looked at, plus a margin for the tokens that read a little
  * past where they stop, is unchanged.
  */
 import * as Arr from "effect/Array"
 import * as Predicate from "effect/Predicate"
-import type * as Context from "effect/Context"
 import type { Encoding } from "../Encoding.js"
-import type { ErrMode, Input, Source } from "../Input.js"
+import type { ErrMode, Input } from "../Input.js"
 import { Fail, Failure, State } from "../Input.js"
 
 /** What a failure inside an `ERROR` node was. Offsets are relative to the node. */
@@ -163,79 +170,61 @@ export interface Builder {
    * where they leave the cursor or record a failure.
    */
   read(end: number): void
+  /** A failure or hint was recorded at `offset`. */
+  reach(offset: number): void
+  /** The cursor moved back from `from` to `to` (see `State.rewind`). */
+  rewound(from: number, to: number): void
 }
 
-/** The parse state of a `Syntax` parse. */
-export class SyntaxState<I extends Input = Input> extends State<I> implements Builder {
-  // Declared, not defined: `State`'s constructor sets `pos` through the
-  // accessor below before these could be initialized
-  declare cursor: number
-  /** The furthest position the cursor reached, or failure recorded, since the innermost open node started. */
-  declare highWater: number
+/**
+ * The tree builder of a `Syntax` parse, reached through `state.syntax`. It
+ * is not a `State` subclass: one class of state keeps every parser's cursor
+ * and failure accesses monomorphic, whether or not the program also builds
+ * syntax trees. `State` calls {@link reach} and {@link rewound} itself.
+ */
+export class SyntaxBuilder implements Builder {
+  /**
+   * The furthest position the cursor reached before a rewind, or failure
+   * recorded, since the innermost open node started; {@link looked} adds
+   * where the cursor is now.
+   */
+  highWater: number
   /** Completed nodes waiting for their parent, in input order. */
-  declare stack: Array<Child>
-  declare previous: Previous | undefined
+  readonly stack: Array<Child> = []
   /** How many nodes were reused from the previous tree. */
-  declare reused: number
+  reused = 0
   /** Where {@link find} found the last node it found. */
-  declare lastParent: Green | undefined
-  declare lastParentStart: number
-
-  static {
-    Object.defineProperty(this.prototype, "pos", {
-      get(this: SyntaxState) {
-        return this.cursor
-      },
-      set(this: SyntaxState, p: number) {
-        if (p < this.cursor) {
-          // An attempt was abandoned (or a lookahead finished): drop its nodes
-          const stack = this.stack
-          while (Arr.isArrayNonEmpty(stack) && Arr.lastNonEmpty(stack).end > p) stack.pop()
-        }
-        if (p > this.highWater) this.highWater = p
-        this.cursor = p
-      },
-      configurable: true,
-      enumerable: true
-    })
-  }
+  lastParent: Green | undefined = undefined
+  lastParentStart = 0
 
   constructor(
-    source: I | Source<I>,
-    options: {
-      readonly context?: Context.Context<never> | undefined
-    },
-    previous: Previous | undefined
+    readonly state: State<any>,
+    readonly previous: Previous | undefined
   ) {
-    super(source, { context: options.context })
-    this.highWater = this.cursor
-    this.stack = []
-    this.previous = previous
-    this.reused = 0
-    this.lastParent = undefined
-    this.lastParentStart = 0
-    this.syntax = this
+    this.highWater = state.pos
+    state.syntax = this
     // Error recovery is always on: like Tree-sitter, a syntax parse always produces a tree
-    this.recovered = []
+    state.recovered = []
   }
 
-  override failWith(mode: ErrMode, failure: Failure): Fail {
-    if (failure.offset > this.highWater) this.highWater = failure.offset
-    return super.failWith(mode, failure)
-  }
-
-  override failTies(head: Failure, tie1: Failure, tie2: Failure | undefined): Fail {
-    if (head.offset > this.highWater) this.highWater = head.offset
-    return super.failTies(head, tie1, tie2)
-  }
-
-  override setHint(offset: number, expected: ReadonlyArray<string>): void {
+  reach(offset: number): void {
     if (offset > this.highWater) this.highWater = offset
-    super.setHint(offset, expected)
+  }
+
+  rewound(from: number, to: number): void {
+    if (from > this.highWater) this.highWater = from
+    // An attempt was abandoned (or a lookahead finished): drop its nodes
+    const stack = this.stack
+    while (Arr.isArrayNonEmpty(stack) && Arr.lastNonEmpty(stack).end > to) stack.pop()
+  }
+
+  /** How far the parse looked: {@link highWater}, or the cursor if it is further. */
+  private looked(): number {
+    return this.state.pos > this.highWater ? this.state.pos : this.highWater
   }
 
   node(state: State<any>, step: (state: State<any>) => unknown, key: object, kind: string, named: boolean): unknown {
-    const start = this.cursor
+    const start = this.state.pos
     const stack = this.stack
     if (this.previous !== undefined) {
       const green = this.reusable(this.previous, key, start)
@@ -248,7 +237,7 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
         const d = green.diagnostics
         if (d !== undefined) {
           if (d.deepest !== undefined) this.deepen(start === d.base ? d.deepest : rebase(d.deepest, d.base - start))
-          if (d.hintExpected !== undefined) this.setHint(start + d.hintOffset, d.hintExpected)
+          if (d.hintExpected !== undefined) this.state.setHint(start + d.hintOffset, d.hintExpected)
         }
         stack.push(new Child(green, start, end, undefined))
         return green.value
@@ -256,34 +245,34 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
     }
     const mark = stack.length
     const outer = this.highWater
-    const outerDeepest = this.deepest
-    const hintOffset = this.hintOffset
-    const hintExpected = this.hintExpected
+    const outerDeepest = this.state.deepest
+    const hintOffset = this.state.hintOffset
+    const hintExpected = this.state.hintExpected
     this.highWater = start
     // Collect the furthest failure of this node alone, then merge it as `failWith` would have
-    this.deepest = undefined
+    this.state.deepest = undefined
     const a = step(state)
-    const looked = this.highWater
-    if (outer > looked) this.highWater = outer
-    const deepest = this.deepest as Failure | undefined
-    this.deepest = outerDeepest
+    const looked = this.looked()
+    this.highWater = outer > looked ? outer : looked
+    const deepest = this.state.deepest as Failure | undefined
+    this.state.deepest = outerDeepest
     if (deepest !== undefined) this.deepen(deepest)
     if (a === Fail) {
       if (stack.length > mark) stack.length = mark
       return a
     }
-    const end = this.cursor
+    const end = this.state.pos
     // Like Tree-sitter's rules, nodes are never empty: an empty match adds nothing to the tree
     if (end === start) return a
-    const hinted = this.hintOffset !== hintOffset || this.hintExpected !== hintExpected
+    const hinted = this.state.hintOffset !== hintOffset || this.state.hintExpected !== hintExpected
     const diagnostics: Diagnostics | undefined =
       deepest === undefined && !hinted
         ? undefined
         : {
             deepest,
             base: start,
-            hintOffset: this.hintOffset - start,
-            hintExpected: hinted ? this.hintExpected : undefined
+            hintOffset: this.state.hintOffset - start,
+            hintExpected: hinted ? this.state.hintExpected : undefined
           }
     const entries = stack.splice(mark)
     stack.push(
@@ -299,7 +288,7 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
 
   /** Records `failure` as the furthest failure if it is, as `failWith` does. */
   private deepen(failure: Failure): void {
-    if (this.deepest === undefined || failure.offset >= this.deepest.offset) this.deepest = failure
+    if (this.state.deepest === undefined || failure.offset >= this.state.deepest.offset) this.state.deepest = failure
   }
 
   field(state: State<any>, step: (state: State<any>) => unknown, name: string): unknown {
@@ -314,8 +303,8 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
     const stack = this.stack
     let i = stack.length
     while (i > 0 && stack[i - 1].start >= start && stack[i - 1].end > start) i--
-    const end = this.cursor
-    const green = build(errorKind, true, undefined, start, end, this.highWater, stack.splice(i), undefined, {
+    const end = this.state.pos
+    const green = build(errorKind, true, undefined, start, end, this.looked(), stack.splice(i), undefined, {
       failure: rebase(failure, start),
       mode
     })
@@ -329,7 +318,7 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
    */
   finish(kind: string, value: unknown, fatal: ErrorInfo | undefined, errorStart: number): Green {
     const entries = this.stack.splice(0)
-    const end = this.end
+    const end = this.state.end
     if (fatal !== undefined) {
       const last = Arr.isArrayNonEmpty(entries) ? Arr.lastNonEmpty(entries).end : 0
       const start = Math.max(Math.min(errorStart, end), last)
@@ -339,7 +328,7 @@ export class SyntaxState<I extends Input = Input> extends State<I> implements Bu
       })
       entries.push(new Child(error, start, end, undefined))
     }
-    return build(kind, true, undefined, 0, end, Math.max(end, this.highWater), entries, value, undefined)
+    return build(kind, true, undefined, 0, end, Math.max(end, this.looked()), entries, value, undefined)
   }
 
   /**

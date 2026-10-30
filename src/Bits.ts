@@ -176,7 +176,7 @@ export const pattern = (pattern: number, count: number): Parser<number, never, n
     if (avail < count) return state.eoi("Bits", expected, count - avail)
     const value = readBits(state, count)
     if (value !== pattern) {
-      state.pos = start
+      state.rewind(start)
       return state.backtrack("Bits", expected)
     }
     return value

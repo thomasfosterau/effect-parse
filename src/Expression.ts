@@ -180,7 +180,7 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
         return i
       }
       if (state.mode !== "Backtrack") return -2
-      state.pos = start
+      state.rewind(start)
       failures.add(state)
     }
     return -1
@@ -223,7 +223,7 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
       if (q >= 0) {
         const op = postfixes[q]
         if (op.precedence * 2 < minPower) {
-          state.pos = start
+          state.rewind(start)
           break
         }
         lhs = op.fold(lhs, matched)
@@ -239,7 +239,7 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
       const op = infixes[i]
       const leftPower = op.precedence * 2
       if (leftPower < minPower) {
-        state.pos = start
+        state.rewind(start)
         break
       }
       const opOut = matched

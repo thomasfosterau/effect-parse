@@ -29,7 +29,7 @@ export const eagerPermutation = (...ps: ReadonlyArray<Any>): Any =>
         }
         if (state.mode !== "Backtrack") return Input.Fail
         const merged = failure === undefined ? state.failure : Input.mergeFailures(failure, state.failure)
-        state.pos = start
+        state.rewind(start)
         return attempt(i + 1, merged)
       }
       return attempt(0, undefined)
@@ -67,7 +67,7 @@ export const eagerExpression = (options: { readonly operand: Any; readonly opera
       }
       if (state.mode !== "Backtrack") return -2
       failure = failure === undefined ? state.failure : Input.mergeFailures(failure, state.failure)
-      state.pos = start
+      state.rewind(start)
       return go(i + 1)
     }
     return go(0)
@@ -96,7 +96,7 @@ export const eagerExpression = (options: { readonly operand: Any; readonly opera
     }
     // Stops before an operator that binds looser than `minPower`
     const stop = (lhs: unknown, start: number): unknown => {
-      state.pos = start
+      state.rewind(start)
       return lhs
     }
     const hint = (postfixFailure: Input.Failure | undefined): void => {

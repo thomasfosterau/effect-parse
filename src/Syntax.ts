@@ -52,12 +52,12 @@ import type * as Context from "effect/Context"
 import { dual } from "effect/Function"
 import * as Option from "effect/Option"
 import type { Input, Slice, Source } from "./Input.js"
-import { Fail, fromSource } from "./Input.js"
+import { Fail, fromSource, State } from "./Input.js"
 import * as ParseError from "./ParseError.js"
 import { nodeOf } from "./internal/node.js"
 import * as Stack from "./internal/stack.js"
 import type { ErrorInfo, Green, Previous, Segment } from "./internal/syntax.js"
-import { absolute, errorKind, SyntaxState } from "./internal/syntax.js"
+import { absolute, errorKind, SyntaxBuilder } from "./internal/syntax.js"
 import type { Parser } from "./Parser.js"
 import { described, isParser } from "./Parser.js"
 
@@ -709,7 +709,8 @@ export class TreeCursor<I extends Input = string> {
 const expectedEof = ["end of input"]
 
 const run = <A, E, I extends Input>(config: Config, input: I, previous: Previous | undefined): Tree<A, E, I> => {
-  const state = new SyntaxState<I>(input, { context: config.context }, previous)
+  const state = new State<I>(input, { context: config.context })
+  const builder = new SyntaxBuilder(state, previous)
   const a = Stack.run(config.inner.step, state)
   // Text parsers record the encoding when they fail, which they may have done inside reused nodes
   if (state.encoding === undefined && previous !== undefined) state.encoding = previous.encoding
@@ -723,8 +724,8 @@ const run = <A, E, I extends Input>(config: Config, input: I, previous: Previous
   } else {
     value = Option.some(a as A)
   }
-  const green = state.finish(config.kind, Option.getOrUndefined(value), fatal, state.pos)
-  return new Tree<A, E, I>(input, value, state.reused, green, config, state.encoding)
+  const green = builder.finish(config.kind, Option.getOrUndefined(value), fatal, state.pos)
+  return new Tree<A, E, I>(input, value, builder.reused, green, config, state.encoding)
 }
 
 /**
