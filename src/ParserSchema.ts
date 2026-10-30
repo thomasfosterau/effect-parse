@@ -431,7 +431,7 @@ const isAnnotated = (ast: SchemaAST.AST): boolean => lookup(ast, annotationKey) 
 
 const withStop = <T>(ctx: Context<T>, text: string | undefined): Context<T> => {
   if (text === undefined || text === "" || ctx.stop.includes(text[0])) return ctx
-  return { ...ctx, stop: Arr.sort([...ctx.stop, text[0]], Order.String).join("") }
+  return { ...ctx, stop: Arr.sort([...ctx.stop.split(""), text[0]], Order.String).join("") }
 }
 
 const at = <T>(ctx: Context<T>, key: PropertyKey): Context<T> => ({

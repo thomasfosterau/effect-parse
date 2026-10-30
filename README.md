@@ -313,7 +313,9 @@ effect-parse tries hard to produce good messages without annotations:
 User errors are typed. `Parser.fail(e)`, `Parser.tryMap(f)` and `Parser.filterOrFail(pred, f)` add their error type to `E`, and the error arrives as `ParseError.cause`:
 
 ```ts
-class OutOfRange extends Schema.TaggedError<OutOfRange>()("OutOfRange", { value: Schema.Number }) {}
+class OutOfRange extends Schema.TaggedError<OutOfRange, { readonly brand: unique symbol }>()("OutOfRange", {
+  value: Schema.Finite
+}) {}
 
 const port = Ascii.decUint.pipe(
   Parser.filterOrFail(

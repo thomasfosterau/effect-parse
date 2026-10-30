@@ -126,7 +126,7 @@ export default defineConfig({
       // `?: T | undefined` under `exactOptionalPropertyTypes`, `Input.State`
       // fields) and the step protocol's per-step results. Changing the public
       // spelling breaks every consumer; boxing a step result in `Option`
-      // allocates on every parse step. 219 sites.
+      // allocates on every parse step. 228 sites.
       "effect/prefer-option-over-null": "warn",
       // `unknown` is the honest type at the interpreter's erased boundary: a
       // step returns the value of whatever parser it runs, and the compilers
@@ -181,6 +181,14 @@ export default defineConfig({
           "unicorn/no-new-array": "off"
         }
       },
+      // The JIT compiler's whole job is building a step function from
+      // generated source with `new Function`; there is no other way to do it.
+      {
+        files: ["src/internal/compiler/jit.ts"],
+        rules: {
+          "typescript/no-implied-eval": "off"
+        }
+      },
       // `ParseError` and `ParserStream.ReadError` are published
       // `Data.TaggedError` classes; moving them to `Schema.TaggedError`
       // changes their public type for every consumer.
@@ -217,6 +225,14 @@ export default defineConfig({
           // through each; the computed access is the point, and tsc already
           // checks the key against the namespace's exports.
           "import/namespace": "off"
+        }
+      },
+      // The suite derives parsers from `Schema.Number` itself: which numbers
+      // that grammar accepts (signs, exponents) is the behaviour under test.
+      {
+        files: ["test/ParserSchema.test.ts"],
+        rules: {
+          "effecttsgo/schema-number": "off"
         }
       },
       // Type-level tests: the expect-error directives ARE the assertions (a
@@ -263,11 +279,14 @@ export default defineConfig({
         }
       }
     ],
-    // Type-aware linting is intentionally disabled: type checking stays the
-    // `check` task's job (native tsc, Effect-patched).
+    // Type-aware rules run through the oxlint-tsgolint Vite+ bundles (patched
+    // by `effect-tsgo patch --oxlint`, so the `effecttsgo/*` rules see types
+    // too). `typeCheck` adds the compiler's own diagnostics; the one
+    // tsconfig.json covers src, test, examples and bench, so it agrees with
+    // the `check` task, which stays the gate of record.
     options: {
-      typeAware: false,
-      typeCheck: false
+      typeAware: true,
+      typeCheck: true
     },
     jsPlugins: [
       {

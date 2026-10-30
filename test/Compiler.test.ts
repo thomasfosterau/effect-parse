@@ -431,7 +431,7 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
         Parser.filter((n) => n % 2 === 0)
       ),
       digit.pipe(Parser.tryMap((d) => (d === "5" ? Result.fail("five") : Result.succeed(d + d)))),
-      digit.pipe(Parser.filterMap((d) => (d === "3" ? Option.none() : Option.some(-d)))),
+      digit.pipe(Parser.filterMap((d) => (d === "3" ? Option.none() : Option.some(-Number(d))))),
       Token.any.pipe(
         Parser.filterOrFail(
           (c) => c !== "x",

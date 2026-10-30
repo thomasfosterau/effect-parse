@@ -11,7 +11,6 @@ export const fromEntries: <K extends PropertyKey, V>(entries: Iterable<readonly 
   Object.fromEntries as any
 
 const objectPrototype = Object.prototype
-const hasOwn = objectPrototype.hasOwnProperty
 
 /**
  * Whether `o[key] = value` on a new plain object creates the same property
@@ -19,7 +18,8 @@ const hasOwn = objectPrototype.hasOwnProperty
  * property): `key` is a string that `Object.prototype` has no property for,
  * so there is no setter (`__proto__`) or read-only property to run into.
  */
-export const isPlainKey = (key: unknown): key is string => Predicate.isString(key) && !hasOwn.call(objectPrototype, key)
+export const isPlainKey = (key: unknown): key is string =>
+  Predicate.isString(key) && !Object.hasOwn(objectPrototype, key)
 
 const define = (o: object, key: unknown, value: unknown): void => {
   Object.defineProperty(o, key as PropertyKey, { value, writable: true, enumerable: true, configurable: true })

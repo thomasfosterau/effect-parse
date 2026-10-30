@@ -24,7 +24,9 @@ export type Expr =
   | { readonly _tag: "If"; readonly cond: Expr; readonly consequent: Expr; readonly alternative: Expr | undefined }
   | { readonly _tag: "Quote"; readonly exprs: ReadonlyArray<Expr> }
 
-export class EvalError extends Schema.TaggedError<EvalError>()("EvalError", { message: Schema.String }) {}
+export class EvalError extends Schema.TaggedError<EvalError, { readonly brand: unique symbol }>()("EvalError", {
+  message: Schema.String
+}) {}
 
 const ws = Ascii.multispace0
 

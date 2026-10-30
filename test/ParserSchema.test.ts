@@ -350,7 +350,10 @@ describe("ParserSchema.toParser", () => {
     })
 
     it("decodes classes, applying their grammar to the fields", () => {
-      class Point extends Schema.Class<Point>("Point")({ x: Schema.Int, y: Schema.Int }) {}
+      class Point extends Schema.Class<Point, { readonly brand: unique symbol }>("Point")({
+        x: Schema.Int,
+        y: Schema.Int
+      }) {}
       const P = Point.pipe(annotate({ separator: ",", prefix: "<", suffix: ">" }))
       const r = success(Parser.parse(toParser(P), "<1,2>"))
       expect(r).toBeInstanceOf(Point)
@@ -376,12 +379,12 @@ describe("ParserSchema.fromSchema", () => {
   )
 
   it("decodes and encodes", () => {
-    expect(Schema.decodeUnknownSync(Pair)("width=10")).toEqual(["width", 10])
+    expect(Schema.decodeSync(Pair)("width=10")).toEqual(["width", 10])
     expect(Schema.encodeSync(Pair)(["height", 2])).toBe("height=2")
   })
 
   it("reports parse errors as issues", () => {
-    expect(() => Schema.decodeUnknownSync(Pair)("width")).toThrow(/expected "="/)
+    expect(() => Schema.decodeSync(Pair)("width")).toThrow(/expected "="/)
   })
 
   it("encodes with the derived printer", () => {
@@ -410,7 +413,7 @@ describe("ParserSchema.fromSchema", () => {
 
   it("composes with a token parser", () => {
     const Ident = Schema.String.pipe(annotate(Token.takeWhile(Ascii.isAlpha, { min: 1 })))
-    expect(Schema.decodeUnknownSync(ParserSchema.fromSchema(Ident))("abc")).toBe("abc")
+    expect(Schema.decodeSync(ParserSchema.fromSchema(Ident))("abc")).toBe("abc")
   })
 })
 
@@ -469,7 +472,10 @@ describe("ParserSchema.toPrinter", () => {
   })
 
   it("prints transformations' encoded side", () => {
-    class Point extends Schema.Class<Point>("Point")({ x: Schema.Int, y: Schema.Int }) {}
+    class Point extends Schema.Class<Point, { readonly brand: unique symbol }>("Point")({
+      x: Schema.Int,
+      y: Schema.Int
+    }) {}
     expect(printed(Point.pipe(annotate({ separator: ",", prefix: "<", suffix: ">" })), new Point({ x: 1, y: 2 }))).toBe(
       "<1,2>"
     )
@@ -490,7 +496,7 @@ describe("ParserSchema.toPrinter", () => {
         print: (s) => `"${s}"`
       })
     )
-    const row = (member: ReadonlyArray<typeof Quoted | typeof Schema.String>) =>
+    const row = (member: ReadonlyArray<typeof Schema.String>) =>
       Schema.Tuple([Schema.Union(member), Schema.Int]).pipe(annotate({ separator: ";" }))
     // The plain string cannot hold ";", so the quoted one writes it
     const PlainFirst = row([Schema.String, Quoted])
