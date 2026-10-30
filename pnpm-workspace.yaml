@@ -27,15 +27,17 @@ catalog:
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
   # before bumping any of the three.
   "@effect/tsgo": 0.63.0
-  # 0.6.0 depends on `effect` 4.0.0 (exact) and runs on the singleton the
-  # `effect` override below forces, so it needs no scoped `effect` override of
-  # its own (0.5.0, built on beta.100, did). Its `vite.config.ts` load calls
-  # Effect APIs, so an `effect` bump re-runs `vp check` against the plugin too.
-  "@mpsuesser/oxlint-plugin-effect": ^0.6.0
   "@types/node": ^26.6.5
   # Must equal the vitest that vite-plus bundles (see `vitest` below); vite-plus
   # refuses to run coverage on a mismatch.
   "@vitest/coverage-istanbul": 5.0.5
+  # The Effect oxlint rules (`effect/*`, the anti-slop rules included), loaded
+  # by oxlint as a JS plugin; successor of @mpsuesser/oxlint-plugin-effect.
+  # 0.9.0 depends on `effect` 4.1.0 (exact), which the `effect` override below
+  # forces onto the singleton. Its `vite.config.ts` load calls Effect APIs, so
+  # an `effect` bump re-runs `vp check` against the plugin too; it moves with
+  # the `toolchain` Dependabot group, since it runs inside vite-plus's oxlint.
+  "@enfect/oxlint": ^0.9.0
   effect: 4.1.0
   fallow: 3.37.0
   # `scripts/check-dist.mjs` parses the built `dist/` with `rolldown/parseAst`.
@@ -69,9 +71,14 @@ catalogs:
   peers:
     effect: ^4.0.0
 
+# `vite@*` / `vitest@*` are the keys Vite+'s migrator manages (`vp migrate`
+# rewrites bare `vite` / `vitest` to them). It also adds the toolchain
+# (vite-plus, oxlint, oxfmt, vitest, …) to `minimumReleaseAgeExclude`; that
+# exemption is deliberately NOT kept here, so the supply-chain wait still
+# covers the toolchain: drop it again after any `vp migrate`.
 overrides:
-  vite: "catalog:"
-  vitest: "catalog:"
+  vite@*: "catalog:"
+  vitest@*: "catalog:"
   # `effect` MUST be a singleton: two copies break Context / Schema identity at
   # runtime. Force every resolution to the catalog version.
   effect: "catalog:"
@@ -87,9 +94,11 @@ peerDependencyRules:
     vite: "*"
     vitest: "*"
 
-# Supply-chain delay (owner's policy, gardeneria #1149): hold newly published
-# versions for 1 day (unit: MINUTES) before pnpm will install them.
-minimumReleaseAge: 1440
+# Supply-chain delay (owner's policy, gardeneria #1149, relaxed to 8 hours on
+# 2026-10-30): hold newly published versions for 480 MINUTES before pnpm will
+# install them. Dependabot's `cooldown` (whole days only) is 1 day, longer than
+# this, so a Dependabot PR never proposes a version pnpm would still refuse.
+minimumReleaseAge: 480
 minimumReleaseAgeExclude:
   # @thomasfosterau/* is first-party — exempt so our own releases install immediately.
   - "@thomasfosterau/*"

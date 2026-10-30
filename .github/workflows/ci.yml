@@ -46,19 +46,19 @@ jobs:
       # Before anything that runs the toolchain: a vite-plus bump that left
       # its lockstep catalog entries behind installs cleanly, then fails later
       - name: Toolchain lockstep
-        run: vp run check:toolchain
+        run: pnpm exec vp run check:toolchain
       - name: Format and lint
-        run: vp check
+        run: pnpm exec vp check
       - name: Type gate (src, tests, examples, benchmarks)
-        run: vp run check
+        run: pnpm exec vp run check
       - name: Unit tests
-        run: vp run test:unit
+        run: pnpm exec vp run test:unit
       - name: Build
-        run: vp run build
+        run: pnpm exec vp run build
       # Imports every `exports` entry from dist/ as a consumer does, requires
       # every top-level call to be /*#__PURE__*/, and checks that only the
       # Compiler module reaches the compilers.
       - name: Dist guard
-        run: vp run check:dist
+        run: pnpm exec vp run check:dist
       - name: Audit
         run: pnpm audit --audit-level high

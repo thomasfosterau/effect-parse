@@ -111,7 +111,7 @@
     "@changesets/cli": "catalog:",
     "@effect/language-service": "catalog:",
     "@effect/tsgo": "catalog:",
-    "@mpsuesser/oxlint-plugin-effect": "catalog:",
+    "@enfect/oxlint": "catalog:",
     "@types/node": "catalog:",
     "@typescript/native": "catalog:",
     "@vitest/coverage-istanbul": "catalog:",
