@@ -1,5 +1,21 @@
 # @thomasfosterau/effect-parse
 
+## 0.4.0
+
+### Minor Changes
+
+- [#58](https://github.com/thomasfosterau/effect-parse/pull/58) [`4e8f5fb`](https://github.com/thomasfosterau/effect-parse/commit/4e8f5fb8cc509c263ca7ecfce49e7cab08747d14) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - Breaking: a parser step that moves the cursor backwards (to retry an alternative, or after a lookahead) must call the new `state.rewind(offset)` instead of assigning `state.pos`; moving forward is still an assignment. `Syntax` trees are now built by a separate builder rather than a `State` subclass whose `pos` was an accessor, so every parser sees one state shape. In a program that also builds syntax trees, ordinary interpreted parses no longer slow down by about 20%. Built-in encodings also share one object shape.
+
+### Patch Changes
+
+- [#55](https://github.com/thomasfosterau/effect-parse/pull/55) [`42e115d`](https://github.com/thomasfosterau/effect-parse/commit/42e115d13d0984ac76bb190e751c6359a03fdf01) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - The closure compiler writes the `Text` `takeWhile` loop once per kind of unit read (string, bytes, UTF-16 bytes), so it keeps inlining its reads in a program that parses more than one input kind or encoding: about 17-20% faster on the JSON benchmark's `Text` grammars.
+
+- [#55](https://github.com/thomasfosterau/effect-parse/pull/55) [`d9c3410`](https://github.com/thomasfosterau/effect-parse/commit/d9c341008772f5c0117fe40fdd528c1cca81ed80) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - The closure compiler reads UTF-16 bytes a code unit at a time, as the JIT does, instead of decoding every code point: compiled `Text.utf16le` / `Text.utf16be` parsers run about 1.75× faster on the JSON benchmark when `new Function` is unavailable.
+
+- [#57](https://github.com/thomasfosterau/effect-parse/pull/57) [`f1ac841`](https://github.com/thomasfosterau/effect-parse/commit/f1ac84175d7411cfa1fe76cb5f1ada98dc064b0f) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - Streaming parses with a JIT-compiled parser run escapes (`escaped`, `takeEscaped`) as generated code that keeps checkpoints, instead of calling the closure compiler's: about 13% faster on a JSON document, within 5% of an ordinary compiled parse.
+
+- [#56](https://github.com/thomasfosterau/effect-parse/pull/56) [`459f8fe`](https://github.com/thomasfosterau/effect-parse/commit/459f8fe12dedad0988ce67b372d46904ebe2706e) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - `ParserStream.parseAll` (and `parseReadable` / `parseResponse`) parse an input that arrives in a single chunk, such as most small response bodies, once instead of twice: the first partial attempt waits for a second chunk, and a stream that ends first is parsed as an ordinary compiled parse. On a 2 MB JSON document in one chunk this takes 60 ms instead of 147 ms.
+
 ## 0.3.0
 
 ### Minor Changes
