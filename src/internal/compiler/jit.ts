@@ -485,8 +485,7 @@ class Emitter {
       case "Literal":
         return this.leaf(p, node, used, out, fail, fn, node.literal.length * 4)
       case "Escaped": {
-        // Streaming builds use the closure compiler's escapes, which keep checkpoints
-        if (!this.native(node.encoding) || this.resumable) return this.delegate(p, used, out, fail, fn)
+        if (!this.native(node.encoding)) return this.delegate(p, used, out, fail, fn)
         return this.escaped(p, node, out, fail, fn, d)
       }
       case "Map": {
@@ -1193,21 +1192,32 @@ class Emitter {
     return `${head}if(${c}<${small}){if(!(${member}))break;p++}else ${rest}${count}}${finish}`
   }
 
+  /**
+   * `escaped`. In a resumable build it keeps the closure compiler's
+   * checkpoints: where the next segment starts and, unless raw, the text
+   * so far, saved when a segment or an escape runs out of input.
+   */
   escaped(p: ParserLike, node: NodeOf<"Escaped">, out: string | null, fail: string, fn: Fn, d: number): string {
     const enc = node.encoding
     const ctrl = node.control
-    const r = enc === undefined ? undefined : this.reader(enc)
-    if (r !== undefined && !(ctrl < r.fast)) return this.delegate(p, !node.raw, out, fail, fn)
+    const rd = enc === undefined ? undefined : this.reader(enc)
+    if (rd !== undefined && !(ctrl < rd.fast)) return this.delegate(p, !node.raw, out, fail, fn)
     const raw = node.raw
+    const r = this.resumable ? this.resumePoint(fn) : undefined
     const acc = raw ? null : (out ?? this.v(fn))
     const x = raw ? null : this.v(fn)
     const b = this.v(fn)
-    const st = this.v(fn)
+    const st = r?.entry ?? this.v(fn)
     const okv = this.v(fn)
     const loop = this.label()
     const bad = this.label()
+    /** Saves the checkpoint of a segment starting at `pos`, when the parse ran out of input. */
+    const save = (pos: string) =>
+      r === undefined
+        ? ""
+        : `if($S.mode==="Incomplete"&&$S.resume!==void 0)R.save($S,${r.key},${r.entry},${raw ? pos : `{out:${acc},pos:${pos}}`});`
     const normal = this.gen(node.normal, !raw, x, `break ${bad};`, fn, d)
-    const escape = this.gen(node.escape, !raw, x, fail, fn, d)
+    const escape = this.gen(node.escape, !raw, x, `${save(b)}${fail}`, fn, d)
     const onNormal = raw
       ? `if(p===${b}){$S.mode="Cut";${fail}}continue ${loop};`
       : `if(p!==${b}){${acc}+=${x};continue ${loop}}`
@@ -1217,14 +1227,25 @@ class Emitter {
         : this.kind === 0
           ? `I.slice(${st},p)`
           : `I.subarray(${st},p)`
-    const ctrlTest = r === undefined ? `p<E&&${this.unit("p")}===${ctrl}` : `${r.guard("p")}&&${r.unit("p")}===${ctrl}`
-    return (
-      `${raw ? `${st}=p;` : `${acc}="";`}${loop}:while(p<E){${b}=p;${okv}=false;` +
+    const ctrlTest =
+      rd === undefined ? `p<E&&${this.unit("p")}===${ctrl}` : `${rd.guard("p")}&&${rd.unit("p")}===${ctrl}`
+    // In a resumable build, running out of a partial input (not stopping
+    // before a non-control character) leaves the text incomplete
+    const stop = r === undefined ? loop : this.label()
+    const loopCode =
+      `${loop}:while(p<E){${b}=p;${okv}=false;` +
       `${bad}:{${normal}${okv}=true;}` +
-      `if(${okv}){${onNormal}}else{if($S.mode!=="Backtrack"){${fail}}p=${b}}` +
-      `if(${ctrlTest}){p+=${r?.width ?? 1};${escape}${raw ? "" : `${acc}+=${x};`}}else break ${loop};}` +
-      (raw && out !== null ? `${out}=${slice};` : "")
-    )
+      `if(${okv}){${onNormal}}else{if($S.mode!=="Backtrack"){${save(b)}${fail}}p=${b}}` +
+      `if(${ctrlTest}){p+=${rd?.width ?? 1};${escape}${raw ? "" : `${acc}+=${x};`}}else break ${stop};}`
+    const body =
+      r === undefined ? loopCode : `${stop}:{${loopCode}if($S.partial){$S.mode="Incomplete";${save("p")}${fail}}}`
+    if (r === undefined) {
+      return `${raw ? `${st}=p;` : `${acc}="";`}${body}${raw && out !== null ? `${out}=${slice};` : ""}`
+    }
+    // `acc` is set unless raw
+    if (acc !== null) return r.wrap(acc, `${acc}=cp.out;p=cp.pos;`, `${acc}="";`, body)
+    const value = out ?? this.v(fn)
+    return r.wrap(value, "p=cp;", "", `${body}${value}=${out === null ? "void 0" : slice};`)
   }
 }
 

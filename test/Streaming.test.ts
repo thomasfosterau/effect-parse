@@ -217,6 +217,23 @@ describe("incremental parsing", () => {
     expect(segments).toBeLessThan(500 * 1.5 + chunks.length)
   })
 
+  it.each(["interpreted", "closure", "jit"] as const)("resumes long raw escaped text (%s)", (backend) => {
+    let segments = 0
+    const normal = Text.utf8.takeTill('\\"', { min: 1 }).pipe(Parser.tap(() => segments++))
+    const string = Parser.delimited(
+      Text.utf8.literal('"'),
+      Text.utf8.takeEscaped(normal, "\\", Text.utf8.oneOf('\\"')),
+      Text.utf8.literal('"')
+    )
+    if (backend !== "interpreted") Compiler[backend](string)
+    const text = Array.from({ length: 500 }, (_, i) => `segment ${i}\\"`).join("")
+    const bytes = new TextEncoder().encode(`"${text}"`)
+    const chunks = split(bytes, rng(3), 32)
+    const value = Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(string)))
+    expect(value).toBe(text)
+    expect(segments).toBeLessThan(500 * 1.5 + chunks.length)
+  })
+
   it("parses chunks as they arrive", async () => {
     let parsed = 0
     const element = Text.utf8.decUint.pipe(Parser.tap(() => parsed++))
