@@ -200,6 +200,24 @@ describe("incremental parsing", () => {
     }
   )
 
+  it.each(["interpreted", "closure", "jit"] as const)(
+    "parses an input that arrives in one chunk once (%s)",
+    (backend) => {
+      let parsed = 0
+      const element = Ascii.decUint.pipe(Parser.tap(() => parsed++))
+      // The list completes without resuming, then the trailing spaces run out
+      // of input: a partial attempt would keep no checkpoint for the list
+      const doc = Parser.terminated(
+        Parser.delimited(Token.literal("["), Parser.separated(element, Token.literal(",")), Token.literal("]")),
+        Ascii.multispace0
+      )
+      if (backend !== "interpreted") Compiler[backend](doc)
+      const input = `[${Array.from({ length: 100 }, (_, i) => i).join(",")}]  `
+      expect(Effect.runSync(Stream.make(input).pipe(ParserStream.parseAll(doc)))).toHaveLength(100)
+      expect(parsed).toBe(100)
+    }
+  )
+
   it.each(["interpreted", "closure", "jit"] as const)("resumes long strings where they stopped (%s)", (backend) => {
     let segments = 0
     const normal = Text.utf8.takeTill('\\"', { min: 1 }).pipe(Parser.tap(() => segments++))

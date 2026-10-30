@@ -175,6 +175,7 @@ class Incremental<A, E, I extends Chunkable> {
   /** The input length at the last attempt, and where that attempt ran out of input. */
   private attempted = 0
   private restart = 0
+  private pushed = 0
   /** Set once an attempt settles: a success (with its end offset) or a definite failure. */
   private settled: { readonly value: A; readonly pos: number } | "failed" | undefined
 
@@ -225,6 +226,11 @@ class Incremental<A, E, I extends Chunkable> {
     if (isEmptyUnits(chunk)) return
     this.append(chunk)
     if (this.settled !== undefined) return
+    // The first attempt waits for a second chunk: an input that arrives in
+    // one chunk (most small responses) is parsed once, by `finish`, instead
+    // of once in partial mode and again in complete mode, since a repetition
+    // that completes without resuming keeps no checkpoint
+    if (++this.pushed === 1) return
     // An attempt re-reads what the last one could not finish, from `restart`;
     // waiting until at least half as much new input has arrived keeps the
     // total work linear in the input. Strings are also copied when they are
@@ -235,9 +241,12 @@ class Incremental<A, E, I extends Chunkable> {
     this.attempt()
   }
 
-  /** The step attempts run: the parser's resumable compiled code if it was compiled, else the interpreter. */
-  private step(state: State<I>): unknown {
-    return Stack.run(Registry.stepFor(this.parser, state, true) ?? this.parser.step, state)
+  /**
+   * The step attempts run: the parser's compiled code if it was compiled
+   * (the resumable build, unless `resumable` is false), else the interpreter.
+   */
+  private step(state: State<I>, resumable = true): unknown {
+    return Stack.run(Registry.stepFor(this.parser, state, resumable) ?? this.parser.step, state)
   }
 
   private attempt(): void {
@@ -259,10 +268,12 @@ class Incremental<A, E, I extends Chunkable> {
     if (settled !== undefined && settled !== "failed") {
       if (settled.pos === this.length) return Effect.succeed(settled.value)
     } else if (settled === undefined) {
-      // The last attempt, in complete mode, resumes from the checkpoints too
+      // The last attempt, in complete mode, resumes from the checkpoints too;
+      // with no attempt before it, it is an ordinary parse
       const state = new State(this.input(), { context: this.context })
-      state.resume = this.resume
-      const a = this.step(state)
+      const resumable = this.attempted > 0
+      if (resumable) state.resume = this.resume
+      const a = this.step(state, resumable)
       if (a !== Fail && state.pos === state.end) return Effect.succeed(a as A)
     }
     // The error comes from an ordinary parse of the whole input, so it is the

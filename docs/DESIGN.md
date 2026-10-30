@@ -300,7 +300,7 @@ What runs interpreted in the JSON grammars: only the parser returned by the `fla
 
 Taking a progress checkpoint removes it, so its accumulator has a single owner. A repetition entered at the same offset twice in one attempt (after backtracking) simply parses again.
 
-**Scheduling.** An attempt re-reads the input from where the last one ran out; waiting until half as much input again has arrived keeps the total work linear. Byte buffers grow geometrically, so appending is linear too.
+**Scheduling.** An attempt re-reads the input from where the last one ran out; waiting until half as much input again has arrived keeps the total work linear. Byte buffers grow geometrically, so appending is linear too. The first attempt waits for a second chunk: an input that arrives in one chunk (most small response bodies) is then parsed once, as an ordinary compiled parse, rather than in partial mode and again in complete mode. A repetition that completes without resuming keeps no checkpoint, so a partial attempt whose only shortfall is at the very end (trailing whitespace) would otherwise be repeated in full: 147 ms instead of 60 ms for a 2 MB JSON document.
 
 **Errors.** On failure, the whole input is buffered anyway; once the stream ends it is parsed again by the plain interpreter, so the `ParseError` is the one a one-shot parse gives.
 
