@@ -12,6 +12,19 @@
 #   `@typescript/typescript6`) and the Effect lint plugin that loads inside
 #   oxlint. Check the `components` table in
 #   node_modules/@effect/tsgo/dist/effect-tsgo.cjs before merging.
+#
+#   Dependabot does not update `npm:` alias specifiers, and the catalog has
+#   three: `vite` (vite-plus's core), `typescript` (TS6) and
+#   `@typescript/native` (TS7). So a toolchain PR can bump `vite-plus` but
+#   never its `vite` alias, and `vitest` / `@vitest/coverage-istanbul` must
+#   equal vite-plus's exact vitest pin, not the newest vitest. Those three
+#   are therefore ignored below and derived from vite-plus instead: CI's
+#   "Toolchain lockstep" step (scripts/check-toolchain.mjs) fails a PR that
+#   left them behind, and on the PR branch
+#   `pnpm install && node scripts/check-toolchain.mjs --fix && pnpm install`
+#   completes it (PR #48 failed its Build step this way). A TypeScript move
+#   that a new @effect/tsgo needs is a hand edit of the two TS aliases;
+#   `pnpm install` fails at once, naming the version, if it is missing.
 # - `effect`: the Effect 4 release line is a lockstep-versioned singleton set
 #   (`@effect/tsgo` is in `toolchain`, so it is excluded here).
 # - `changesets`, `fallow`: their own cadence.
@@ -40,13 +53,17 @@ updates:
       default-days: 1
       exclude:
         - "@thomasfosterau/*"
+    # Derived from vite-plus by scripts/check-toolchain.mjs (see above)
+    ignore:
+      - dependency-name: "vite"
+      - dependency-name: "vitest"
+      - dependency-name: "@vitest/coverage-istanbul"
     groups:
       toolchain:
         applies-to: version-updates
         patterns:
           - "vite-plus"
-          - "vite"
-          - "vitest"
+          - "@voidzero-dev/*"
           - "@vitest/*"
           - "oxlint"
           - "oxfmt"
