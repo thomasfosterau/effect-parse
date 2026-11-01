@@ -1,5 +1,11 @@
 # @thomasfosterau/effect-parse
 
+## 0.4.1
+
+### Patch Changes
+
+- [#69](https://github.com/thomasfosterau/effect-parse/pull/69) [`9d72a0f`](https://github.com/thomasfosterau/effect-parse/commit/9d72a0f63efcf1de4b2e29b8ce81eb1d95359544) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - Fixes from type-aware linting. `Parser` now declares the `toString()` it already had (`Parser(<name>)`), and `tryMapUnknown` spells its error type `unknown` rather than the equivalent `E | unknown`. An unexpected token that `JSON.stringify` cannot render (a cycle, a `BigInt`) is now shown as its elements joined (arrays) or its object tag such as `[object Map]`, without calling a user `toString`.
+
 ## 0.4.0
 
 ### Minor Changes
