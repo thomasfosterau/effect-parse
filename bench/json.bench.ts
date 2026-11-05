@@ -35,7 +35,7 @@ const utf8 = new TextEncoder().encode(doc)
 const utf16 = Encoding.utf16le.encode(doc)
 const decoder = new TextDecoder()
 
-const backends = ["interpreted", "closure", "jit"] as const
+const backends = ["interpreted", "closure", "jit", "wasm"] as const
 type Backend = (typeof backends)[number]
 
 /** A separate parser object per backend, since compilation is per parser. */

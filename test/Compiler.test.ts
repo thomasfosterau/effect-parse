@@ -2,6 +2,7 @@
  * Differential tests: compiled parsers must give exactly the interpreter's
  * results, values and errors alike, on valid, invalid and truncated input.
  */
+import * as Arr from "effect/Array"
 import * as Predicate from "effect/Predicate"
 import * as Context from "effect/Context"
 import * as Option from "effect/Option"
@@ -9,7 +10,7 @@ import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { assert, describe, expect, it } from "vite-plus/test"
+import { assert, describe, expect, it, onTestFinished, vi } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
 import * as Http from "../examples/http.js"
 import * as Ini from "../examples/ini.js"
@@ -36,7 +37,7 @@ import * as Registry from "../src/internal/compiler/registry.js"
 import { allStrings, mutations, randomJson, rng } from "./generators.js"
 import { defined } from "./utils.js"
 
-const backends = ["closure", "jit"] as const
+const backends = ["closure", "jit", "wasm"] as const
 type Backend = (typeof backends)[number]
 
 // -----------------------------------------------------------------------------
@@ -84,7 +85,9 @@ const fast = (p: Parser.Parser.Any, input: Input.Input, context?: Context.Contex
   const compiled = defined(Registry.compiled(p, kind))
   if (compiled.error !== undefined) throw compiled.error
   if (compiled.jitError !== undefined) throw compiled.jitError
+  if (compiled.wasmError !== undefined) throw compiled.wasmError
   if (backendOf.get(p) === "jit") assert.strictEqual(compiled.backend, "jit")
+  if (backendOf.get(p) === "wasm") assert.strictEqual(compiled.backend, kind === 2 ? "jit" : "wasm")
   const a = step(state)
   return a === Fail ? undefined : { value: a, pos: state.pos, end: state.end }
 }
@@ -1329,14 +1332,16 @@ describe("running from an offset", () => {
     jsonInputs.forEach((input) => sameAtOffset(p, prefix, Encoding.utf8.encode(input)))
   })
 
-  // Every grammar on every short string, in every runner and backend: about
-  // 5 s, which is vitest's default timeout
+  // Every grammar on every short string, in every runner and backend, each
+  // run compiling a fresh parser (`watched`): about 25 s, mostly compiling
+  // (a WebAssembly module takes about 0.5 ms), and two to three times that
+  // under coverage
   it("combinators", () => {
     grammars.forEach(([name, g]) => {
       const positions = name === "taken and spans" || name === "eof, location, rest"
       allStrings(alphabet, 2).forEach((input) => sameAtOffset(g, "ab\n", input, { positions, leafRoot: true }))
     })
-  }, 30_000)
+  }, 120_000)
 
   it.each(backends)("takes the compiled path with the %s backend, in complete and partial mode", (backend) => {
     const token = Parser.preceded(Ascii.multispace0, Parser.alt(Ascii.alpha1, Ascii.digit1, Token.literal("=")))
@@ -1366,7 +1371,8 @@ describe("running from an offset", () => {
     expect(Parser.parseSync(w.parser, "let x", { offset: 3 })).toBe("x")
     expect(w.interpreted).toBe(0)
     expect(Registry.compiled(w.parser, 0, false)?.backend).toBe(backend)
-    expect(Registry.compiled(w.parser, 0, true)?.backend).toBe(backend)
+    // The streaming build of the WebAssembly compiler is the JIT's
+    expect(Registry.compiled(w.parser, 0, true)?.backend).toBe(backend === "wasm" ? "jit" : backend)
   })
 
   it("reports offsets, lines and columns in the whole input", () => {
@@ -1404,5 +1410,111 @@ describe("the JIT", () => {
     const q = Compiler.jit(Parser.repeat(a))
     Parser.parse(q, "a")
     expect(Registry.compiled(q, 0)?.backend).toBe("jit")
+  })
+})
+
+describe("the WebAssembly compiler", () => {
+  /** A JSON document of `n` records, pretty-printed. */
+  const records = (n: number) =>
+    `[\n${Arr.makeBy(n, (i) => ` {\n  "id": ${i},\n  "name": "item ${i}",\n  "tags": ["a", "b"],\n  "price": ${i * 1.25}\n }`).join(",\n")}\n]`
+
+  /** `p` compiled with the WebAssembly compiler parses `input` as the interpreter does, compiled. */
+  const sameAsInterpreted = <A, E, I extends string | Uint8Array>(p: Parser.Parser<A, E, never, I>, input: I) => {
+    const compiled = Compiler.wasm(Parser.named(p, "wasm"))
+    expect(Parser.parse(compiled, input)).toEqual(Parser.parse(p, input))
+    expect(Registry.compiled(compiled, Predicate.isString(input) ? 0 : 1)?.backend).toBe("wasm")
+  }
+
+  it("grows its trace past the memory it starts with", () => {
+    // About 8 MB of trace: several times the initial memory
+    const doc = records(40000)
+    sameAsInterpreted(JsonFast.json, doc)
+    sameAsInterpreted(JsonFast.jsonGrammar(Text.utf8), new TextEncoder().encode(doc))
+  })
+
+  it("parses again after a callback threw", () => {
+    let calls = 0
+    const p = Compiler.wasm(
+      Parser.separated(
+        Ascii.decUint.pipe(
+          Parser.tap((n) => {
+            calls++
+            if (n === 13) throw new RangeError("unlucky")
+          })
+        ),
+        Token.literal(",")
+      )
+    )
+    expect(() => Parser.parseSync(p, "1,13,2")).toThrow("unlucky")
+    expect(Parser.parseSync(p, "1,2,3")).toEqual([1, 2, 3])
+    expect(Registry.compiled(p, 0)?.backend).toBe("wasm")
+    expect(calls).toBeGreaterThan(3)
+  })
+
+  it("returns the same strings from its string cache, across parses", () => {
+    const doc = '[{"key": "value", "k\\u00e9y": "é"}, {"key": "value", "k\\u00e9y": "é"}, "aé", "a\\u00e9"]'
+    const expected = [{ key: "value", ["kéy"]: "é" }, { key: "value", ["kéy"]: "é" }, "aé", "aé"]
+    const p = Compiler.wasm(Parser.named(JsonFast.json, "json"))
+    const q = Compiler.wasm(JsonFast.jsonGrammar(Text.utf8))
+    const bytes = new TextEncoder().encode(doc)
+    Arr.makeBy(3, () => {
+      expect(Parser.parseSync(p, doc)).toEqual(expected)
+      expect(Parser.parseSync(q, bytes)).toEqual(expected)
+    })
+    // Slots shared by different strings of the same hash still give each its own text
+    const many = Arr.makeBy(5000, (i) => `s${i % 1500}`)
+    expect(Parser.parseSync(p, `[${many.map((s) => `"${s}"`).join(",")}]`)).toEqual(many)
+  })
+
+  it("converts floats exactly as Number does", () => {
+    const random = rng(12)
+    const digits = () => Arr.makeBy(1 + Math.floor(random() * 21), () => Math.floor(random() * 10)).join("")
+    const texts = [
+      "9007199254740993",
+      "1.00000000000000011102230246251565404236316680908203125",
+      "2.2250738585072011e-308",
+      ...Arr.makeBy(20000, () => {
+        const d = digits()
+        return `${random() < 0.3 ? "-" : ""}${d}.${d.slice(0, 3)}e${Math.floor(random() * 50) - 25}`
+      })
+    ]
+    const string = Compiler.wasm(Parser.named(Ascii.float, "float"))
+    const bytes = Compiler.wasm(Parser.named(Text.utf8.float, "float"))
+    const utf16 = Compiler.wasm(Parser.named(Text.utf16le.float, "float"))
+    texts.forEach((text) => {
+      const expected = Number(text)
+      expect(Object.is(Parser.parseSync(string, text), expected), text).toBe(true)
+      expect(Object.is(Parser.parseSync(bytes, new TextEncoder().encode(text)), expected), text).toBe(true)
+      expect(Object.is(Parser.parseSync(utf16, Encoding.utf16le.encode(text)), expected), text).toBe(true)
+    })
+  })
+
+  it("runs filter, tryMap and filterMap on values built from the trace", () => {
+    const even = Parser.filter(Ascii.decUint, (n) => n % 2 === 0)
+    const half = Parser.tryMap(Ascii.decUint, (n) => (n % 2 === 0 ? Result.succeed(n / 2) : Result.fail("odd")))
+    const third = Parser.filterMap(Ascii.decUint, (n) => (n % 3 === 0 ? Option.some(n / 3) : Option.none()))
+    const p = Parser.separated(
+      Parser.alt(
+        Parser.map(even, (n) => ["even", n]),
+        Parser.map(half, () => "never"),
+        Parser.map(third, (n) => ["third", n]),
+        Parser.map(Ascii.decUint, (n) => ["other", n])
+      ),
+      Token.literal(",")
+    )
+    sameAsInterpreted(p, "4,9,7,12,15,1")
+    const fast = Compiler.wasm(Parser.named(p, "p"))
+    Parser.parse(fast, "4")
+    expect(Registry.compiled(fast, 0)?.fallbacks).toEqual([])
+  })
+
+  it("uses the JIT where WebAssembly is unavailable", () => {
+    vi.stubGlobal("WebAssembly", undefined)
+    onTestFinished(() => {
+      vi.unstubAllGlobals()
+    })
+    const p = Compiler.wasm(Parser.repeat(a))
+    expect(Parser.parse(p, "aa")).toEqual(Result.succeed(["a", "a"]))
+    expect(Registry.compiled(p, 0)?.backend).toBe("jit")
   })
 })

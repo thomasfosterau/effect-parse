@@ -59,7 +59,7 @@ const twins = new Map<Parser.Parser.Any, ReadonlyArray<Parser.Parser.Any>>()
 const variants = <P extends Parser.Parser.Any>(p: P): ReadonlyArray<P> => {
   let v = twins.get(p)
   if (v === undefined) {
-    v = [p, ...(["closure", "jit"] as const).map((backend) => Compiler[backend](Parser.named(p, "twin")))]
+    v = [p, ...(["closure", "jit", "wasm"] as const).map((backend) => Compiler[backend](Parser.named(p, "twin")))]
     twins.set(p, v)
   }
   return v as ReadonlyArray<P>
@@ -179,7 +179,7 @@ describe("streaming parses", () => {
 })
 
 describe("incremental parsing", () => {
-  it.each(["interpreted", "closure", "jit"] as const)(
+  it.each(["interpreted", "closure", "jit", "wasm"] as const)(
     "does not parse elements again when more input arrives (%s)",
     (backend) => {
       let parsed = 0
@@ -196,11 +196,12 @@ describe("incremental parsing", () => {
       // Each element is parsed about once, not once per chunk
       expect(chunks.length).toBeGreaterThan(500)
       expect(parsed).toBeLessThan(2000 * 1.5)
-      if (backend !== "interpreted") assert.strictEqual(Registry.compiled(list, 0, true)?.backend, backend)
+      if (backend !== "interpreted")
+        assert.strictEqual(Registry.compiled(list, 0, true)?.backend, backend === "wasm" ? "jit" : backend)
     }
   )
 
-  it.each(["interpreted", "closure", "jit"] as const)(
+  it.each(["interpreted", "closure", "jit", "wasm"] as const)(
     "parses an input that arrives in one chunk once (%s)",
     (backend) => {
       let parsed = 0
@@ -218,24 +219,27 @@ describe("incremental parsing", () => {
     }
   )
 
-  it.each(["interpreted", "closure", "jit"] as const)("resumes long strings where they stopped (%s)", (backend) => {
-    let segments = 0
-    const normal = Text.utf8.takeTill('\\"', { min: 1 }).pipe(Parser.tap(() => segments++))
-    const string = Parser.delimited(
-      Text.utf8.literal('"'),
-      Text.utf8.escaped(normal, "\\", Text.utf8.oneOf('\\"')),
-      Text.utf8.literal('"')
-    )
-    if (backend !== "interpreted") Compiler[backend](string)
-    const text = Array.from({ length: 500 }, (_, i) => `segment ${i}\\"`).join("")
-    const bytes = new TextEncoder().encode(`"${text}"`)
-    const chunks = split(bytes, rng(2), 32)
-    const value = Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(string)))
-    expect(value).toBe(text.replaceAll('\\"', '"'))
-    expect(segments).toBeLessThan(500 * 1.5 + chunks.length)
-  })
+  it.each(["interpreted", "closure", "jit", "wasm"] as const)(
+    "resumes long strings where they stopped (%s)",
+    (backend) => {
+      let segments = 0
+      const normal = Text.utf8.takeTill('\\"', { min: 1 }).pipe(Parser.tap(() => segments++))
+      const string = Parser.delimited(
+        Text.utf8.literal('"'),
+        Text.utf8.escaped(normal, "\\", Text.utf8.oneOf('\\"')),
+        Text.utf8.literal('"')
+      )
+      if (backend !== "interpreted") Compiler[backend](string)
+      const text = Array.from({ length: 500 }, (_, i) => `segment ${i}\\"`).join("")
+      const bytes = new TextEncoder().encode(`"${text}"`)
+      const chunks = split(bytes, rng(2), 32)
+      const value = Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(string)))
+      expect(value).toBe(text.replaceAll('\\"', '"'))
+      expect(segments).toBeLessThan(500 * 1.5 + chunks.length)
+    }
+  )
 
-  it.each(["interpreted", "closure", "jit"] as const)("resumes long raw escaped text (%s)", (backend) => {
+  it.each(["interpreted", "closure", "jit", "wasm"] as const)("resumes long raw escaped text (%s)", (backend) => {
     let segments = 0
     const normal = Text.utf8.takeTill('\\"', { min: 1 }).pipe(Parser.tap(() => segments++))
     const string = Parser.delimited(

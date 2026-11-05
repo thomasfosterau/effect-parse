@@ -252,14 +252,15 @@ Parser.parse(json, text) // same Result as before, about 5 times faster
 
 On the JSON example, compiled parsing runs at 5–6 times the speed of the interpreter, for strings, UTF-8 and UTF-16 alike, and at 1–4 times the time of `JSON.parse` depending on the document (see [the design notes](docs/DESIGN.md#results)).
 
-There are two compilers, one function each:
+There are three compilers, one function each:
 
+- `Compiler.wasm` scans the input in WebAssembly and builds the value with generated JavaScript. It is the fastest on strings and bytes: on the JSON benchmark it takes 17–34% less time than the JIT. It uses the JIT for array input, for streaming, and where `WebAssembly` or `new Function` is unavailable.
 - `Compiler.jit` generates JavaScript where `new Function` is allowed, and falls back to the closure compiler where it isn't.
 - `Compiler.closure` never generates code. It is meant for pages with a Content Security Policy.
 
-A bundle contains only the compilers it calls. A program that compiles nothing bundles neither, and one that uses only `Compiler.closure` contains no `new Function`. esbuild keeps every member of a namespace imported from the root entry, so with esbuild import from the subpaths instead (`import * as Compiler from "@thomasfosterau/effect-parse/Compiler"`). Rolldown and Rollup drop unused members either way.
+A bundle contains only the compilers it calls. A program that compiles nothing bundles none, and one that uses only `Compiler.closure` contains no `new Function`. esbuild keeps every member of a namespace imported from the root entry, so with esbuild import from the subpaths instead (`import * as Compiler from "@thomasfosterau/effect-parse/Compiler"`). Rolldown and Rollup drop unused members either way.
 
-Both return the same parser. The code is built on the first run, for each kind of input, and cached. `parse`, `parseSync`, `parsePeek`, `parsePartial`, `parseEffect`, `ParserStream.parseMany` and `ParserStream.parseAll` use it, from any `offset`; `parseRecoverable` and tracing stay interpreted. A driver that keeps its own `Input.State` (a lexer reading one token at a time, say) runs the compiled code with `Parser.run(p, state)`; calling `p.step(state)` directly always runs interpreted.
+Each returns the same parser. The code is built on the first run, for each kind of input, and cached. `parse`, `parseSync`, `parsePeek`, `parsePartial`, `parseEffect`, `ParserStream.parseMany` and `ParserStream.parseAll` use it, from any `offset`; `parseRecoverable` and tracing stay interpreted. A driver that keeps its own `Input.State` (a lexer reading one token at a time, say) runs the compiled code with `Parser.run(p, state)`; calling `p.step(state)` directly always runs interpreted.
 
 Compiled code records no diagnostics. When it fails, the parser runs again interpreted, so errors are exactly the same, byte for byte. Callbacks should therefore be pure: on failing input they may run twice, and those whose results are unused may be skipped. Parsers built with `Parser.make` or `Parser.gen` run interpreted inside compiled code. See the [design notes](docs/DESIGN.md#6-compiled-parsers) for details.
 

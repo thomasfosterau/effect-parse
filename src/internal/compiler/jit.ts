@@ -23,9 +23,9 @@ import * as Result from "effect/Result"
 import type { Encoding } from "../../Encoding.js"
 import type { State } from "../../Input.js"
 import { Fail } from "../../Input.js"
-import type { Node, NodeOf, ParserLike } from "../node.js"
+import type { NodeOf, ParserLike } from "../node.js"
 import { addEntry, flushEntries, fromEntries, isPlainKey } from "../entries.js"
-import { children, nodeOf, scansFloat } from "../node.js"
+import { nodeOf, scansFloat } from "../node.js"
 import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from "../numbers.js"
 import { compileAny } from "../tokens.js"
 import { Key } from "../key.js"
@@ -34,6 +34,7 @@ import { charOf, fastLimit, latin1, string, utf16be, utf16le, utf8, validate } f
 import type { ClosureCompiler, CompiledRoot, Fallback, Step } from "./closure.js"
 import { backend as closureBackend, createClosureCompiler } from "./closure.js"
 import { buildsEntries, pairOf } from "./entries.js"
+import { countRefs, isLeaf, isLetter, isSmall, lowerAscii, selectorOf } from "./graph.js"
 import type { Backend } from "./registry.js"
 import type { First } from "./first.js"
 import { planAlt, Strict } from "./first.js"
@@ -77,7 +78,7 @@ let supported = false
  * Whether `new Function` works here (it doesn't under a Content Security
  * Policy). Checked once, and again if `globalThis.Function` is replaced.
  */
-const jitSupported = (): boolean => {
+export const jitSupported = (): boolean => {
   if (checked !== globalThis.Function) {
     checked = globalThis.Function
     const fn = checked
@@ -108,26 +109,6 @@ interface Reader {
 class Fn {
   readonly vars: Array<string> = []
 }
-
-const isLeaf = (node: Node): boolean => {
-  switch (node._tag) {
-    case "Succeed":
-    case "Fail":
-    case "Eof":
-    case "Location":
-    case "RestLen":
-    case "Any":
-    case "Literal":
-    case "OneOf":
-    case "TakeWhile":
-      return true
-    default:
-      return false
-  }
-}
-
-const lowerAscii = (c: number): number => (c >= 65 && c <= 90 ? c + 32 : c)
-const isLetter = (c: number): boolean => (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
 
 /** The inclusive ranges of 1s in a table. */
 const runsOf = (table: Uint8Array): Array<[number, number]> => {
@@ -218,7 +199,7 @@ class Emitter {
   private readonly constantIndex = new Map<unknown, number>()
   readonly functions: Array<string> = []
   private readonly rules = [new Map<ParserLike, string>(), new Map<ParserLike, string>()]
-  private readonly refs = new Map<ParserLike, number>()
+  private readonly refs: WeakMap<ParserLike, number>
   private readonly closure: ClosureCompiler
   private next = 0
 
@@ -228,25 +209,11 @@ class Emitter {
     readonly resumable = false
   ) {
     this.closure = createClosureCompiler(kind, resumable)
-    this.countRefs(root)
+    this.refs = countRefs(root)
   }
 
   get fallbacks(): ReadonlyArray<Fallback> {
     return this.closure.fallbacks
-  }
-
-  /** Counts the distinct parents of each parser. */
-  private countRefs(root: ParserLike): void {
-    const seen = new Set<ParserLike>()
-    const stack = [root]
-    for (let p = stack.pop(); p !== undefined; p = stack.pop()) {
-      if (seen.has(p)) continue
-      seen.add(p)
-      for (const c of new Set(children(nodeOf(p)))) {
-        this.refs.set(c, (this.refs.get(c) ?? 0) + 1)
-        stack.push(c)
-      }
-    }
   }
 
   const(value: unknown): string {
@@ -325,27 +292,10 @@ class Emitter {
   gen(p: ParserLike, used: boolean, out: string | null, fail: string, fn: Fn, depth: number): string {
     const node = nodeOf(p)
     if (Predicate.isTagged(node, "Suspend")) return this.call(this.rule(node.resolve(), used), out, fail)
-    if (!isLeaf(node) && (((this.refs.get(p) ?? 0) > 1 && !this.small(p)) || depth > 32)) {
+    if (!isLeaf(node) && (((this.refs.get(p) ?? 0) > 1 && !isSmall(p)) || depth > 32)) {
       return this.call(this.rule(p, used), out, fail)
     }
     return this.inline(p, used, out, fail, fn, depth)
-  }
-
-  /** Whether a parser is small enough to inline wherever it is used. */
-  private small(p: ParserLike): boolean {
-    let budget = 6
-    const visit = (q: ParserLike): boolean => {
-      const node = nodeOf(q)
-      if (
-        --budget < 0 ||
-        Predicate.isTagged(node, "Suspend") ||
-        Predicate.isTagged(node, "Escaped") ||
-        Predicate.isTagged(node, "Dispatch")
-      )
-        return false
-      return children(node).every(visit)
-    }
-    return visit(p)
   }
 
   /**
@@ -757,9 +707,7 @@ class Emitter {
       const r = out ?? this.v(fn)
       return code + `default:{$S.pos=p;${r}=${q}.step($S);if(${r}===F){${fail}}p=$S.pos;}}`
     }
-    let sel = nodeOf(node.selector)
-    const peek = Predicate.isTagged(sel, "Peek")
-    if (peek) sel = nodeOf((sel as NodeOf<"Peek">).self)
+    const { node: sel, peek } = selectorOf(node.selector)
     if (!Predicate.isTagged(sel, "Any") || !this.native(sel.encoding)) return general(true)
     const enc = sel.encoding
     const r = enc === undefined ? undefined : this.reader(enc)

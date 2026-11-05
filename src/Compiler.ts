@@ -4,11 +4,15 @@
  * `Parser.parseSync`, `Parser.parsePeek`, `Parser.parsePartial` and
  * `Parser.parseEffect` faster, from any `offset`.
  *
- * There are two compilers, one function each, so a program bundles only the
- * one it uses, and a program that compiles nothing bundles neither:
+ * There are three compilers, one function each, so a program bundles only
+ * the ones it uses, and a program that compiles nothing bundles none:
  *
+ * - {@link wasm} scans the input in WebAssembly and builds the value with
+ *   generated JavaScript. It is the fastest on strings and bytes, and uses
+ *   the JIT for array input and streaming, and where WebAssembly or
+ *   `new Function` is unavailable.
  * - {@link jit} generates code with `new Function` where it is allowed, and
- *   otherwise uses the closure compiler. It is the fastest.
+ *   otherwise uses the closure compiler.
  * - {@link closure} builds specialized closures only. It never generates
  *   code, and a bundle that uses only it contains no `new Function`, so it
  *   is the choice under a Content Security Policy, where even probing for
@@ -54,6 +58,40 @@ import type { Parser } from "./Parser.js"
 import { backend as closureBackend } from "./internal/compiler/closure.js"
 import { backend as jitBackend } from "./internal/compiler/jit.js"
 import { register } from "./internal/compiler/registry.js"
+import { backend as wasmBackend } from "./internal/compiler/wasm.js"
+
+/**
+ * Compiles a parser with the WebAssembly compiler. Returns the same parser.
+ *
+ * The input is copied into WebAssembly memory and scanned there, by code
+ * generated from the grammar; a JavaScript function generated with
+ * `new Function` then builds the value from what the scan recorded, with
+ * the same callbacks and the same objects as the JIT. Parts of the grammar
+ * with no WebAssembly form (such as `Parser.make`, `flatMap`, or `filter`
+ * on a value) run their JIT-compiled code from inside the scan.
+ *
+ * It uses the JIT (see {@link jit}) for array input, for the streaming build
+ * of `Parser.parsePartial` and `ParserStream`, and where `WebAssembly` or
+ * `new Function` is unavailable: a Content Security Policy needs both
+ * `'wasm-unsafe-eval'` and `'unsafe-eval'` for it. Short strings with the
+ * same characters may be returned as one string, which no program can tell
+ * apart from two.
+ *
+ * @example
+ * ```ts
+ * import { Ascii, Compiler, Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * const list = Compiler.wasm(Parser.separated(Ascii.decInt, Token.literal(",")))
+ * Parser.parse(list, "1,2,3") // Result.succeed([1, 2, 3])
+ * ```
+ *
+ * @since 0.5.0
+ * @category compilation
+ */
+export const wasm = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<A, E, R, I> => {
+  register(self, wasmBackend)
+  return self
+}
 
 /**
  * Compiles a parser with the JIT: generated code where `new Function` is

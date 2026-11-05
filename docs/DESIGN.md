@@ -290,6 +290,39 @@ The JIT's remaining gap to the hand-fused parser was mostly the grammar itself: 
 
 What runs interpreted in the JSON grammars: only the parser returned by the `flatMap` in `\uXXXX` escapes (its first parser, `hex4`, is compiled); `json-fast.ts` writes those escapes with `alt` and `cut` instead. Both compilers read UTF-16 bytes through a unit reader (a unit below 0xD800 is a whole code point, read inline; `decode` runs only for surrogates and a unit cut off by the end): before the closure compiler had one, it decoded every code point through `Encoding.decode` and ran UTF-16 at 1.4× over the interpreter (44 ms where it now takes 25 ms).
 
+### The WebAssembly compiler
+
+`Compiler.wasm` (`internal/compiler/wasm.ts`, with the assembler in `wasmAsm.ts`) is a third backend behind the same registry. It exists because recognition, not building values, dominates the JIT: on the JSON benchmark document the JIT takes about 2.5 ms to recognize the input (`asVoid`) and about 3.4 ms to parse it, while code generated as WebAssembly recognizes it in about 1 ms.
+
+**Two passes.** A parse copies the input into linear memory (strings as UTF-16 units, with Node's `Buffer#write` where it exists, about 0.06 ms for 0.6 MB, otherwise a loop; bytes with `Uint8Array#set`) and runs the generated scan. The scan has the JIT's shape: a WebAssembly function per rule (`(p) -> p | -1`), everything else inlined as structured blocks, failure as a branch, the mode in a global. Where a value is used, it appends what the value needs to a _trace_ in linear memory: slice bounds, the index of the branch or case that matched, repetition counts (written back into a reserved word), flags of `opt`, doubles. Every point that rewinds the cursor rewinds the trace pointer with it, so the trace describes the successful parse only. A JavaScript function generated with `new Function` for the grammar then reads the trace in order and builds the value: the same callbacks, `Object.fromEntries` assignments (`internal/entries.ts`) and object shapes as the JIT, with no scanning. Builder functions mirror the scan's rules.
+
+A first version replayed a generic event tape with an interpreter loop, and was 1.7 times slower than the JIT: per-node interpretation is what compilers remove. The builder is therefore specialized per grammar, and the trace holds only decisions and data, never the structure, which the builder knows.
+
+**Islands.** Parsers with no WebAssembly form (`Parser.make`, `flatMap`, `dispatch` on a function, services, caseless `Text` literals, custom encodings) are _islands_: the scan calls an import that runs their JIT-compiled step on the shared state, and the trace records the index of their value. A callback that needs a value while scanning (`filter`, `tryMap`, `filterMap`, `tap`) is a _value island_: its parser is scanned natively, then an import builds just that value from its part of the trace, with a builder function of its own, and applies the callback; the trace of the parser is replaced by the index of the result. Calls between WebAssembly and JavaScript cost about 40 ns, so the hot parts of a grammar must not be islands: in the JSON grammars only escapes are.
+
+**Tokens and numbers.** Token sets compile to comparisons (accepted or rejected runs, whichever are fewer) or to tables in linear memory, as in the JIT; a set's test is called only for code points it has no table or ranges for. The built-in encodings decode in WebAssembly (UTF-8 with the same validation as `decodeUtf8`, UTF-16 surrogates, lone surrogates). `Ascii.float` and `Text.float` are scanned and converted in one pass for every built-in encoding, UTF-16 included: up to 15 significant digits with Clinger's fast path, up to 19 with the double-double arithmetic of `numbers.ts` (WebAssembly has no fused multiply-add, so every operation rounds as in JavaScript, and the doubles are the same), the rest with `Number` in JavaScript. `nan` and `inf` run the float's text parser and `toFloat`.
+
+**Strings.** Short string slices of `takeWhile` (and `escaped` strings of one piece) are hashed by the scan into a cache in linear memory of 1024 slots, each holding the units of the latest slice hashed to it and a version that changes with them. The trace records the slot and version; the builder decodes a string once per version and returns the same string for the same units after that. Repeated keys and short values cost no decoding, and are already internalized when they are used as property keys. Backtracking can't invalidate the cache, and it outlives a parse. On UTF-8 the scan also records whether a slice is ASCII, which the builder decodes without looking for longer sequences.
+
+**Where it runs.** Streaming (resumable) builds, array input, a callback that re-enters the same parser during a parse, and environments without `WebAssembly` or `new Function` use the JIT. A Content Security Policy needs both `'wasm-unsafe-eval'` and `'unsafe-eval'` for it. Modules are compiled synchronously, on the first parse; browsers limit the size of synchronous compiles on the main thread, which the JSON grammars (a few kilobytes) are far below.
+
+**Testing.** The differential suites (`test/Compiler.test.ts`, `test/Streaming.test.ts`, `test/Syntax.test.ts`, `test/Regressions.test.ts`) run every grammar with the WebAssembly backend too, checking the compiled step alone as well as the results, and `test/Compiler.test.ts` adds its own cases: a trace that grows the memory, a callback that throws, the string cache, floats against `Number`, value islands, and the fallback without `WebAssembly`.
+
+**Results.** JSON benchmark (`vp run bench`, as in the table above):
+
+| Grammar and input               | JIT     | WebAssembly    |
+| ------------------------------- | ------- | -------------- |
+| `json.ts` (Token/Ascii), string | 5.97 ms | 3.94 ms (1.5×) |
+| `json-text.ts`, `Text.string`   | 4.86 ms | 3.94 ms (1.2×) |
+| `json-text.ts`, `Text.utf8`     | 5.12 ms | 4.12 ms (1.2×) |
+| `json-text.ts`, `Text.utf16le`  | 6.99 ms | 5.42 ms (1.3×) |
+| `json-fast.ts`, `Text.string`   | 3.40 ms | 2.38 ms (1.4×) |
+| `json-fast.ts`, `Text.utf8`     | 3.48 ms | 2.90 ms (1.2×) |
+
+`json-fast.ts` on a string parses faster than the hand-fused parser (3.19 ms on the same run). On the documents of `vp run bench:native`, the JIT takes 1.1–1.5 times as long on records and about 1.5 times as long on numbers (where the WebAssembly compiler is faster than `JSON.parse`); on long ASCII or escaped strings and deep nesting, where both spend their time building strings and on the call stack, the two are level (0.94–1.19). Over its 35 cases the JIT takes 1.22 times as long (geometric mean).
+
+**Compiling** costs more than the JIT: about 0.5 ms for a small grammar against 0.04 ms (code generation, encoding, and the engine's module and memory), once per parser and kind of input.
+
 ## 7. Streaming a document as it arrives
 
 `ParserStream.parseAll` (and `parseReadable` / `parseResponse` for web streams) parse one document from a stream of chunks without waiting for the end of the stream.
