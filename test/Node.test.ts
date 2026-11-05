@@ -8,7 +8,8 @@ import { children, nodeOf } from "../src/internal/node.js"
 
 /** Counts the description nodes reachable from a parser, by tag. */
 const tags = (root: ParserLike): Partial<Record<Node["_tag"], number>> => {
-  const seen = new Set<ParserLike>()
+  const seen = new WeakSet<ParserLike>()
+
   const out: Partial<Record<Node["_tag"], number>> = {}
   const visit = (p: ParserLike) => {
     if (seen.has(p)) return
@@ -42,7 +43,9 @@ describe("parser descriptions", () => {
         })
       )
     ).toBe("Opaque")
-    expect(tags(Arithmetic.ast).Opaque).toBe(1)
+    // The Pratt loop is described as a combinator, so the parsers inside it compile
+    expect(tags(Arithmetic.ast).Opaque).toBeUndefined()
+    expect(tags(Arithmetic.ast).Combinator).toBe(1)
   })
 
   it("keeps the description through named and pipe", () => {

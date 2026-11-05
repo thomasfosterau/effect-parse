@@ -92,6 +92,7 @@ export class FirstSets {
   }
 
   private compute(node: Node): First {
+    // SAFETY: `compute` is only called from `of`, which returns before it when `kind` is 2
     const kind = this.kind as 0 | 1
     switch (node._tag) {
       case "Succeed":
@@ -111,6 +112,7 @@ export class FirstSets {
         if (node.encoding !== undefined) {
           if (kindOfEncoding(node.encoding) !== kind) return unknown
           if (node.caseless) return isEmptyUnits(lit) ? unknown : anyUnit
+          // SAFETY: a `Literal` with an encoding is a `Text` literal, which records the string it encodes
           const encoded = node.encoding.encode(lit as string)
           if (isEmptyUnits(encoded)) return emptyOptional
           return ofUnits([Predicate.isString(encoded) ? encoded.charCodeAt(0) : encoded[0]])
@@ -141,13 +143,18 @@ export class FirstSets {
       case "Tap":
       case "TryMap":
       case "FilterMap":
+      case "MapOrFail":
       case "Filter":
       case "Taken":
       case "WithTaken":
       case "Span":
       case "WithSpan":
+      case "MapSpan":
       case "Context":
       case "Expected":
+      case "Quiet":
+      // A fast path accepts what its grammar accepts (`Parser.withFastPath`)
+      case "FastPath":
       case "MapError":
       case "OrFail":
       case "Peek":
@@ -173,6 +180,7 @@ export class FirstSets {
       }
       case "Seq":
       case "Struct":
+      case "SeqWith":
         return this.sequence(node.parsers)
       case "ZipWith":
         return this.sequence([node.self, node.that])
@@ -198,6 +206,8 @@ export class FirstSets {
       }
       case "Suspend":
         return this.of(node.resolve())
+      case "Fixed":
+        return kind !== 1 ? unknown : node.size === 0 ? emptyOptional : anyUnit
       default:
         return unknown
     }

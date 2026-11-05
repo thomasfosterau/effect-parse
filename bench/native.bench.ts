@@ -12,7 +12,7 @@
  * Run with `pnpm build && pnpm bench:native`.
  */
 import { Compiler, Parser, Text } from "@thomasfosterau/effect-parse"
-import { json } from "../examples/json.ts"
+import { json, type Json } from "../examples/json.ts"
 import { jsonGrammar as fastJsonGrammar } from "../examples/json-fast.ts"
 import { jsonGrammar } from "../examples/json-text.ts"
 
@@ -95,7 +95,7 @@ const byBackend = { jit: grammars("jit"), wasm: grammars("wasm") }
 
 interface Case {
   readonly name: string
-  readonly run: () => unknown
+  readonly run: () => Json
 }
 
 const casesFor = (doc: Doc): Array<Case> => {
@@ -125,7 +125,7 @@ const casesFor = (doc: Doc): Array<Case> => {
   ]
 }
 
-const time = (doc: Doc, run: () => unknown): number => {
+const time = (doc: Doc, run: () => Json): number => {
   const start = performance.now()
   for (let i = 0; i < doc.batch; i++) run()
   return (performance.now() - start) / doc.batch

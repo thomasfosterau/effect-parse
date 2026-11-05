@@ -6,9 +6,12 @@
 
 import * as Predicate from "effect/Predicate"
 
+type FromEntries = <K extends PropertyKey, V>(entries: Iterable<readonly [K, V]>) => { [P in K]: V }
+
 /** The built-in `Object.fromEntries`, which compiled parsers recognize. */
-export const fromEntries: <K extends PropertyKey, V>(entries: Iterable<readonly [K, V]>) => { [P in K]: V } =
-  Object.fromEntries as any
+// SAFETY: `Object.fromEntries` gives each `[key, value]` entry an own
+// property `key` holding `value`, so entries keyed by `K` build `{ [P in K]: V }`
+export const fromEntries: FromEntries = Object.fromEntries as FromEntries
 
 const objectPrototype = Object.prototype
 
@@ -22,6 +25,9 @@ export const isPlainKey = (key: unknown): key is string =>
   Predicate.isString(key) && !Object.hasOwn(objectPrototype, key)
 
 const define = (o: object, key: unknown, value: unknown): void => {
+  // SAFETY: `Object.defineProperty` converts any key to a property key
+  // (ToPropertyKey), as `Object.fromEntries` does; its `PropertyKey`
+  // parameter type is narrower than what it accepts
   Object.defineProperty(o, key as PropertyKey, { value, writable: true, enumerable: true, configurable: true })
 }
 

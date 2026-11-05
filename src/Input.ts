@@ -19,6 +19,7 @@ import * as Context from "effect/Context"
 import type { Encoding } from "./Encoding.js"
 import type { ErrorKind } from "./ParseError.js"
 import type { Builder as SyntaxBuilder } from "./internal/syntax.js"
+import type { AsciiRun } from "./internal/text.js"
 
 /**
  * The kinds of input a parser can consume.
@@ -57,6 +58,17 @@ export type BinaryInput = ArrayBufferLike | ArrayBufferView
 export type Source<I> = I | ([I] extends [Uint8Array] ? BinaryInput : never)
 
 /**
+ * The overloads of {@link fromSource}.
+ *
+ * @since 0.5.0
+ * @category constructors
+ */
+export interface FromSourceFn {
+  (source: BinaryInput): Uint8Array
+  <I extends Input>(source: Source<I>): I
+}
+
+/**
  * Converts a {@link Source} to the input parsers read: binary data becomes a
  * `Uint8Array` view of the same memory, everything else is returned as is.
  *
@@ -70,10 +82,7 @@ export type Source<I> = I | ([I] extends [Uint8Array] ? BinaryInput : never)
  * @since 0.1.0
  * @category constructors
  */
-export const fromSource: {
-  (source: BinaryInput): Uint8Array
-  <I extends Input>(source: Source<I>): I
-} = (source: Input | BinaryInput): any => {
+export const fromSource: FromSourceFn = (source: Input | BinaryInput): any => {
   if (Predicate.isString(source) || source instanceof Uint8Array || Array.isArray(source)) return source
   if (ArrayBuffer.isView(source)) return new Uint8Array(source.buffer, source.byteOffset, source.byteLength)
   // An explicit length fixes the view's size even for a resizable buffer
@@ -292,6 +301,31 @@ export class State<I extends Input = Input> {
    * @internal
    */
   syntax: SyntaxBuilder | undefined = undefined
+  /**
+   * Where the stop characters of compiled `takeTill`s next occur in this
+   * state's input, by search site; created on first use. It lives as long
+   * as the state (whose input never changes), and `reset` clears it with
+   * the other per-run fields.
+   *
+   * @internal
+   */
+  searches: Map<object, Array<number>> | undefined = undefined
+  /**
+   * A run of ASCII bytes of this state's UTF-8 input, decoded once, from
+   * which `Text.utf8` slices the long strings it decodes (see
+   * `internal/text.ts`); `reset` clears it with the other per-run fields.
+   *
+   * @internal
+   */
+  asciiRun: AsciiRun | undefined = undefined
+  /**
+   * A `DataView` of this state's byte input, for the `Binary` parsers;
+   * created on first use. It lives as long as the state, whose input never
+   * changes: one per read cost most of a number's time.
+   *
+   * @internal
+   */
+  view: DataView | undefined = undefined
 
   constructor(
     source: I | Source<I>,
@@ -301,7 +335,7 @@ export class State<I extends Input = Input> {
       readonly offset?: number | undefined
     }
   ) {
-    const input = fromSource(source as Input) as I
+    const input = fromSource<I>(source)
     this.input = input
     this.end = input.length
     this.pos = options?.offset ?? 0
@@ -393,6 +427,8 @@ export class State<I extends Input = Input> {
     this.depth = 0
     this.encoding = undefined
     this.resume = undefined
+    this.searches = undefined
+    this.asciiRun = undefined
     return this
   }
 
@@ -445,7 +481,14 @@ export class State<I extends Input = Input> {
    * Extracts the slice `[start, end)` of the input.
    */
   slice(start: number, end: number): Slice<I> {
-    const input = this.input as any
+    // SAFETY: `inputKind` 1 is a `Uint8Array`, whose `subarray` returns a
+    // `Uint8Array` view (its `Slice`); 0 and 2 are a string and an array, whose
+    // `slice` returns a string and an array of the same elements (their
+    // `Slice`). `subarray` is only called for kind 1
+    const input = this.input as {
+      slice(start: number, end: number): Slice<I>
+      subarray(start: number, end: number): Slice<I>
+    } & I
     switch (this.inputKind) {
       case 0:
         return input.slice(start, end)
@@ -598,14 +641,30 @@ export class State<I extends Input = Input> {
   }
 }
 
+/**
+ * The last merges {@link mergeExpected} made, as `[a, b, merged]` triples. A
+ * parse merges the same few pairs of expectation arrays over and over (a
+ * whitespace skipper's hint with a repetition's, then with the failure of
+ * the token after them), and expectation arrays are never mutated, so a
+ * merge seen recently returns its earlier result, which in turn keeps the
+ * next merge's input the same array.
+ */
+const merges: Array<ReadonlyArray<string>> = /*#__PURE__*/ new Array(12).fill(empty)
+let mergeSlot = 0
+
 /** @internal */
 export const mergeExpected = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): ReadonlyArray<string> => {
   if (Arr.isReadonlyArrayEmpty(a)) return b
   if (Arr.isReadonlyArrayEmpty(b)) return a
+  for (let i = 0; i < 12; i += 3) if (merges[i] === a && merges[i + 1] === b) return merges[i + 2]
   const out = a.slice()
   for (const e of b) {
     if (!out.includes(e)) out.push(e)
   }
+  merges[mergeSlot] = a
+  merges[mergeSlot + 1] = b
+  merges[mergeSlot + 2] = out
+  mergeSlot = mergeSlot === 9 ? 0 : mergeSlot + 3
   return out
 }
 

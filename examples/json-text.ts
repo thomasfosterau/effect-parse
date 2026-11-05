@@ -8,6 +8,7 @@
  * Parser.parse(jsonGrammar(Text.utf8), new TextEncoder().encode('{"a": [1, "é"]}'))
  * ```
  */
+import * as Record from "effect/Record"
 import { Ascii, Parser, Text, Token } from "@thomasfosterau/effect-parse"
 import type { Json } from "./json.js"
 
@@ -81,7 +82,7 @@ export const jsonGrammar = <I extends string | Uint8Array>(
     lexeme(T.literal("{")),
     Parser.cut(Parser.terminated(Parser.separated(member, comma), T.literal("}")))
   ).pipe(
-    Parser.map((members) => Object.fromEntries(members)),
+    Parser.map((members) => Record.fromEntries(members)),
     Parser.context("object")
   )
 

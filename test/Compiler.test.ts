@@ -5,12 +5,16 @@
 import * as Arr from "effect/Array"
 import * as Predicate from "effect/Predicate"
 import * as Context from "effect/Context"
+import * as Formatter from "effect/Formatter"
+import * as Record from "effect/Record"
+
 import * as Option from "effect/Option"
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { assert, describe, expect, it, onTestFinished, vi } from "vite-plus/test"
+
 import * as Arithmetic from "../examples/arithmetic.js"
 import * as Http from "../examples/http.js"
 import * as Ini from "../examples/ini.js"
@@ -18,13 +22,13 @@ import * as Json from "../examples/json.js"
 import * as JsonFast from "../examples/json-fast.js"
 import { jsonGrammar } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
-import type { Input } from "../src/index.js"
 import {
   Ascii,
   Binary,
   Compiler,
   Encoding,
   Expression,
+  Input,
   Parser,
   ParserSchema,
   ParserStream,
@@ -35,10 +39,13 @@ import { State } from "../src/Input.js"
 import { Fail } from "../src/Input.js"
 import * as Registry from "../src/internal/compiler/registry.js"
 import { allStrings, mutations, randomJson, rng } from "./generators.js"
-import { defined } from "./utils.js"
+import { defined, runOfAs } from "./utils.js"
 
 const backends = ["closure", "jit", "wasm"] as const
 type Backend = (typeof backends)[number]
+
+/** A text backend under test: its name, its parsers, and how to encode a string for it. */
+type TextBackend = [name: string, T: Text.TextParsers<any>, encode: (s: string) => Input.Input]
 
 // -----------------------------------------------------------------------------
 // Harness
@@ -58,19 +65,24 @@ const errorFields = (e: any) => ({
 const outcome = (r: Result.Result<unknown, any>) =>
   Result.isSuccess(r) ? { ok: true, value: r.success } : { ok: false, error: errorFields(r.failure) }
 
-const compiledCopy = new Map<string, Map<Parser.Parser.Any, Parser.Parser.Any>>()
-const backendOf = new Map<Parser.Parser.Any, Backend>()
+const compiledCopy: Record<Backend, WeakMap<Parser.Parser.Any, Parser.Parser.Any>> = {
+  closure: new WeakMap(),
+  jit: new WeakMap(),
+  wasm: new WeakMap()
+}
+const backendOf = new WeakMap<Parser.Parser.Any, Backend>()
 
 /** A compiled twin of `p` (with the same description), leaving `p` interpreted. */
 const twin = <P extends Parser.Parser.Any>(p: P, backend: Backend): P => {
-  let byParser = compiledCopy.get(backend)
-  if (byParser === undefined) compiledCopy.set(backend, (byParser = new Map()))
+  const byParser = compiledCopy[backend]
   let c = byParser.get(p)
   if (c === undefined) {
     c = Compiler[backend](Parser.named(p, p.name ?? "root"))
     byParser.set(p, c)
     backendOf.set(c, backend)
   }
+  // SAFETY: `c` is `Compiler[backend](Parser.named(p, …))`, which has `p`'s
+  // type; only the cache erases it to `Parser.Any`.
   return c as P
 }
 
@@ -97,7 +109,7 @@ const fast = (p: Parser.Parser.Any, input: Input.Input, context?: Context.Contex
  * compiled build: the value and position, or the failure mode.
  */
 const stepOutcome = (
-  step: ((state: State<any>) => unknown) | undefined,
+  step: Parser.Parser.Any["step"] | undefined,
   input: Input.Input,
   partial: boolean,
   context: Context.Context<any> | undefined
@@ -121,18 +133,38 @@ const resumableStep = (p: Parser.Parser.Any, input: Input.Input) => {
   }
 }
 
+/** The options the harness runs a parser with: `ParseOptions`, plus a context when the parser needs one. */
+type RunOptions = Parser.ParseOptions & { readonly context?: Context.Context<any> }
+
+/**
+ * The runners over erased parsers. The harness holds every parser as
+ * `Parser.Any`, whose `R` is `any`, so neither overload of the typed runners
+ * (no context for `R = never`, a required one otherwise) applies.
+ */
+const runners = {
+  parse: (p: Parser.Parser.Any, input: Input.Input, options?: RunOptions) =>
+    // SAFETY: `options` carries the context exactly when the parser needs one.
+    Parser.parse(p, input, options as Parser.ParseOptionsWithContext<any>),
+  peek: (p: Parser.Parser.Any, input: Input.Input, options?: RunOptions) =>
+    // SAFETY: `options` carries the context exactly when the parser needs one.
+    Parser.parsePeek(p, input, options as Parser.ParseOptionsWithContext<any>),
+  partial: (p: Parser.Parser.Any, input: Input.Input, options?: RunOptions) =>
+    // SAFETY: `options` carries the context exactly when the parser needs one.
+    Parser.parsePartial(p, input, options as Parser.ParseOptionsWithContext<any>)
+}
+
 let checked = 0
 
 /** Checks that `p` gives the same results compiled and interpreted on `input`. */
 const same = (p: Parser.Parser.Any, input: Input.Input, context?: Context.Context<any>): void => {
   const options = context === undefined ? undefined : { context }
-  const expected = outcome(Parser.parse(p, input as never, options as never))
-  const expectedPeek = outcome(Parser.parsePeek(p, input as never, options as never))
+  const expected = outcome(runners.parse(p, input, options))
+  const expectedPeek = outcome(runners.peek(p, input, options))
   backends.forEach((backend) => {
     const c = twin(p, backend)
-    const label = `${backend} on ${JSON.stringify(Predicate.isString(input) ? input : Array.from(input as any))}`
-    expect(outcome(Parser.parse(c, input as never, options as never)), label).toEqual(expected)
-    expect(outcome(Parser.parsePeek(c, input as never, options as never)), label).toEqual(expectedPeek)
+    const label = `${backend} on ${Formatter.formatJson(Predicate.isString(input) ? input : Array.from(input))}`
+    expect(outcome(runners.parse(c, input, options)), label).toEqual(expected)
+    expect(outcome(runners.peek(c, input, options)), label).toEqual(expectedPeek)
     // The compiled step on its own succeeds exactly when the interpreter does
     const f = fast(c, input, context)
     expect(f !== undefined, `${label}: compiled success`).toBe(expectedPeek.ok)
@@ -177,23 +209,23 @@ describe("compiled examples", () => {
     jsonInputs.forEach((input) => same(Json.json, input))
   })
 
-  it.each([
+  it.each<TextBackend>([
     ["Text.string", Text.string, (s: string) => s],
     ["Text.utf8", Text.utf8, (s: string) => Encoding.utf8.encode(s)],
     ["Text.utf16le", Text.utf16le, (s: string) => Encoding.utf16le.encode(s)],
     ["Text.utf16be", Text.utf16be, (s: string) => Encoding.utf16be.encode(s)]
-  ] as const)("json-text with %s", (_, T, encode) => {
-    const p = jsonGrammar(T as Text.TextParsers<any>)
-    jsonInputs.forEach((input) => same(p, (encode as (s: string) => Input.Input)(input)))
+  ])("json-text with %s", (_, T, encode) => {
+    const p = jsonGrammar(T)
+    jsonInputs.forEach((input) => same(p, encode(input)))
   })
 
-  it.each([
+  it.each<TextBackend>([
     ["Text.string", Text.string, (s: string) => s],
     ["Text.utf8", Text.utf8, (s: string) => Encoding.utf8.encode(s)],
     ["Text.utf16le", Text.utf16le, (s: string) => Encoding.utf16le.encode(s)]
-  ] as const)("json-fast with %s, accepting what json-text accepts", (_, T, encode) => {
-    const fast = JsonFast.jsonGrammar(T as Text.TextParsers<any>)
-    const text = jsonGrammar(T as Text.TextParsers<any>)
+  ])("json-fast with %s, accepting what json-text accepts", (_, T, encode) => {
+    const fast = JsonFast.jsonGrammar(T)
+    const text = jsonGrammar(T)
     const inputs = [
       ...jsonInputs,
       '{"__proto__": 1, "toString": [2], "constructor": {"__proto__": null}}',
@@ -204,10 +236,10 @@ describe("compiled examples", () => {
       '"\\ud83d\\x"'
     ]
     inputs.forEach((input) => {
-      const bytes = (encode as (s: string) => Input.Input)(input)
+      const bytes = encode(input)
       same(fast, bytes)
-      const a = Parser.parse(fast, bytes as never)
-      const b = Parser.parse(text, bytes as never)
+      const a = Parser.parse(fast, bytes)
+      const b = Parser.parse(text, bytes)
       expect(Result.isSuccess(a), input).toBe(Result.isSuccess(b))
       expect(Result.getSuccess(a), input).toEqual(Result.getSuccess(b))
     })
@@ -435,6 +467,13 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
       ),
       digit.pipe(Parser.tryMap((d) => (d === "5" ? Result.fail("five") : Result.succeed(d + d)))),
       digit.pipe(Parser.filterMap((d) => (d === "3" ? Option.none() : Option.some(-Number(d))))),
+      digit.pipe(
+        Parser.mapOrFail(
+          (d) => (d === "1" ? Input.Fail : `${d}!`),
+          (d) => `no ${d}`
+        )
+      ),
+      Parser.mapOrFail(Token.oneOf("ab+"), (c) => (c === "+" ? Input.Fail : c.toUpperCase())),
       Token.any.pipe(
         Parser.filterOrFail(
           (c) => c !== "x",
@@ -449,6 +488,21 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
       Parser.as(a, 1),
       Parser.asVoid(Parser.opt(b)),
       Parser.zipWith(Parser.opt(a), Parser.opt(b), (x, y) => [y, x])
+    )
+  ],
+  // The allocation-free spellings of map(withSpan(p)) and map(seq(...)) (#64)
+  [
+    "mapSpan and seqWith",
+    Parser.alt(
+      Parser.seqWith([digit, Parser.mapSpan(Parser.repeat(a), (xs, s, e) => [xs.length, s, e]), b], (x, y, z) => [
+        z,
+        y,
+        x
+      ]),
+      Parser.seqWith([Parser.opt(b), Parser.opt(a)], (x, y) => [y, x]),
+      Parser.seqWith([b], (x) => x + x),
+      Parser.seqWith([digit, digit, digit, a], (...xs) => xs.join("")),
+      Parser.mapSpan(Token.oneOf("+e"), (x, s, e) => `${x}${s}${e}`)
     )
   ],
   ["struct", Parser.struct({ x: Parser.opt(a), y: Parser.repeat(b, { max: 2 }), z: Token.rest })],
@@ -495,6 +549,48 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
     )
   ],
   ["cut and context", Parser.preceded(a, Parser.cut(Parser.context(Parser.expected(digit, "a digit"), "number")))],
+  // Repetitions of a character set whose values are unused scan as runs (#79)
+  [
+    "repeat(oneOf) as a run",
+    (() => {
+      const chars = Parser.alt(Token.oneOf("ab😀"), Parser.seq(Token.literal("\\"), Token.any))
+      const tail = Parser.repeat(
+        Parser.alt(Parser.repeat(chars, { min: 1 }), Parser.seq(Token.takeWhile(".", { min: 1 }), Parser.peek(chars)))
+      )
+      return Parser.seq(
+        Parser.taken(tail),
+        Parser.asVoid(Parser.repeat(Token.oneOf("0+"), { min: 1, max: 2 })),
+        Parser.taken(Parser.repeat(Token.noneOf("e"), { min: 2 })),
+        Parser.peek(Parser.asVoid(Parser.repeat(chars)))
+      )
+    })()
+  ],
+  // A hand-written fast path in front of a grammar (#78): runs of "a" before a "b"
+  [
+    "withFastPath",
+    Parser.separated(
+      Parser.withFastPath(Parser.terminated(Token.takeWhile("a", { min: 1 }), b), runOfAs),
+      Token.literal("+")
+    )
+  ],
+  // A check that fails at an offset it chooses (#73)
+  [
+    "failAt",
+    Parser.alt(
+      Parser.seq(Parser.taken(Parser.repeat(digit)), Parser.location, Parser.alt(a, b)).pipe(
+        Parser.flatMap(([n, at, x]) => (n.length % 2 === 0 ? Parser.succeed(x) : Parser.failAt(at - 1, n)))
+      ),
+      Parser.seq(digit, b)
+    )
+  ],
+  // Skippers whose hints and furthest failures are dropped (#74)
+  [
+    "quiet",
+    Parser.separated(
+      Parser.preceded(Parser.quiet(Parser.repeat(Parser.alt(a, Parser.seq(b, Parser.cut(a))))), Parser.alt(digit, ab)),
+      Parser.quiet(Parser.opt(Token.literal("+")))
+    )
+  ],
   [
     "errors only",
     Parser.alt(
@@ -529,6 +625,21 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
     )
   ],
   ["permutation", Parser.permutation(a, b, digit)],
+  [
+    "a combinator counting separated items",
+    Parser.combinator([Parser.alt(ab, digit), Token.literal("+")], ([item, sep]) => {
+      const more = (state: State<string>, n: number): number | Fail => {
+        const start = state.pos
+        if (sep(state) === Fail || item(state) === Fail) {
+          if (state.mode !== "Backtrack") return Fail
+          state.rewind(start)
+          return n
+        }
+        return more(state, n + 1)
+      }
+      return (state) => (item(state) === Fail ? Fail : more(state, 1))
+    })
+  ],
   // Permutation and expression rounds whose attempts tie: merged lazily (#44)
   [
     "permutation of tied alts",
@@ -624,14 +735,18 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
   [
     "fromEntries of nothing",
     Parser.fromEntries(
-      Parser.repeat(Parser.seq(Parser.opt(a), Parser.opt(b))) as unknown as Parser.Parser<Array<[string, unknown]>>
+      // SAFETY: a deliberate type lie: the keys are `Option`s, not property
+      // keys; `fromEntries` converts them as `Object.fromEntries` does.
+      Parser.repeat(Parser.seq(Parser.opt(a), Parser.opt(b))) as Parser.Parser<Array<[any, unknown]>>
     )
   ],
   [
     "fromEntries of separated nothing",
     Parser.fromEntries(
-      Parser.separated(Parser.seq(Parser.opt(a), Parser.opt(digit)), Parser.opt(b)) as unknown as Parser.Parser<
-        Array<[string, unknown]>
+      // SAFETY: a deliberate type lie: the keys are `Option`s, not property
+      // keys; `fromEntries` converts them as `Object.fromEntries` does.
+      Parser.separated(Parser.seq(Parser.opt(a), Parser.opt(digit)), Parser.opt(b)) as Parser.Parser<
+        Array<[any, unknown]>
       >
     )
   ],
@@ -710,38 +825,45 @@ describe("compiled combinators", () => {
   ]
   const textAlphabet = ["a", "b", "0", "é", "😀", "\\", '"', "+", "\n", "\r", "\ufeff", "Ä"]
 
-  it.each([
+  it.each<[name: string, T: Text.TextParsers<any>]>([
     ["Text.string", Text.string],
     ["Text.utf8", Text.utf8],
     ["Text.utf16le", Text.utf16le],
     ["Text.latin1", Text.latin1]
-  ] as const)("%s parsers", (name, T) => {
-    const inputs = allStrings(textAlphabet, 3)
-    textGrammars(T as Text.TextParsers<any>, name === "Text.latin1" ? "þ" : "😀").forEach((p) => {
-      inputs.forEach((input) => {
-        if (name === "Text.latin1" && beyondLatin1(input)) return
-        same(p, (T.encoding as Encoding.Encoding<any>).encode(input))
-      })
-      if (name !== "Text.string") {
-        const random = rng(3)
-        Array.from({ length: 200 }).forEach(() => {
-          same(
-            p,
-            Uint8Array.from(
-              { length: Math.floor(random() * 6) },
-              () => [0x61, 0x30, 0xc3, 0xa9, 0xf0, 0x9f, 0x98, 0x80, 0xff, 0x00, 0x5c][Math.floor(random() * 11)]
-            )
-          )
+  ])(
+    "%s parsers",
+    (name, T) => {
+      const inputs = allStrings(textAlphabet, 3)
+      textGrammars(T, name === "Text.latin1" ? "þ" : "😀").forEach((p) => {
+        inputs.forEach((input) => {
+          if (name === "Text.latin1" && beyondLatin1(input)) return
+          same(p, T.encoding.encode(input))
         })
-      }
-    })
-  })
+        if (name !== "Text.string") {
+          const random = rng(3)
+          Array.from({ length: 200 }).forEach(() => {
+            same(
+              p,
+              Uint8Array.from(
+                { length: Math.floor(random() * 6) },
+                () => [0x61, 0x30, 0xc3, 0xa9, 0xf0, 0x9f, 0x98, 0x80, 0xff, 0x00, 0x5c][Math.floor(random() * 11)]
+              )
+            )
+          })
+        }
+      })
+    },
+    // Every grammar on every short input, with three backends: about 5 s
+    30_000
+  )
 
   it("byte inputs", () => {
     const bytes = Token.literal(new Uint8Array([1, 2]))
     const p = Parser.seq(
       Parser.opt(bytes),
-      Parser.opt(Token.literal("ab") as any),
+      // SAFETY: a string literal also matches byte input, as its UTF-8 bytes
+      // (`Token.literalImpl`); the overloads type it for string input only.
+      Parser.opt(Token.literal("ab") as Parser.Parser<"ab", never, never, any>),
       Token.takeWhile<Uint8Array>([Token.range(0x30, 0x39), 1], { max: 3 }),
       Parser.opt(Ascii.caseless(new Uint8Array([0x41]))),
       Parser.opt(Ascii.bytes.decUint),
@@ -750,12 +872,44 @@ describe("compiled combinators", () => {
     const random = rng(11)
     Array.from({ length: 2000 }).forEach(() => {
       same(
-        p as any,
+        p,
         Uint8Array.from(
           { length: Math.floor(random() * 7) },
           () => [1, 2, 0x30, 0x39, 0x41, 0x61, 0x62, 0xff][Math.floor(random() * 8)]
         )
       )
+    })
+  })
+
+  it("Binary numbers", () => {
+    const grammars: ReadonlyArray<Parser.Parser<any, any, never, Uint8Array>> = [
+      Parser.repeat(Binary.beU32),
+      Parser.seq(Binary.u8, Binary.beU16, Binary.leU32, Binary.i8, Parser.opt(Binary.beI24)),
+      Parser.repeat(
+        Parser.alt(
+          Parser.preceded(Token.literal(new Uint8Array([1])), Binary.leF32),
+          Parser.preceded(Token.literal(new Uint8Array([2])), Binary.beF64),
+          Parser.preceded(Token.literal(new Uint8Array([3])), Binary.leU64),
+          Parser.preceded(Binary.u8, Binary.beI16)
+        )
+      ),
+      // Values discarded, and a fold over them
+      Parser.preceded(Binary.beU16, Parser.terminated(Binary.leI32, Binary.u8)),
+      Parser.fold(Binary.leU16, { init: () => 0, f: (a: number, x: number) => a + x }),
+      Parser.alt(Parser.seq(Binary.beU32, Parser.eof), Parser.seq(Binary.leU24, Binary.u8)),
+      Parser.seq(Binary.u128("big"), Binary.i64("little"))
+    ]
+    const random = rng(12)
+    grammars.forEach((p) => {
+      Array.from({ length: 400 }).forEach(() => {
+        same(
+          p,
+          Uint8Array.from(
+            { length: Math.floor(random() * 26) },
+            () => [0, 1, 2, 3, 0x7f, 0x80, 0xff][Math.floor(random() * 7)]
+          )
+        )
+      })
     })
   })
 
@@ -788,7 +942,7 @@ describe("compiled combinators", () => {
   // Sets compile to comparisons on their accepted or rejected ranges, or to a
   // table: every code unit up to 0x103 crosses each boundary
   it("token sets at their boundaries", () => {
-    const sets: ReadonlyArray<unknown> = [
+    const sets: ReadonlyArray<Token.TokenSet<string>> = [
       ['"\\', Token.range("\u0000", "\u001f")],
       Token.range("a", "z"),
       Token.range(" ", "~"),
@@ -813,29 +967,34 @@ describe("compiled combinators", () => {
     const inputs = [...units.map((c) => `${c}${c}a`), "é😀", "😀\u0000", "\ud800a", "Āÿ"]
     sets.forEach((set) => {
       const token = Parser.seq(
-        Parser.opt(Token.oneOf(set as never)),
-        Parser.opt(Token.noneOf(set as never)),
-        Token.takeWhile(set as never),
-        Token.takeTill(set as never, { max: 2 })
+        Parser.opt(Token.oneOf(set)),
+        Parser.opt(Token.noneOf(set)),
+        Token.takeWhile(set),
+        Token.takeTill(set, { max: 2 })
       )
       inputs.forEach((input) => same(token, input))
+      // SAFETY: a deliberate type lie: the string sets (character ranges, a
+      // predicate on characters) run on byte input, which `ByteTokenSet` does
+      // not admit, to check that compiled and interpreted parsers agree there too.
       const bytes = Parser.seq(Token.takeWhile<Uint8Array>(set as never), Token.takeTill<Uint8Array>(set as never))
-      Array.from({ length: 256 }).forEach((_, b) => same(bytes as any, new Uint8Array([b, b, 0x61])))
-      ;([Text.string, Text.utf8, Text.latin1] as ReadonlyArray<Text.TextParsers<any>>).forEach((T) => {
+      Array.from({ length: 256 }).forEach((_, b) => same(bytes, new Uint8Array([b, b, 0x61])))
+      const texts: ReadonlyArray<Text.TextParsers<any>> = [Text.string, Text.utf8, Text.latin1]
+      texts.forEach((T) => {
         const text = Parser.seq(
-          Parser.opt(T.oneOf(set as never)),
-          Parser.opt(T.noneOf(set as never)),
-          T.takeWhile(set as never),
-          T.takeTill(set as never, { max: 2 })
+          Parser.opt(T.oneOf(set)),
+          Parser.opt(T.noneOf(set)),
+          T.takeWhile(set),
+          T.takeTill(set, { max: 2 })
         )
         inputs.forEach((input) => {
           if (T === Text.latin1 && beyondLatin1(input)) return
           if (T === Text.utf8 && /[\ud800-\udfff]/.test(input.replace("😀", ""))) return
-          same(text, (T.encoding as Encoding.Encoding<any>).encode(input))
+          same(text, T.encoding.encode(input))
         })
       })
     })
-  })
+    // Every case with three backends: about 5 s
+  }, 30_000)
 
   // Compiled floats are read from the input without slicing it, when they
   // are in decimal notation
@@ -920,32 +1079,154 @@ describe("compiled combinators", () => {
       ),
       ...generated
     ]
-    const encodings = [
+    const encodings: ReadonlyArray<
+      readonly [name: string, float: Parser.Parser<number, never, never, any>, encode: (s: string) => Input.Input]
+    > = [
       ["string", Ascii.float, (s: string) => s],
       ["bytes", Ascii.bytes.float, (s: string) => Encoding.utf8.encode(s)],
       ["Text.string", Text.string.float, (s: string) => s],
       ["Text.utf8", Text.utf8.float, (s: string) => Encoding.utf8.encode(s)],
       ["Text.latin1", Text.latin1.float, (s: string) => Encoding.latin1.encode(s)],
       ["Text.utf16le", Text.utf16le.float, (s: string) => Encoding.utf16le.encode(s)]
-    ] as const
+    ]
     encodings.forEach(([, float, encode]) => {
-      const p = Parser.seq(float as Parser.Parser<number, never, never, any>, Token.restLen)
+      const p = Parser.seq(float, Token.restLen)
       inputs.forEach((input) => {
-        const bytes = (encode as (s: string) => Input.Input)(input)
+        const bytes = encode(input)
         same(p, bytes)
-        const expected = Parser.parse(p, bytes as never)
+        const expected = Parser.parse(p, bytes)
         backends.forEach((backend) => {
-          const actual = Parser.parse(twin(p, backend), bytes as never)
+          const actual = Parser.parse(twin(p, backend), bytes)
           // `toEqual` does not tell 0 from -0
           const first = (r: typeof actual) => Result.map(r, (values) => Object.is(values[0], -0))
           expect(first(actual), `${backend} on ${input}`).toEqual(first(expected))
         })
       })
     })
-  })
+    // Every case with three backends: about 5 s
+  }, 30_000)
 
   // Compiled parsers assign plain keys and define the others, as
   // Object.fromEntries does
+  describe("withFastPath (#78)", () => {
+    const grammar = Parser.terminated(Token.takeWhile("a", { min: 1 }), Token.literal("b"))
+    const fast =
+      (calls: { n: number }, wrong = false) =>
+      (state: State<string>) => {
+        calls.n++
+        const value = runOfAs(state)
+        return wrong && value !== Parser.Defer ? value.toUpperCase() : value
+      }
+
+    it("runs the fast path in compiled code only", () => {
+      const calls = { n: 0 }
+      // A wrong fast path shows which runs used it
+      const p = Parser.withFastPath(grammar, fast(calls, true))
+      expect(Parser.parse(p, "aab")).toEqual(Result.succeed("aa"))
+      expect(calls.n).toBe(0)
+      backends.forEach((backend) => {
+        expect(Parser.parse(Compiler[backend](Parser.named(p, backend)), "aab"), backend).toEqual(Result.succeed("AA"))
+      })
+      // Once per backend
+      expect(calls.n).toBe(backends.length)
+    })
+
+    it.each(backends)("defers to the grammar, whose errors are reported (%s)", (backend) => {
+      const calls = { n: 0 }
+      const p = Compiler[backend](Parser.separated(Parser.withFastPath(grammar, fast(calls)), Token.literal(",")))
+      const reference = Parser.separated(grammar, Token.literal(","))
+      ;["ab,aab", "ab,b", "ab,a", "", "ab,", "aab,ab,x"].forEach((input) => {
+        expect(Parser.parse(p, input), input).toEqual(Parser.parse(reference, input))
+      })
+      expect(calls.n).toBeGreaterThan(0)
+      // Partial input: the fast path defers at the end, and the grammar reports `Incomplete`
+      expect(Parser.parsePartial(p, "ab,aa")).toEqual(Parser.parsePartial(reference, "ab,aa"))
+    })
+
+    it("verifyFastPath finds where a fast path disagrees", () => {
+      const inputs = ["ab", "aab", "b", "abab", "aa", ""]
+      expect(Parser.verifyFastPath(grammar, fast({ n: 0 }), inputs)).toEqual([])
+      const wrong = Parser.verifyFastPath(grammar, fast({ n: 0 }, true), inputs)
+      expect(wrong.map((m) => [m.input, m.offset, m.partial])).toEqual([
+        ["ab", 0, false],
+        ["ab", 0, true],
+        ["aab", 0, false],
+        ["aab", 0, true],
+        ["aab", 1, false],
+        ["aab", 1, true],
+        ["abab", 0, false],
+        ["abab", 0, true],
+        ["abab", 2, false],
+        ["abab", 2, true]
+      ])
+      expect(wrong[0]).toMatchObject({ fast: { value: "A", end: 2 }, grammar: { value: "a", end: 2 } })
+      // A fast path that accepts what the grammar rejects
+      const greedy = (state: State<string>) => {
+        state.pos = state.end
+        return state.input
+      }
+      expect(Parser.verifyFastPath(grammar, greedy, ["b"])[0]).toMatchObject({ grammar: { failed: "Backtrack" } })
+    })
+  })
+
+  it("takeTill searches for its stop characters (#75)", () => {
+    const random = rng(75)
+    // Astral characters and lone surrogates: a `Token` set accepts both
+    const fill = ["a", "😀", "\ud800", "é", "b"]
+    const run = (n: number) => Array.from({ length: n }, () => fill[Math.floor(random() * fill.length)]).join("")
+    const lengths = [0, 1, 7, 8, 9, 15, 16, 17, 33, 1000]
+    const quoted = Parser.repeat(
+      Parser.terminated(
+        Parser.delimited(Token.literal('"'), Token.takeTill('"'), Token.literal('"')),
+        Token.takeWhile(",\r\n", { min: 1 })
+      )
+    )
+    const plain = Parser.repeat(
+      Parser.terminated(Token.takeTill(",\r\n", { min: 1 }), Token.takeWhile(",\r\n", { min: 1 }))
+    )
+    // The second branch searches again from before the first one's stop
+    const backtracking = Parser.repeat(
+      Parser.alt(
+        Parser.seq(Token.takeTill(",;"), Token.literal(",x")),
+        Parser.seq(Token.takeTill(",;"), Token.oneOf(",;"))
+      )
+    )
+    const inputs = lengths.flatMap((n) => [
+      `"${run(n)}",\n"${run(n)}"\r\n`,
+      `"${run(n)}",${'"'}${run(n)}`,
+      `${run(n)},${run(n)}\n${run(n)}`,
+      `${run(n)}\r${run(n)},`,
+      `${run(n)},x${run(n)};${run(n)},`,
+      `${run(n)};${run(n)}`
+    ])
+    inputs.forEach((input) => [quoted, plain, backtracking].forEach((p) => same(p, input)))
+  })
+
+  it("takeTill keeps its searches per state, across runs (#75)", () => {
+    const field = Token.takeTill(",;")
+    const separator = Token.oneOf(",;")
+    /** The fields of `text`, one run of `step` each, on one state reset before every run. */
+    const lex = (step: (state: State<string>) => string | Fail, text: string): ReadonlyArray<string> => {
+      const state = new State(text)
+      const next = (): ReadonlyArray<string> => {
+        if (state.pos >= state.end) return []
+        const v = step(state.reset(state.pos))
+        if (v === Fail) return []
+        return Parser.run(separator, state.reset(state.pos)) === Fail ? [v] : [v, ...next()]
+      }
+      return next()
+    }
+    const text = Array.from({ length: 50 }, (_, i) => "x".repeat(i * 7)).join(",")
+    const expected = lex(field.step, text)
+    backends.forEach((backend) => {
+      const run = Compiler.runner(Compiler[backend](Parser.named(field, "field")))
+      expect(lex(run, text), backend).toEqual(expected)
+      // Another state over another input: nothing is carried over
+      expect(lex(run, text.replaceAll(",", ";")), backend).toEqual(lex(field.step, text.replaceAll(",", ";")))
+      expect(lex(run, text), backend).toEqual(expected)
+    })
+  })
+
   it("fromEntries keys", () => {
     const sym = Symbol("s")
     const key = Parser.alt(
@@ -959,7 +1240,9 @@ describe("compiled combinators", () => {
       Token.literal("n").pipe(Parser.as(null))
     )
     const entries = Parser.fromEntries(
-      Parser.repeat(Parser.seq(key, Token.oneOf("abc"))) as unknown as Parser.Parser<Array<[string, string]>>
+      // SAFETY: a deliberate type lie: the keys include an object, `null` and
+      // a number, which `fromEntries` converts as `Object.fromEntries` does.
+      Parser.repeat(Parser.seq(key, Token.oneOf("abc"))) as Parser.Parser<Array<[string, string]>>
     )
     const describe = (o: any) => ({
       proto: Object.getPrototypeOf(o) === Object.prototype,
@@ -996,7 +1279,7 @@ describe("compiled combinators", () => {
 
   it("array inputs", () => {
     const p = Parser.separated(Token.oneOf<ReadonlyArray<string>>(["x", "y"]), Token.literal(["+"]))
-    allStrings(["x", "y", "+", "z"], 5).forEach((input) => same(p as any, Array.from(input)))
+    allStrings(["x", "y", "+", "z"], 5).forEach((input) => same(p, Array.from(input)))
   })
 
   it("token parsers on array inputs", () => {
@@ -1084,6 +1367,27 @@ describe.each(backends)("Compiler.%s", (backend) => {
     expect(fallbacks.map((f) => f.tag)).toEqual(["FlatMap"])
   })
 
+  it("compiles the parsers inside a combinator", () => {
+    // The parsers inside are a `make` (which stays interpreted) and compiled tokens
+    const opaque = Parser.make<string>((state) => {
+      if (state.pos < state.end && state.input[state.pos] === "x") return state.input[state.pos++]
+      return state.backtrack("Token", ["x"])
+    }, "x")
+    const p = twin(
+      Parser.combinator([Parser.alt(a, opaque), Token.literal(",")], ([item, sep]) => (state) => {
+        const first = item(state)
+        return first === Fail ? Fail : sep(state) === Fail ? Fail : first
+      }),
+      backend
+    )
+    Parser.parse(p, "a,")
+    const fallbacks = defined(Registry.compiled(p, 0)).fallbacks
+    // The WebAssembly scan runs the combinator as an island: its JIT-compiled step, whose parsers compile
+    expect(fallbacks.map((f) => (backend === "wasm" ? f.tag : f.name))).toEqual([
+      backend === "wasm" ? "Combinator" : "x"
+    ])
+  })
+
   it("runs a state whose end is not the input's length", () => {
     const p = Compiler[backend](Parser.repeat(a))
     Parser.parse(p, "")
@@ -1115,6 +1419,8 @@ describe.each(backends)("Compiler.%s", (backend) => {
 const watched = <P extends Parser.Parser.Any>(p: P, backend: Backend) => {
   const c = Compiler[backend](Parser.named(p, "watched"))
   const step = c.step
+  // SAFETY: `c` is `p` renamed (`Parser.named`) and registered for a
+  // compiler; it runs on the same input and produces the same values as `p`.
   const counter = { parser: c as P, interpreted: 0 }
   Object.defineProperty(c, "step", {
     value: (state: State<any>) => {
@@ -1137,10 +1443,11 @@ const shifted = (o: any, by: number) => {
 }
 
 const concatInput = (a: Input.Input, b: Input.Input): Input.Input => {
-  if (Predicate.isString(a)) return a + (b as string)
+  if (Predicate.isString(a) && Predicate.isString(b)) return a + b
+  if (!(a instanceof Uint8Array && b instanceof Uint8Array)) return assert.fail("concatInput: mixed inputs")
   const out = new Uint8Array(a.length + b.length)
-  out.set(a as Uint8Array)
-  out.set(b as Uint8Array, a.length)
+  out.set(a)
+  out.set(b, a.length)
   return out
 }
 
@@ -1161,15 +1468,8 @@ const sameAtOffset = (
 ): void => {
   const whole = concatInput(prefix, input)
   const offset = prefix.length
-  const runners = {
-    parse: (q: Parser.Parser.Any, i: Input.Input, o?: Parser.ParseOptions) => Parser.parse(q, i as never, o as never),
-    peek: (q: Parser.Parser.Any, i: Input.Input, o?: Parser.ParseOptions) =>
-      Parser.parsePeek(q, i as never, o as never),
-    partial: (q: Parser.Parser.Any, i: Input.Input, o?: Parser.ParseOptions) =>
-      Parser.parsePartial(q, i as never, o as never)
-  }
-  const label = JSON.stringify(Predicate.isString(input) ? input : Array.from(input as any))
-  Object.entries(runners).forEach(([runner, run]) => {
+  const label = Formatter.formatJson(Predicate.isString(input) ? input : Array.from(input))
+  Record.toEntries(runners).forEach(([runner, run]) => {
     const expected: any = outcome(run(p, whole, { offset }))
     // Values that are positions (spans, `location`) are positions in the whole input
     if (!options?.positions) {
@@ -1188,14 +1488,15 @@ const sameAtOffset = (
         (f) => f.name === "watched"
       )
       if (rootFallback || (runner === "partial" && options?.leafRoot)) return
-      const rerun = !expected.ok || expected.value?._tag === "Incomplete"
+      // An error is built interpreted; `Incomplete` comes from the compiled run itself
+      const rerun = !expected.ok
       expect(w.interpreted, `${runner}, ${backend} on ${label}: interpreted runs`).toBe(rerun ? 1 : 0)
     })
   })
 }
 
 /** Runs a parser on a fresh state with `run`: its value and position, or its failure. */
-const stateOutcome = (run: (state: State<any>) => unknown, input: Input.Input, partial: boolean) => {
+const stateOutcome = (run: Parser.Parser.Any["step"], input: Input.Input, partial: boolean) => {
   const state = new State(input, { partial })
   const a = run(state)
   return a === Fail ? { mode: state.mode, failure: state.reportedFailure() } : { value: a, pos: state.pos }
@@ -1223,6 +1524,52 @@ describe("Parser.run", () => {
       inputs.forEach((input) => [false, true].forEach((partial) => check(name, g, input, partial)))
     )
   }, 30_000)
+
+  it("reports Incomplete compiled as the interpreter does, needed included", () => {
+    const inputs = allStrings(alphabet, 3)
+    grammars.forEach(([name, g]) =>
+      backends.forEach((backend) => {
+        const c = twin(g, backend)
+        inputs.forEach((input) => {
+          const label = `${name} on "${input}", ${backend}`
+          expect(Parser.parsePartial(c, input), label).toEqual(Parser.parsePartial(g, input))
+          const state = new State(input, { partial: true })
+          if (Parser.run(c, state, { diagnostics: false }) !== Fail || state.mode !== "Incomplete") return
+          const reference = new State(input, { partial: true })
+          expect(g.step(reference), label).toBe(Fail)
+          expect([reference.mode, reference.failure.needed], label).toEqual(["Incomplete", state.failure.needed])
+        })
+      })
+    )
+  }, 60_000)
+
+  it.each([
+    ["json.ts", Json.json, (s: string): Input.Input => s],
+    ["json-text, Text.utf8", jsonGrammar(Text.utf8), (s: string): Input.Input => new TextEncoder().encode(s)],
+    [
+      "json-fast, Text.utf16le",
+      JsonFast.jsonGrammar(Text.utf16le),
+      (s: string): Input.Input => Encoding.utf16le.encode(s)
+    ]
+  ] as const)(
+    "parsePartial agrees compiled on every prefix of JSON (%s)",
+    (_, g, encode) => {
+      const docs = ['{"a": [1, -2.5e3, true, null, "x\\n\\u00e9😀\\"q"], "b": {}} ', jsonDocs[3], jsonDocs[7]]
+      const p: Parser.Parser<unknown, never, never, any> = g
+      backends.forEach((backend) => {
+        const c = twin(p, backend)
+        docs.forEach((doc) =>
+          Array.from({ length: doc.length + 1 }, (_, i) => i).forEach((i) => {
+            const input = encode(doc.slice(0, i))
+            expect(Parser.parsePartial(c, input), `${backend}, prefix of ${i} characters`).toEqual(
+              Parser.parsePartial(p, input)
+            )
+          })
+        )
+      })
+    },
+    60_000
+  )
 
   it.each(backends)("runs compiled with the %s backend, interpreting only failures", (backend) => {
     const token = Parser.preceded(Ascii.multispace0, Parser.alt(Ascii.alpha1, Ascii.digit1, Token.literal("=")))
@@ -1301,6 +1648,94 @@ describe("Parser.run", () => {
   })
 })
 
+describe("Compiler.runner", () => {
+  it("agrees with Parser.run, compiled or not, in complete and partial mode", () => {
+    const inputs = allStrings(alphabet, 2)
+    grammars.forEach(([name, g]) => {
+      const runners = [
+        ["interpreted", g, Compiler.runner(g)] as const,
+        ...backends.map((backend) => {
+          const c = twin(g, backend)
+          return [backend, c, Compiler.runner(c)] as const
+        })
+      ]
+      inputs.forEach((input) =>
+        [false, true].forEach((partial) =>
+          runners.forEach(([label, p, run]) => {
+            expect(stateOutcome(run, input, partial), `${name} on "${input}", partial: ${partial}, ${label}`).toEqual(
+              stateOutcome((s) => Parser.run(p, s), input, partial)
+            )
+          })
+        )
+      )
+    })
+  }, 30_000)
+
+  it.each(backends)("follows the state's input kind, mode and end (%s)", (backend) => {
+    const w = watched(Parser.terminated(Ascii.digit1, Token.literal(";")), backend)
+    const run: (state: State<any>) => string | Uint8Array | typeof Fail = Compiler.runner(w.parser)
+    expect(run(new State("12;"))).toBe("12")
+    expect(run(new State(new TextEncoder().encode("34;")))).toEqual(new TextEncoder().encode("34"))
+    // Partial states run the resumable build, and report `Incomplete`
+    const partial = new State("56", { partial: true })
+    expect(run(partial)).toBe(Fail)
+    expect(partial.mode).toBe("Incomplete")
+    expect(run(new State("78;"))).toBe("78")
+    // A state that ends before its input's end
+    const short = new State("9;0;")
+    short.end = 2
+    expect(run(short)).toBe("9")
+    short.reset(0).end = 1
+    expect(run(short)).toBe(Fail)
+    expect(short.failure.offset).toBe(1)
+    // Every failure above ran interpreted once (two), and nothing else did
+    expect(w.interpreted).toBe(2)
+  })
+
+  it.each(backends)("skips the interpreted re-run with diagnostics off (%s)", (backend) => {
+    const w = watched(Parser.delimited(Token.literal("("), Ascii.digit1, Token.literal(")")), backend)
+    const run = Compiler.runner(w.parser, { diagnostics: false })
+    const state = new State("(12) (x)")
+    expect(run(state)).toBe("12")
+    const before = state.failure
+    expect(run(state.reset(5))).toBe(Fail)
+    expect(state.mode).toBe("Backtrack")
+    expect(state.pos).toBe(5)
+    expect(state.failure).toBe(before)
+    expect(w.interpreted).toBe(0)
+  })
+
+  it("runs interpreted under a tracer or with recovery on", () => {
+    const w = watched(Ascii.alpha1, "jit")
+    const run = Compiler.runner(w.parser)
+    const traced = new State("abc")
+    traced.tracer = () => {}
+    expect(run(traced)).toBe("abc")
+    expect(run(new State("abc"))).toBe("abc")
+    expect(w.interpreted).toBe(1)
+  })
+
+  it.each(backends)("reports deep nesting as a TooDeep failure (%s)", (backend) => {
+    const nested: Parser.Parser<unknown> = Parser.alt(
+      Parser.delimited(
+        Token.literal("["),
+        Parser.suspend(() => nested),
+        Token.literal("]")
+      ),
+      Token.literal("x")
+    )
+    const run = Compiler.runner(Compiler[backend](nested))
+    const state = new State("[".repeat(200_000))
+    expect(run(state)).toBe(Fail)
+    expect(state.mode).toBe("Cut")
+    expect(state.failure.kind).toBe("TooDeep")
+    // With diagnostics off, the compiled run's own TooDeep failure
+    const quick = new State("[".repeat(200_000))
+    expect(Compiler.runner(Compiler[backend](nested), { diagnostics: false })(quick)).toBe(Fail)
+    expect(quick.mode).toBe("Cut")
+  })
+})
+
 describe("ParserStream.parseMany", () => {
   it.each(backends)("runs compiled with the %s backend, interpreting only where a chunk ends", (backend) => {
     const line = Parser.terminated(Ascii.decInt, Token.literal("\n"))
@@ -1310,12 +1745,13 @@ describe("ParserStream.parseMany", () => {
     const chunks = ["1\n2", "3\n-4\n5", "\n6\n"]
     expect(collect(w.parser, chunks)).toEqual(collect(line, chunks))
     expect(collect(w.parser, chunks)).toEqual([1, 23, -4, 5, 6])
-    // Once per run of `collect`: "2" and "5" are cut short by their chunk
-    expect(w.interpreted).toBe(4)
+    // "2" and "5", cut short by their chunk, end `Incomplete` compiled: nothing runs interpreted
+    expect(w.interpreted).toBe(0)
     const failed = Effect.runSync(
       Effect.flip(Stream.fromIterable(["1\nx\n"]).pipe(ParserStream.parseMany(w.parser), Stream.runCollect))
     )
     // The interpreter's error, with offsets in the buffer of unconsumed input
+    expect(w.interpreted).toBe(1)
     expect(failed.offset).toBe(2)
     expect(failed.input).toBe("1\nx\n")
   })
@@ -1338,7 +1774,7 @@ describe("running from an offset", () => {
   // under coverage
   it("combinators", () => {
     grammars.forEach(([name, g]) => {
-      const positions = name === "taken and spans" || name === "eof, location, rest"
+      const positions = name === "taken and spans" || name === "eof, location, rest" || name === "mapSpan and seqWith"
       allStrings(alphabet, 2).forEach((input) => sameAtOffset(g, "ab\n", input, { positions, leafRoot: true }))
     })
   }, 120_000)
@@ -1364,7 +1800,8 @@ describe("running from an offset", () => {
     expect(Parser.parsePartial(w.parser, "let x", { offset: 3 })).toEqual(
       Result.succeed({ _tag: "Incomplete", needed: Option.some(1) })
     )
-    expect(w.interpreted).toBe(1)
+    // `Incomplete`, `needed` included, comes from the compiled run: nothing runs interpreted
+    expect(w.interpreted).toBe(0)
     w.interpreted = 0
     expect(Parser.parse(w.parser, buffer.slice(0, 10), { offset: 7 })).toEqual(Result.succeed("10"))
     expect(Parser.parsePeek(w.parser, buffer, { offset: 3 })).toEqual(Result.succeed([" = 10;", "x"]))
@@ -1395,17 +1832,15 @@ describe("running from an offset", () => {
 
 describe("the JIT", () => {
   it("falls back to the closure compiler where new Function is blocked", () => {
-    const original = globalThis.Function
-    const blocked = function () {
+    vi.stubGlobal("Function", function () {
       throw new EvalError("Refused to evaluate a string as JavaScript")
-    } as unknown as FunctionConstructor
-    globalThis.Function = blocked
+    })
     try {
       const p = Compiler.jit(Parser.repeat(a))
       expect(Parser.parse(p, "aa")).toEqual(Result.succeed(["a", "a"]))
       expect(Registry.compiled(p, 0)?.backend).toBe("closure")
     } finally {
-      globalThis.Function = original
+      vi.unstubAllGlobals()
     }
     const q = Compiler.jit(Parser.repeat(a))
     Parser.parse(q, "a")

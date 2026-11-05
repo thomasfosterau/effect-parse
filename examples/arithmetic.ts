@@ -82,6 +82,7 @@ export type Tok =
 
 const tok = Parser.alt(
   Ascii.decUint.pipe(Parser.map((value): Tok => ({ kind: "Value", value }))),
+  // SAFETY: `oneOf("+-*/")` matches one of exactly these four characters.
   Token.oneOf("+-*/").pipe(Parser.map((op): Tok => ({ kind: "Oper", op: op as "+" | "-" | "*" | "/" }))),
   Token.literal("(").pipe(Parser.as<Tok>({ kind: "OpenParen" })),
   Token.literal(")").pipe(Parser.as<Tok>({ kind: "CloseParen" }))
@@ -97,6 +98,7 @@ type Tokens = ReadonlyArray<Tok>
 
 const kind = <K extends Tok["kind"]>(k: K) =>
   Token.oneOf<Tokens>((t) => t.kind === k).pipe(
+    // SAFETY: `oneOf` matched only a token whose `kind` is `k`.
     Parser.map((t) => t as Extract<Tok, { kind: K }>),
     Parser.expected(k)
   )

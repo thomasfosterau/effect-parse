@@ -1,4 +1,6 @@
 /** Input generators shared by the differential test suites. */
+import * as Formatter from "effect/Formatter"
+import * as Match from "effect/Match"
 
 /** A deterministic PRNG (mulberry32). */
 export const rng = (seed: number) => () => {
@@ -15,16 +17,12 @@ export const mutations = (doc: string, alphabet: string, count: number, seed: nu
   return Array.from({ length: count }, (_, i) => {
     const at = Math.floor(random() * (doc.length + 1))
     const c = chars[Math.floor(random() * chars.length)]
-    switch (i % 4) {
-      case 0:
-        return doc.slice(0, at) + doc.slice(at + 1)
-      case 1:
-        return doc.slice(0, at) + c + doc.slice(at)
-      case 2:
-        return doc.slice(0, at) + c + doc.slice(at + 1)
-      default:
-        return doc.slice(0, at)
-    }
+    return Match.value(i % 4).pipe(
+      Match.when(0, () => doc.slice(0, at) + doc.slice(at + 1)),
+      Match.when(1, () => doc.slice(0, at) + c + doc.slice(at)),
+      Match.when(2, () => doc.slice(0, at) + c + doc.slice(at + 1)),
+      Match.orElse(() => doc.slice(0, at))
+    )
   })
 }
 
@@ -55,7 +53,7 @@ export const randomJson = (random: () => number, depth = 0): string => {
       () => "true",
       () => "false",
       () => "null",
-      () => JSON.stringify(["abc", "é", "😀 x", '"q"', "\\", "\n\t", "\u0001", ""][Math.floor(random() * 8)]),
+      () => Formatter.formatJson(["abc", "é", "😀 x", '"q"', "\\", "\n\t", "\u0001", ""][Math.floor(random() * 8)]),
       () => '"\\u00e9\\ud83d\\ude00\\/\\b"'
     ]
     return atoms[Math.floor(random() * atoms.length)]()
@@ -66,7 +64,7 @@ export const randomJson = (random: () => number, depth = 0): string => {
   }
   const members = Array.from(
     { length: n },
-    (_, i) => `${JSON.stringify(`k${i}é`)}${ws()}:${ws()}${randomJson(random, depth + 1)}`
+    (_, i) => `${Formatter.formatJson(`k${i}é`)}${ws()}:${ws()}${randomJson(random, depth + 1)}`
   )
   return `{${ws()}${members.join(`${ws()},${ws()}`)}${ws()}}`
 }

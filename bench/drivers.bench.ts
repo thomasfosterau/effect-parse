@@ -9,12 +9,13 @@
  * Run with `pnpm build && pnpm bench:drivers`.
  */
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
 import { Ascii, Compiler, Input, Parser, ParserStream, Token } from "@thomasfosterau/effect-parse"
 
 /** Runs every case once, in order, keeping each one's best time. */
-const round = (cases: Record<string, () => unknown>, names: ReadonlyArray<string>, best: Map<string, number>) => {
+const round = (cases: Record<string, () => void>, names: ReadonlyArray<string>, best: Map<string, number>) => {
   for (const n of names) {
     const start = performance.now()
     cases[n]()
@@ -22,7 +23,7 @@ const round = (cases: Record<string, () => unknown>, names: ReadonlyArray<string
   }
 }
 
-const report = (title: string, cases: Record<string, () => unknown>, rounds = 30): void => {
+const report = (title: string, cases: Record<string, () => void>, rounds = 30): void => {
   const names = Object.keys(cases)
   const orders = [names, [...names].reverse()]
   Array.from({ length: 5 }, () => round(cases, names, new Map()))
@@ -68,6 +69,17 @@ const byRun = (partial: boolean) => (): number => {
   return n
 }
 
+// Its own function literal, so that its call site sees only the runner
+const next = Compiler.runner(compiled)
+const byRunner = (): number => {
+  let n = 0
+  for (let pos = 0; pos < state.end; n++) {
+    if (next(state.reset(pos)) === Input.Fail) break
+    pos = state.pos
+  }
+  return n
+}
+
 const byParsePartial = (): number => {
   let n = 0
   for (let offset = 0; offset < source.length; n++) {
@@ -82,7 +94,8 @@ report(`lexer, ${source.length / 1000} K characters, one token per run`, {
   "step + State.reset (interpreted)": byStep,
   "parsePartial with offset (compiled)": byParsePartial,
   "Parser.run + State.reset (compiled)": byRun(false),
-  "Parser.run + State.reset, partial": byRun(true)
+  "Parser.run + State.reset, partial": byRun(true),
+  "Compiler.runner + State.reset (compiled)": byRunner
 })
 
 // -----------------------------------------------------------------------------
@@ -172,4 +185,176 @@ const viaPredicate = statements(predicate)
 report(`token array, ${tokens.length / 1000} K tokens`, {
   "Parser.make tokens": () => Parser.parseSync(viaMake, tokens),
   "Token.oneOf(predicate)": () => Parser.parseSync(viaPredicate, tokens)
+})
+
+// -----------------------------------------------------------------------------
+// A check on every token: tryMap / filterMap against mapOrFail (#66)
+// -----------------------------------------------------------------------------
+
+const word = Token.takeWhile(Ascii.isAlpha, { min: 1 })
+const words = <E>(check: Parser.Parser<string, E>) => Compiler.jit(Parser.separated(check, Token.literal(" ")))
+
+/**
+ * A check like a markup lexer's (is every character allowed here?). Here
+ * V8 inlines the callbacks and removes the `Result` / `Option` they return,
+ * so the three forms cost the same. In a large grammar, which exhausts
+ * V8's inlining budget, the wrapper is really allocated: run with
+ * `node --no-turbo-escape` to see that case, where `mapOrFail` is about
+ * 1.3x faster than `tryMap` (15.5 ms, 16.6 ms and 11.8 ms on the machine
+ * that wrote this).
+ */
+/** Whether a unit is a control character, `&` or `<`. */
+const isMarkup = (c: number): boolean => c < 0x20 || c === 0x26 || c === 0x3c || (c >= 0x80 && c <= 0x9f)
+/** Whether a unit is a surrogate or a noncharacter. */
+const isNonText = (c: number): boolean =>
+  (c >= 0xd800 && c <= 0xdfff) || c === 0xfffe || c === 0xffff || (c >= 0xfdd0 && c <= 0xfdef)
+/** Whether a word containing the unit may not appear in XML text. */
+const isBadUnit = (c: number): boolean => isMarkup(c) || isNonText(c)
+const check =
+  <B>(ok: (w: string) => B, bad: (w: string) => B) =>
+  (w: string): B => {
+    for (let i = 0; i < w.length; i++) if (isBadUnit(w.charCodeAt(i))) return bad(w)
+    return ok(w)
+  }
+const viaTryMap = words(
+  word.pipe(
+    Parser.tryMap(
+      check<Result.Result<string, number>>(
+        (w) => Result.succeed(w),
+        (w) => Result.fail(w.length)
+      )
+    )
+  )
+)
+const viaFilterMap = words(
+  word.pipe(
+    Parser.filterMap(
+      check<Option.Option<string>>(
+        (w) => Option.some(w),
+        () => Option.none()
+      )
+    )
+  )
+)
+const viaMapOrFail = words(
+  word.pipe(
+    Parser.mapOrFail(
+      check(
+        (w): string | Input.Fail => w,
+        () => Input.Fail
+      ),
+      (w) => w.length
+    )
+  )
+)
+const prose2 = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do ".repeat(20_000).trimEnd()
+
+report(`a check on every word, ${prose2.length / 1000} K characters`, {
+  tryMap: () => Parser.parseSync(viaTryMap, prose2),
+  filterMap: () => Parser.parseSync(viaFilterMap, prose2),
+  mapOrFail: () => Parser.parseSync(viaMapOrFail, prose2)
+})
+
+// -----------------------------------------------------------------------------
+// A lexer that records spans: withSpan against mapSpan (#64)
+// -----------------------------------------------------------------------------
+
+const text = Parser.terminated(Token.takeTill("<"), Token.literal("<"))
+const runs = "hello world<".repeat(100_000)
+const runsState = new Input.State(runs)
+/** One token per `Parser.run`, as a markup lexer reads text runs. */
+const lex = (p: Parser.Parser<number>) => (): number => {
+  let n = 0
+  for (let pos = 0; pos < runsState.end; n++) {
+    if (Parser.run(p, runsState.reset(pos, { partial: true })) === Input.Fail) break
+    pos = runsState.pos
+  }
+  return n
+}
+
+// With V8's escape analysis the tuple and span are removed and the three
+// cost the same; in a grammar past the inlining budget (`node
+// --no-turbo-escape`) mapSpan saves the two allocations, about 10%.
+report(`text runs with spans, ${runs.length / 1000} K characters, one token per run`, {
+  "map(withSpan(p))": lex(Compiler.jit(Parser.map(Parser.withSpan(text), ([v, s]) => v.length + s.end - s.start))),
+  "struct of locations": lex(
+    Compiler.jit(
+      Parser.map(Parser.struct({ s: Parser.location, a: text, e: Parser.location }), (r) => r.a.length + r.e - r.s)
+    )
+  ),
+  mapSpan: lex(Compiler.jit(Parser.mapSpan(text, (v, start, end) => v.length + end - start)))
+})
+
+// -----------------------------------------------------------------------------
+// Runs up to a stop character: takeTill on CSV-shaped input (#75)
+// -----------------------------------------------------------------------------
+
+/** Fields of the given length, quoted (`takeTill('"')`) and unquoted (`takeTill(",\r\n")`). */
+const fieldsOf = (length: number) => {
+  const field = "x".repeat(length)
+  const rows = Array.from({ length: Math.ceil(400_000 / (length + 3)) }, (_, i) => (i % 8 === 7 ? "\r\n" : ","))
+  return {
+    quoted: rows.map((sep) => `"${field}"${sep}`).join(""),
+    plain: rows.map((sep) => `${field}${sep}`).join("")
+  }
+}
+const quotedField = Compiler.jit(
+  Parser.repeat(
+    Parser.terminated(
+      Parser.delimited(Token.literal('"'), Token.takeTill('"'), Token.literal('"')),
+      Token.takeWhile(",\r\n", { min: 1 })
+    )
+  )
+)
+const plainField = Compiler.jit(
+  Parser.repeat(Parser.terminated(Token.takeTill(",\r\n", { min: 1 }), Token.takeWhile(",\r\n", { min: 1 })))
+)
+for (const length of [4, 16, 32, 64, 256]) {
+  const { plain, quoted } = fieldsOf(length)
+  report(`fields of ${length} characters, ${(quoted.length / 1000).toFixed(0)} K characters`, {
+    "takeTill('\"'), quoted": () => Parser.parseSync(quotedField, quoted),
+    'takeTill(",\\r\\n"), unquoted': () => Parser.parseSync(plainField, plain)
+  })
+}
+
+// -----------------------------------------------------------------------------
+// A name-like terminal: a repetition of a shared character alternative (#79)
+// -----------------------------------------------------------------------------
+
+const nameChar = Token.oneOf<string>([Token.range("a", "z"), Token.range("0", "9"), "_"])
+const escapeSeq = Parser.seq(Token.literal("%"), Token.takeWhile(Ascii.isHexDigit, 2))
+const charsShared = Parser.alt(nameChar, escapeSeq)
+const nameNatural = Compiler.jit(
+  Parser.separated(
+    Parser.taken(
+      Parser.repeat(
+        Parser.alt(
+          Parser.repeat(charsShared, { min: 1 }),
+          Parser.seq(Token.takeWhile(".", { min: 1 }), Parser.peek(charsShared))
+        ),
+        { min: 1 }
+      )
+    ),
+    Token.literal(" ")
+  )
+)
+const nameByHand = Compiler.jit(
+  Parser.separated(
+    Parser.taken(
+      Parser.repeat(
+        Parser.alt(
+          Token.takeWhile([Token.range("a", "z"), Token.range("0", "9"), "_"], { min: 1 }),
+          escapeSeq,
+          Parser.seq(Token.takeWhile(".", { min: 1 }), Parser.peek(charsShared))
+        ),
+        { min: 1 }
+      )
+    ),
+    Token.literal(" ")
+  )
+)
+const names = Array.from({ length: 20_000 }, (_, i) => `name_${i}.part%20two.and_some_more_text_${i % 97}`).join(" ")
+report(`names of ~45 characters, ${(names.length / 1000).toFixed(0)} K characters`, {
+  "repeat(alt(oneOf(set), escape)), shared": () => Parser.parseSync(nameNatural, names),
+  "takeWhile(set) by hand": () => Parser.parseSync(nameByHand, names)
 })

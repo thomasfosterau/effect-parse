@@ -41,7 +41,9 @@ type Backend = (typeof backends)[number]
 
 /** A separate parser object per backend, since compilation is per parser. */
 const variant = <P extends Parser.Parser.Any>(p: P, backend: Backend): P => {
+  // SAFETY: `named` returns a copy of `p` with the same step and description, so the same parser type
   const copy = Parser.named(p, p.name ?? "json") as P
+  // SAFETY: `Compiler.jit` and `Compiler.closure` return the parser they are given
   return backend === "interpreted" ? copy : (Compiler[backend](copy) as P)
 }
 
@@ -71,6 +73,7 @@ let turn = 0
 
 for (const [group, grammar, input] of grammars) {
   for (const backend of backends) {
+    // SAFETY: the grammars differ only in their input type, and each runs on its own input
     const p = variant(grammar as Parser.Parser<unknown, never, never, any>, backend)
     const inputs = [input, twin(input)]
     cases.push({ group, name: backend, run: () => Parser.parseSync(p, inputs[turn++ & 1]) })

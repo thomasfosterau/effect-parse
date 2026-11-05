@@ -1,5 +1,3 @@
-// fallow-ignore-file duplicate-export -- `End` and `scan` here are the token-set versions of the text
-// helpers in ./text.ts; both are internal modules, imported by path, never re-exported from one barrel.
 import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import type { Input, State } from "../Input.js"
@@ -22,7 +20,7 @@ export interface TokenRangeLike {
   readonly to: string | number
 }
 
-const isRange = (u: unknown): u is TokenRangeLike => Predicate.isObjectOrArray(u) && (u as any)._tag === "TokenRange"
+const isRange = (u: unknown): u is TokenRangeLike => Predicate.isObjectOrArray(u) && Predicate.isTagged(u, "TokenRange")
 
 const toCode = (u: string | number): number => (Predicate.isNumber(u) ? u : firstCodePoint(u))
 
@@ -67,7 +65,10 @@ const compileCode = (u: unknown): ((code: number) => boolean) => {
     return bitmap(codes)
   }
   if (Predicate.isNumber(u)) return (x) => x === u
-  if (Predicate.isFunction(u)) return u as (code: number) => boolean
+  if (Predicate.isFunction(u)) {
+    // SAFETY: a predicate compiled for codes is a byte, code point or `codePoints` predicate (`compile` wraps string predicates first)
+    return u as (code: number) => boolean
+  }
   if (u instanceof Uint8Array) return bitmap(Array.from(u))
   if (isRange(u)) {
     const from = toCode(u.from)
@@ -98,7 +99,10 @@ const bitmap = (codes: ReadonlyArray<number>): ((code: number) => boolean) => {
 }
 
 const compileToken = (u: unknown): ((token: unknown) => boolean) => {
-  if (Predicate.isFunction(u)) return u as (token: unknown) => boolean
+  if (Predicate.isFunction(u)) {
+    // SAFETY: a predicate in an array input's token set takes the array's elements, the tokens tested here
+    return u as (token: unknown) => boolean
+  }
   if (Array.isArray(u)) {
     const set = new Set(u)
     return (t) => set.has(t)
@@ -130,8 +134,13 @@ export const codePointPredicate = <F extends (c: never) => boolean>(
   ranges?: ReadonlyArray<readonly [number, number]>
 ): F => {
   Object.defineProperty(f, "name", { value: name })
-  ;(f as any)[CodePointPredicate] = true
-  if (ranges !== undefined) (f as any)[PredicateRanges] = ranges
+  // SAFETY: `f` is a function object, which takes new properties; the intersection only names the two markers set here
+  const marked = f as F & {
+    [CodePointPredicate]?: true
+    [PredicateRanges]?: ReadonlyArray<readonly [number, number]>
+  }
+  marked[CodePointPredicate] = true
+  if (ranges !== undefined) marked[PredicateRanges] = ranges
   return f
 }
 
@@ -144,6 +153,7 @@ export const compile = (set: unknown, kind: "string" | "code" = "code"): Matcher
   const description = describeSet(set)
   let code: (code: number) => boolean
   if (Predicate.isFunction(set) && kind === "string" && !(CodePointPredicate in set)) {
+    // SAFETY: an unmarked predicate in a string token set takes each character as a string (`StringTokenSet`)
     const pred = set as (c: string) => boolean
     code = (x) => pred(charOf(x))
   } else {
@@ -227,6 +237,7 @@ const compileAnyImpl = (set: unknown): AnyMatcher => {
  */
 export const splitSurrogate = (state: State<Input>, i: number): boolean => {
   if (!state.partial || i !== state.end - 1) return false
+  // SAFETY: called only on string input (the `inputKind === 0` paths of `nextIf`, `scan`, `advance` and `Token.any`)
   const c = (state.input as string).charCodeAt(i)
   return c >= 0xd800 && c <= 0xdbff
 }
@@ -253,6 +264,7 @@ export const nextIf = (state: State<Input>, m: AnyMatcher, negate: boolean): unk
   if (pos >= state.end) return End
   switch (state.inputKind) {
     case 0: {
+      // SAFETY: `inputKind` 0 is set only for a string input
       const s = state.input as string
       if (splitSurrogate(state, pos)) return End
       const cp = codePointAt(s, pos)
@@ -262,12 +274,14 @@ export const nextIf = (state: State<Input>, m: AnyMatcher, negate: boolean): unk
       return len === 1 ? s[pos] : s.slice(pos, pos + 2)
     }
     case 1: {
+      // SAFETY: `inputKind` 1 is set only for a `Uint8Array` input
       const b = (state.input as Uint8Array)[pos]
       if (m.forCode.code(b) === negate) return NoMatch
       state.pos = pos + 1
       return b
     }
     default: {
+      // SAFETY: `inputKind` 2 is set for every input that is neither a string nor a `Uint8Array`, an array
       const t = (state.input as ReadonlyArray<unknown>)[pos]
       if (m.forCode.token(t) === negate) return NoMatch
       state.pos = pos + 1
@@ -282,10 +296,32 @@ export interface Scanned extends Advanced {
   readonly hitEnd: boolean
 }
 
+/** The one record {@link scan} fills; see there. */
+class ScanResult implements Scanned {
+  offset = 0
+  count = 0
+  hitEnd = false
+}
+
+const scanned = /*#__PURE__*/ new ScanResult()
+
+/** Fills {@link scanned} and returns it. */
+const scannedAt = (offset: number, count: number, hitEnd: boolean): Scanned => {
+  scanned.offset = offset
+  scanned.count = count
+  scanned.hitEnd = hitEnd
+  return scanned
+}
+
 /**
  * Scans forward while tokens satisfy the matcher (xor `negate`), up to `max`
  * tokens. Returns the offset reached, the number of tokens matched, and
  * whether the end of input was hit before `max` tokens.
+ *
+ * The result is one shared record, overwritten by the next scan: read it
+ * before running anything else. Allocating one per call cost the
+ * interpreter a record per token, since `scan` (shared by every `takeWhile`)
+ * is too polymorphic for V8 to inline and remove it.
  */
 export const scan = (state: State<Input>, m: AnyMatcher, negate: boolean, max: number): Scanned => {
   let i = state.pos
@@ -293,45 +329,48 @@ export const scan = (state: State<Input>, m: AnyMatcher, negate: boolean, max: n
   let count = 0
   switch (state.inputKind) {
     case 0: {
+      // SAFETY: `inputKind` 0 is set only for a string input
       const s = state.input as string
       const test = m.forString.code
       while (count < max) {
-        if (i >= end) return { offset: i, count, hitEnd: true }
+        if (i >= end) return scannedAt(i, count, true)
         const c = s.charCodeAt(i)
         if (c < 0xd800 || c > 0xdbff) {
           if (test(c) === negate) break
           i++
         } else {
-          if (splitSurrogate(state, i)) return { offset: i, count, hitEnd: true }
+          if (splitSurrogate(state, i)) return scannedAt(i, count, true)
           const cp = codePointAt(s, i)
           if (test(cp) === negate) break
           i += cp > 0xffff ? 2 : 1
         }
         count++
       }
-      return { offset: i, count, hitEnd: false }
+      return scannedAt(i, count, false)
     }
     case 1: {
+      // SAFETY: `inputKind` 1 is set only for a `Uint8Array` input
       const bytes = state.input as Uint8Array
       const test = m.forCode.code
       while (count < max) {
-        if (i >= end) return { offset: i, count, hitEnd: true }
+        if (i >= end) return scannedAt(i, count, true)
         if (test(bytes[i]) === negate) break
         i++
         count++
       }
-      return { offset: i, count, hitEnd: false }
+      return scannedAt(i, count, false)
     }
     default: {
+      // SAFETY: `inputKind` 2 is set for every input that is neither a string nor a `Uint8Array`, an array
       const arr = state.input as ReadonlyArray<unknown>
       const test = m.forCode.token
       while (count < max) {
-        if (i >= end) return { offset: i, count, hitEnd: true }
+        if (i >= end) return scannedAt(i, count, true)
         if (test(arr[i]) === negate) break
         i++
         count++
       }
-      return { offset: i, count, hitEnd: false }
+      return scannedAt(i, count, false)
     }
   }
 }
@@ -348,6 +387,7 @@ export const advance = (state: State<Input>, start: number, n: number): Advanced
     const offset = Math.min(state.end, start + n)
     return { offset, count: offset - start }
   }
+  // SAFETY: the other input kinds returned above, and `inputKind` 0 is set only for a string input
   const s = state.input as string
   let i = start
   let count = 0
@@ -363,6 +403,7 @@ export const advance = (state: State<Input>, start: number, n: number): Advanced
 /** Counts tokens between two offsets. */
 export const countTokens = (state: State<Input>, start: number, end: number): number => {
   if (state.inputKind !== 0) return end - start
+  // SAFETY: the other input kinds returned above, and `inputKind` 0 is set only for a string input
   const s = state.input as string
   let count = 0
   for (let i = start; i < end; i++) {
@@ -380,11 +421,14 @@ export const indexOf = (state: State<Input>, needle: Input, from: number): numbe
   if (from > last) return -1
   switch (state.inputKind) {
     case 0: {
+      // SAFETY: `inputKind` 0 is set only for a string input, and the callers' types give the needle the input's kind
       const i = (state.input as string).indexOf(needle as string, from)
       return i <= last ? i : -1
     }
     case 1: {
+      // SAFETY: `inputKind` 1 is set only for a `Uint8Array` input
       const hay = state.input as Uint8Array
+      // SAFETY: the callers' types give the needle the input's kind (`Text` encodes it for byte input)
       const n = needle as Uint8Array
       if (n.byteLength === 0) return from
       const first = n[0]
@@ -398,7 +442,9 @@ export const indexOf = (state: State<Input>, needle: Input, from: number): numbe
       return -1
     }
     default: {
+      // SAFETY: `inputKind` 2 is set for every input that is neither a string nor a `Uint8Array`, an array
       const hay = state.input as ReadonlyArray<unknown>
+      // SAFETY: the callers' types give the needle the input's kind, an array of the same element type
       const n = needle as ReadonlyArray<unknown>
       outer: for (let i = from; i <= last; i++) {
         for (let j = 0; j < n.length; j++) if (hay[i + j] !== n[j]) continue outer
@@ -428,7 +474,9 @@ const match = (state: State<Input>, lit: Input, caseless: boolean): number => {
   const n = Math.min(len, avail)
   switch (state.inputKind) {
     case 0: {
+      // SAFETY: `inputKind` 0 is set only for a string input
       const s = state.input as string
+      // SAFETY: the callers' types give the literal the input's kind (`Token.literal` encodes a string literal for byte input)
       const l = lit as string
       if (!caseless) {
         if (avail >= len) return s.startsWith(l, pos) ? len : -1
@@ -440,7 +488,9 @@ const match = (state: State<Input>, lit: Input, caseless: boolean): number => {
       return n === len ? len : -2
     }
     case 1: {
+      // SAFETY: `inputKind` 1 is set only for a `Uint8Array` input
       const b = state.input as Uint8Array
+      // SAFETY: the callers' types give the literal the input's kind (`Token.literal` and `Text` encode string literals for byte input)
       const l = lit as Uint8Array
       for (let i = 0; i < n; i++) {
         const x = b[pos + i]
@@ -450,7 +500,9 @@ const match = (state: State<Input>, lit: Input, caseless: boolean): number => {
       return n === len ? len : -2
     }
     default: {
+      // SAFETY: `inputKind` 2 is set for every input that is neither a string nor a `Uint8Array`, an array
       const a = state.input as ReadonlyArray<unknown>
+      // SAFETY: the callers' types give the literal the input's kind, an array of the same element type
       const l = lit as ReadonlyArray<unknown>
       for (let i = 0; i < n; i++) if (a[pos + i] !== l[i]) return -1
       return n === len ? len : -2

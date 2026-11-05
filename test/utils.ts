@@ -1,4 +1,6 @@
+import * as Formatter from "effect/Formatter"
 import * as Result from "effect/Result"
+
 import { assert, expect } from "vite-plus/test"
 import type { Input, Parser, ParseError } from "../src/index.js"
 import { Parser as P } from "../src/index.js"
@@ -23,7 +25,7 @@ export const expectFailure = <A, E, I extends Input.Input>(
 ): ParseError.ParseError<E> => {
   const result = P.parse(parser, input)
   if (Result.isSuccess(result)) {
-    return assert.fail(`expected failure, got: ${JSON.stringify(result.success)}`)
+    return assert.fail(`expected failure, got: ${Formatter.format(result.success)}`)
   }
   return result.failure
 }
@@ -37,3 +39,19 @@ export const defined = <A>(value: A | undefined): A => {
 /** nom-style: returns `[remaining, output]`. */
 export const peek = <A, E, I extends Input.Input>(parser: Parser.Parser<A, E, never, I>, input: NoInfer<I>) =>
   Result.mapError(P.parsePeek(parser, input), (e) => e.message)
+
+const notA = /[^a]/g
+
+/**
+ * A fast path (see `Parser.withFastPath`) for `terminated(takeWhile("a", { min: 1 }), literal("b"))`:
+ * a run of "a"s followed by a "b". It defers an empty run, a run not followed by "b", and a run that
+ * reaches the end (where a partial input may continue it).
+ */
+export const runOfAs = (state: Input.State<string>): string | typeof P.Defer => {
+  notA.lastIndex = state.pos
+  const i = notA.test(state.input) ? notA.lastIndex - 1 : state.input.length
+  if (i === state.pos || i >= state.end || state.input.charCodeAt(i) !== 98) return P.Defer
+  const value = state.input.slice(state.pos, i)
+  state.pos = i + 1
+  return value
+}

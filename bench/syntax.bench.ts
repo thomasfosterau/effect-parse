@@ -30,7 +30,7 @@ const tree = Syntax.parse(json, doc)
 const middle = doc.indexOf('"item 1000"') + 6
 const keystrokes = "hello world"
 
-const time = (run: () => unknown, rounds: number): number => {
+const time = (run: () => void, rounds: number): number => {
   let best = Infinity
   for (let i = 0; i < rounds; i++) {
     const start = performance.now()
@@ -40,7 +40,7 @@ const time = (run: () => unknown, rounds: number): number => {
   return best
 }
 
-const cases: ReadonlyArray<readonly [string, () => unknown]> = [
+const cases: ReadonlyArray<readonly [string, () => void]> = [
   ["Parser.parse (interpreted, value only)", () => Parser.parseSync(json, doc)],
   ["Syntax.parse (tree and value)", () => Syntax.parse(json, doc)],
   ["reparse: change a character", () => Syntax.replace(tree, middle, middle + 1, "X")],

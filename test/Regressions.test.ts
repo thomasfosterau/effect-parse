@@ -83,7 +83,7 @@ describe("takeUntil stops at State.end (#30)", () => {
       return out
     })
 
-  const expectWithin = <A>(p: Parser.Parser<A, never, never, any>, input: any, expected: unknown) =>
+  const expectWithin = <A>(p: Parser.Parser<A, never, never, any>, input: any, expected: A) =>
     expect(Result.map(peek(p, input), ([, a]) => a)).toEqual(Result.succeed(expected))
 
   it("does not match a literal past the end of a narrowed region", () => {

@@ -5,6 +5,7 @@
  * started (for precise errors), `escaped` for string escapes, and
  * `expected` to name grammar rules in error messages.
  */
+import * as Record from "effect/Record"
 import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
 
 export type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
@@ -82,7 +83,7 @@ const object: Parser.Parser<{ readonly [key: string]: Json }> = Parser.preceded(
   lexeme(literal("{")),
   Parser.cut(Parser.terminated(Parser.separated(member, comma), literal("}")))
 ).pipe(
-  Parser.map((members) => Object.fromEntries(members)),
+  Parser.map((members) => Record.fromEntries(members)),
   Parser.context("object")
 )
 

@@ -8,6 +8,7 @@
  * `ERROR` node, and the rest of the document still parses. The grammar's
  * output is the JSON value, without the elements that failed.
  */
+import * as Record from "effect/Record"
 import * as Option from "effect/Option"
 import { Ascii, Parser, Syntax, Token } from "@thomasfosterau/effect-parse"
 import type { Json } from "./json.js"
@@ -114,7 +115,7 @@ const object: Parser.Parser<{ readonly [key: string]: Json }> = Syntax.node(
         Syntax.token(Token.literal("}"))
       )
     )
-  ).pipe(Parser.map((members) => Object.fromEntries(members))),
+  ).pipe(Parser.map((members) => Record.fromEntries(members))),
   "object"
 )
 

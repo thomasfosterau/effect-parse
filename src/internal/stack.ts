@@ -36,6 +36,13 @@ export const run = <S extends State<any>, A>(step: (state: S) => A, state: S): A
     return step(state)
   } catch (e) {
     if (!isStackOverflow(e)) throw e
-    return state.failMessage("Cut", "TooDeep", tooDeepMessage)
+    return tooDeep(state)
   }
 }
+
+/**
+ * Records the `TooDeep` failure of a call-stack overflow. The JIT's
+ * generated entry catches overflows itself, with this, so that the runners
+ * can call it without {@link run}.
+ */
+export const tooDeep = (state: State<any>): Fail => state.failMessage("Cut", "TooDeep", tooDeepMessage)

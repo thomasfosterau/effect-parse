@@ -36,7 +36,9 @@
  * **Results and errors are unchanged.** Compiled code records no
  * diagnostics. When it fails, the parser runs again, interpreted, from the
  * same offset, so every `ParseError` (offset, expected, context, cause and
- * message) is exactly the one the interpreter reports.
+ * message) is exactly the one the interpreter reports. Running out of
+ * partial input is not a failure that needs it: compiled code reports
+ * `Incomplete` where the interpreter does, with the same `needed`.
  *
  * **Callbacks should be pure.** On an input that fails, the callbacks given
  * to `map`, `filter`, `tryMap`, `tap`, `fold`, ... may run twice, once
@@ -45,20 +47,24 @@
  * nor those of a branch that is certain to fail, and token-set predicates
  * may be called once per character code and cached.
  *
- * `Parser.parsePartial` and `ParserStream.parseAll` run a build that
- * handles partial input. `ParserStream.parseMany`, `Parser.parseRecoverable`
- * and runs with the `trace` option are always interpreted. Parsers that
+ * `Parser.parsePartial`, `ParserStream.parseAll` and
+ * `ParserStream.parseMany` run a build that handles partial input;
+ * `parseMany` runs it once per value and parses a value again, interpreted,
+ * only when it fails. `Parser.parseRecoverable`, `Syntax`
+ * parses and runs with the `trace` option are always interpreted. Parsers that
  * can't be described, such as `Parser.make` and `Parser.gen`, run
- * interpreted inside compiled code.
+ * interpreted inside compiled code; the parsers given to a
+ * `Parser.combinator` compile, and its step is built from theirs.
  *
  * @since 0.2.0
  */
-import type { Input } from "./Input.js"
-import type { Parser } from "./Parser.js"
+import type { Fail, Input, State } from "./Input.js"
+import type { Parser, RunOptions } from "./Parser.js"
 import { backend as closureBackend } from "./internal/compiler/closure.js"
 import { backend as jitBackend } from "./internal/compiler/jit.js"
 import { register } from "./internal/compiler/registry.js"
 import { backend as wasmBackend } from "./internal/compiler/wasm.js"
+import { prepare } from "./internal/run.js"
 
 /**
  * Compiles a parser with the WebAssembly compiler. Returns the same parser.
@@ -134,3 +140,50 @@ export const closure = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Par
   register(self, closureBackend)
   return self
 }
+
+/**
+ * Prepares a parser for running many times on states you own, as
+ * `Parser.run` does: for drivers that make one small run per token, such as
+ * a lexer over a buffer. `Parser.run` looks the parser's compiled form up
+ * on every run, which costs about a quarter of a small token's time; the
+ * function returned here looks it up once (again only when the input kind
+ * changes, or between complete and partial states) and calls the compiled
+ * code directly.
+ *
+ * It returns exactly what `Parser.run(self, state, options)` returns, and
+ * leaves the state as it would: the output with the cursor where the
+ * parser stopped, or `Fail` with the interpreter's failure (or, with
+ * `diagnostics: false`, only the mode). Compile the parser first with
+ * {@link jit} or {@link closure}; a parser that isn't compiled runs
+ * interpreted. The compiled form is looked up on the first run, so compile
+ * the parser before using the runner: compiling it again later doesn't
+ * reach a runner that has already run.
+ *
+ * @example
+ * ```ts
+ * import { Ascii, Compiler, Input, Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * const token = Compiler.jit(Parser.preceded(Ascii.space0, Parser.alt(Ascii.alpha1, Token.oneOf("+-"))))
+ * const next = Compiler.runner(token)
+ *
+ * const tokens = (text: string): Array<string> => {
+ *   const state = new Input.State(text)
+ *   const out: Array<string> = []
+ *   while (state.pos < state.end) {
+ *     const t = next(state.reset(state.pos))
+ *     if (t === Input.Fail) break
+ *     out.push(t)
+ *   }
+ *   return out
+ * }
+ *
+ * tokens("a + b") // ["a", "+", "b"]
+ * ```
+ *
+ * @since 0.5.0
+ * @category running
+ */
+export const runner = <A, E, R, I extends Input>(
+  self: Parser<A, E, R, I>,
+  options?: RunOptions
+): ((state: State<I>) => A | Fail) => prepare(self, self.step, options?.diagnostics !== false)

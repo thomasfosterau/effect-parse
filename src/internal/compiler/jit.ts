@@ -1,5 +1,3 @@
-// fallow-ignore-file duplicate-export -- every compiler module exports its `backend` under the same name,
-// which the Compiler module imports by path; no barrel re-exports both.
 /**
  * The JIT: emits JavaScript source for a parser's description and builds
  * it with `new Function`.
@@ -23,14 +21,27 @@ import * as Result from "effect/Result"
 import type { Encoding } from "../../Encoding.js"
 import type { State } from "../../Input.js"
 import { Fail } from "../../Input.js"
-import type { NodeOf, ParserLike } from "../node.js"
+import type { Node, NodeOf, ParserLike } from "../node.js"
 import { addEntry, flushEntries, fromEntries, isPlainKey } from "../entries.js"
-import { nodeOf, scansFloat } from "../node.js"
+import { Defer, NodeId, nodeOf, scansFloat } from "../node.js"
 import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from "../numbers.js"
 import { compileAny } from "../tokens.js"
 import { Key } from "../key.js"
 import * as Resume from "../resume.js"
-import { charOf, fastLimit, latin1, string, utf16be, utf16le, utf8, validate } from "../text.js"
+import * as Stack from "../stack.js"
+import {
+  ShortText,
+  charOf,
+  fastLimit,
+  latin1,
+  string,
+  textIn,
+  utf16be,
+  utf16le,
+  utf8,
+  utf8Text,
+  validate
+} from "../text.js"
 import type { ClosureCompiler, CompiledRoot, Fallback, Step } from "./closure.js"
 import { backend as closureBackend, createClosureCompiler } from "./closure.js"
 import { buildsEntries, pairOf } from "./entries.js"
@@ -40,15 +51,20 @@ import type { First } from "./first.js"
 import { planAlt, Strict } from "./first.js"
 import type { CharSet } from "./sets.js"
 import { acceptTable, kindOfEncoding, reachesAbove, TableSize, textSet, tokenSet } from "./sets.js"
+import { nextStop, SearchHead, StopCache, stopChars } from "./search.js"
 
 /** Helpers available to generated code as `R`. */
 const runtime = {
+  StopCache,
+  nextStop,
   take: Resume.take,
   save: Resume.save,
   Done: Resume.Done,
   /** Records the result of a resumed repetition (see `Resume.done`). */
   done: (state: State<any>, key: Key, entry: number, value: unknown, pos: number): void =>
     Resume.save(state, key, entry, new Resume.Done(value, pos)),
+  isStackOverflow: Stack.isStackOverflow,
+  tooDeep: Stack.tooDeep,
   some: Option.some,
   none: Option.none,
   charOf,
@@ -58,17 +74,20 @@ const runtime = {
   addEntry,
   flushEntries,
   /** `Text.taken`: the text of `[start, end)`, or `Fail` if it is malformed. */
-  textOf: (enc: Encoding<any>, fast: number, s: State<any>, start: number, end: number): unknown => {
+  textOf: (enc: Encoding<any>, fast: number, s: State<any>, start: number, end: number): string | typeof Fail => {
     const input = s.input
     let i = start
+    // SAFETY: input kind 0 is a string input
     if (s.inputKind === 0) while (i < end && (input as string).charCodeAt(i) < fast) i++
+    // SAFETY: `Text` parsers are compiled natively, and so call this, on string (0) and byte (1) inputs only
     else while (i < end && (input as Uint8Array)[i] < fast) i++
     if (i < end && validate(enc, s, i, end) < 0) {
       s.mode = "Backtrack"
       return Fail
     }
-    return enc.text(input, start, end)
-  }
+    return textIn(enc, s, start, end)
+  },
+  utf8Text
 }
 
 let checked: FunctionConstructor | undefined
@@ -192,6 +211,11 @@ interface Collect {
   readonly init: string
   readonly element: (fail: string, check: string) => string
   readonly finish: string
+  /** The variable holding the result. */
+  readonly value: string
+  /** In a resumable build: more fields of a checkpoint (`name:variable,`), and the code restoring them from `cp`. */
+  readonly saved: string
+  readonly restore: string
 }
 
 class Emitter {
@@ -224,6 +248,13 @@ class Emitter {
       this.constantIndex.set(value, i)
     }
     return `C[${i}]`
+  }
+
+  /** The text of `[start, p)` in `enc`: UTF-8 decodes through the state's ASCII run (see `utf8Text`). */
+  text(enc: Encoding<any>, start: string): string {
+    const text = `${this.const(enc.text)}(I,${start},p)`
+    // Short strings are built by hand, which no run helps
+    return enc === utf8 ? `(p-${start}>${ShortText}?R.utf8Text($S,${start},p):${text})` : text
   }
 
   /** A JavaScript literal for simple values, otherwise a constant. */
@@ -414,7 +445,8 @@ class Emitter {
       case "Eof":
         return (
           `if(p<E){${BT}${fail}}` +
-          (this.resumable ? `if($S.partial){$S.mode="Incomplete";${fail}}` : "") +
+          // `eof`'s own failure: `Incomplete`, needing one more unit
+          (this.resumable ? `if($S.partial){$S.incomplete(1);${fail}}` : "") +
           set("void 0")
         )
       case "Location":
@@ -445,8 +477,8 @@ class Emitter {
           const code = this.float(node, out, fail, fn, d)
           if (code !== undefined) return code
         }
-        // Streaming builds keep the array, which their checkpoints hold
-        if (node.f === fromEntries && out !== null && !this.resumable && buildsEntries(node.self)) {
+        // Streaming builds too: their checkpoints hold the object built so far
+        if (node.f === fromEntries && out !== null && buildsEntries(node.self)) {
           return this.entries(node.self, out, fail, fn, d)
         }
         const t = this.v(fn)
@@ -467,6 +499,22 @@ class Emitter {
           this.gen(node.self, true, t, fail, fn, d) +
           `${r}=${this.const(node.f)}(${t});if(${r}._tag!=="${tag}"){${BT}${fail}}${set(`${r}.${field}`)}`
         )
+      }
+      case "FastPath": {
+        // The fast path runs on the state; when it defers, the grammar runs from where it started
+        const st = this.v(fn)
+        const t = out ?? this.v(fn)
+        const done = this.label()
+        return (
+          `${st}=p;$S.pos=p;${t}=${this.const(node.fast)}($S);` +
+          `${done}:{if(${t}!==${this.const(Defer)}){p=$S.pos;break ${done}}p=${st};` +
+          `${this.gen(node.self, used, out, fail, fn, d)}}`
+        )
+      }
+      case "MapOrFail": {
+        const t = this.v(fn)
+        const r = out ?? this.v(fn)
+        return this.gen(node.self, true, t, fail, fn, d) + `${r}=${this.const(node.f)}(${t});if(${r}===F){${BT}${fail}}`
       }
       case "Filter": {
         const t = out ?? this.v(fn)
@@ -503,6 +551,12 @@ class Emitter {
         const extra = Predicate.isTagged(node, "WithSpan") ? `{start:${st},end:p}` : `$S.slice(${st},p)`
         return `${st}=p;` + this.gen(node.self, true, t, fail, fn, d) + set(`[${t},${extra}]`)
       }
+      case "MapSpan": {
+        if (!used) return this.gen(node.self, false, null, fail, fn, d)
+        const st = this.v(fn)
+        const t = this.v(fn)
+        return `${st}=p;` + this.gen(node.self, true, t, fail, fn, d) + set(`${this.const(node.f)}(${t},${st},p)`)
+      }
       case "Span": {
         const st = this.v(fn)
         return `${st}=p;` + this.gen(node.self, false, null, fail, fn, d) + set(`{start:${st},end:p}`)
@@ -517,6 +571,7 @@ class Emitter {
       }
       case "Context":
       case "Expected":
+      case "Quiet":
       case "MapError":
       case "OrFail":
       case "Trace":
@@ -565,6 +620,12 @@ class Emitter {
         }
         return code + `${out}={${node.keys.map((k, i) => `${JSON.stringify(k)}:${vars[i]}`).join(",")}};`
       }
+      case "SeqWith": {
+        if (out === null) return node.parsers.map((q) => this.gen(q, false, null, fail, fn, d)).join("")
+        const vars = node.parsers.map(() => this.v(fn))
+        const code = node.parsers.map((q, i) => this.gen(q, true, vars[i], fail, fn, d)).join("")
+        return code + `${out}=${this.const(node.f)}(${vars.join(",")});`
+      }
       case "ZipWith": {
         if (out === null)
           return this.gen(node.self, false, null, fail, fn, d) + this.gen(node.that, false, null, fail, fn, d)
@@ -581,10 +642,20 @@ class Emitter {
       case "Dispatch":
         return this.dispatch(p, node, used, out, fail, fn, d)
       case "Repeat":
-      case "Fold":
-        return this.repeat(node, used, out, fail, fn, d)
+      case "Fold": {
+        // A run of a character set whose characters are not kept is a `takeWhile` (#79)
+        const run =
+          out === null && Predicate.isTagged(node, "Repeat") ? this.repeatRun(p, node, fail, fn, d) : undefined
+        return run ?? this.repeat(node, used, out, fail, fn, d)
+      }
       case "Separated":
         return this.separated(node, used, out, fail, fn, d)
+      case "Fixed": {
+        // On bytes, read inline; at the end of the input, the step reports it
+        if (this.kind !== 1) return this.delegate(p, used, out, fail, fn)
+        const read = used ? `${out ?? this.v(fn)}=${this.const(node.read)}(I,p,$S);` : ""
+        return `if(E-p>=${node.size}){${read}p+=${node.size}}else{${this.delegate(p, used, out, fail, fn)}}`
+      }
       default:
         return this.delegate(p, used, out, fail, fn)
     }
@@ -684,7 +755,7 @@ class Emitter {
     // The cases are known: number them, and run the chosen one inline
     const cases = new Map<ParserLike, number>()
     for (const key of Reflect.ownKeys(node.cases)) {
-      const q = node.cases[key as any]
+      const q = node.cases[key]
       if (!cases.has(q)) cases.set(q, cases.size)
     }
     if (node.otherwise !== undefined && !cases.has(node.otherwise)) cases.set(node.otherwise, cases.size)
@@ -739,6 +810,55 @@ class Emitter {
     return code
   }
 
+  /**
+   * A repetition whose elements are not kept, rewritten to scan a run of a
+   * character set in one loop instead of one element at a time (#79):
+   *
+   * - `repeat(oneOf(S), range)` matches what `takeWhile(S, range)` matches,
+   *   stopping, failing and reporting `Incomplete` where it does, so it
+   *   compiles as that `takeWhile`, with the repetition's own step as the
+   *   fallback near the end of a partial input.
+   * - `repeat(alt(oneOf(S), ...rest))` with `min` at most 1 and no `max`
+   *   matches what `repeat(alt(takeWhile(S, { min: 1 }), ...rest))` matches:
+   *   a run of `S` is a run of one-character elements, and the counts that
+   *   differ only matter for other ranges. The first branch is a synthetic
+   *   `takeWhile` node; outside resumable builds, which never run its step.
+   *
+   * Returns `undefined` when neither applies.
+   */
+  private repeatRun(p: ParserLike, node: NodeOf<"Repeat">, fail: string, fn: Fn, d: number): string | undefined {
+    if (this.kind === 2) return undefined
+    const element = nodeOf(node.self)
+    if (Predicate.isTagged(element, "OneOf") && this.native(element.encoding)) {
+      const { encoding, negate, set } = element
+      return this.leaf(
+        p,
+        { _tag: "TakeWhile", set, negate, encoding, min: node.min, max: node.max },
+        false,
+        null,
+        fail,
+        fn
+      )
+    }
+    if (this.resumable || node.min > 1 || node.max !== Infinity || !Predicate.isTagged(element, "Alt")) return undefined
+    const [first, ...rest] = element.parsers
+    const head = first === undefined ? undefined : nodeOf(first)
+    if (
+      head === undefined ||
+      !Predicate.isTagged(head, "OneOf") ||
+      !this.native(head.encoding) ||
+      Arr.isReadonlyArrayEmpty(rest)
+    ) {
+      return undefined
+    }
+    const run = synthetic(
+      { _tag: "TakeWhile", set: head.set, negate: head.negate, encoding: head.encoding, min: 1, max: Infinity },
+      node.self.step
+    )
+    const alt = synthetic({ _tag: "Alt", parsers: [run, ...rest] }, node.self.step)
+    return this.repeat({ ...node, self: alt }, false, null, fail, fn, d)
+  }
+
   repeat(
     node: NodeOf<"Repeat"> | NodeOf<"Fold">,
     used: boolean,
@@ -754,7 +874,7 @@ class Emitter {
     const n = this.v(fn)
     const st = this.v(fn)
     const isFold = Predicate.isTagged(node, "Fold")
-    const cond = isFold ? (node as NodeOf<"Fold">).while : undefined
+    const cond = isFold ? node.while : undefined
     const keep = out !== null && used && collect === undefined
     // `while` needs the accumulator even when the output is unused
     const tracked = keep || cond !== undefined
@@ -764,8 +884,8 @@ class Emitter {
     let add = ""
     if (tracked) {
       if (isFold) {
-        init = `${acc}=${this.const((node as NodeOf<"Fold">).init)}();`
-        add = `${acc}=${this.const((node as NodeOf<"Fold">).f)}(${acc},${x});`
+        init = `${acc}=${this.const(node.init)}();`
+        add = `${acc}=${this.const(node.f)}(${acc},${x});`
       } else {
         init = `${acc}=[];`
         add = `${acc}.push(${x});`
@@ -774,11 +894,13 @@ class Emitter {
     const check = max === Infinity ? `if(p===${st}){$S.mode="Cut";${fail}}` : ""
     const bound = max === Infinity ? "" : `${n}<${max}`
     const r = this.resumable ? this.resumePoint(fn) : undefined
+    // A checkpoint holds the result so far: the accumulator, or what `collect` builds
+    const held = collect?.value ?? acc
     const save =
       r === undefined
         ? ""
-        : `if($S.mode==="Incomplete"&&$S.resume!==void 0)R.save($S,${r.key},${r.entry},{acc:${acc},count:${n},pos:${st}});`
-    // With `collect` (never in resumable builds), the element adds itself once the loop check passed
+        : `if($S.mode==="Incomplete"&&$S.resume!==void 0)R.save($S,${r.key},${r.entry},{acc:${held},${collect?.saved ?? ""}count:${n},pos:${st}});`
+    // With `collect`, the element adds itself once the loop check passed
     const element =
       collect === undefined
         ? `${this.gen(node.self, tracked, x, `break ${bad};`, fn, d)}${check}${add}`
@@ -790,7 +912,12 @@ class Emitter {
       `${bad}:{${element}continue ${loop};}` +
       `${save}if($S.mode!=="Backtrack"${min > 0 ? `||${n}<${min}` : ""}){${fail}}p=${st};break ${loop};}`
     if (r === undefined) return `${init}${n}=0;${body}${collect?.finish ?? ""}`
-    return r.wrap(acc, `${acc}=cp.acc;${n}=cp.count;p=cp.pos;`, `${init}${n}=0;`, body)
+    return r.wrap(
+      held,
+      `${held}=cp.acc;${collect?.restore ?? ""}${n}=cp.count;p=cp.pos;`,
+      `${init}${n}=0;`,
+      `${body}${collect?.finish ?? ""}`
+    )
   }
 
   /**
@@ -835,10 +962,12 @@ class Emitter {
     const loop = this.label()
     const push = keep ? `${acc}.push(${x});` : ""
     const r = this.resumable ? this.resumePoint(fn) : undefined
+    // A checkpoint holds the result so far: the accumulator, or what `collect` builds
+    const held = collect?.value ?? acc
     const save =
       r === undefined
         ? ""
-        : `if($S.mode==="Incomplete"&&$S.resume!==void 0)R.save($S,${r.key},${r.entry},{acc:${acc},count:${n},pos:${st}});`
+        : `if($S.mode==="Incomplete"&&$S.resume!==void 0)R.save($S,${r.key},${r.entry},{acc:${held},${collect?.saved ?? ""}count:${n},pos:${st}});`
     // Runs `body`; on its failure, stops the repetition (or fails if `fatal`)
     const attempt = (body: (fail: string) => string, success: string, fatal: string, checkpoint: string) => {
       const ok = this.label()
@@ -863,7 +992,12 @@ class Emitter {
       `}`
     if (r === undefined) return `${done}:{${first}${rest}}${collect?.finish ?? ""}`
     // `done` ends the repetition; the checkpoint wrapper records the result after it
-    return r.wrap(acc, `${acc}=cp.acc;${n}=cp.count;p=cp.pos;`, "", `${done}:{if(!${r.resumed}){${first}}${rest}}`)
+    return r.wrap(
+      held,
+      `${held}=cp.acc;${collect?.restore ?? ""}${n}=cp.count;p=cp.pos;`,
+      "",
+      `${done}:{if(!${r.resumed}){${first}}${rest}}${collect?.finish ?? ""}`
+    )
   }
 
   /**
@@ -875,59 +1009,61 @@ class Emitter {
    */
   private entries(p: ParserLike, out: string, fail: string, fn: Fn, d: number): string {
     const node = nodeOf(p)
-    switch (node._tag) {
-      case "Mode": {
-        const ok = this.label()
-        const bad = this.label()
-        return (
-          `${ok}:{${bad}:{${this.entries(node.self, out, `break ${bad};`, fn, d)}break ${ok};}` +
-          `if($S.mode===${JSON.stringify(node.from)})$S.mode=${JSON.stringify(node.to)};${fail}}`
-        )
-      }
-      case "Seq": {
-        const i = node.output as number
-        return node.parsers
-          .map((q, j) => (j === i ? this.entries(q, out, fail, fn, d) : this.gen(q, false, null, fail, fn, d)))
-          .join("")
-      }
-      case "Repeat":
-      case "Separated": {
-        const pair = pairOf(node.self)
-        if (pair === undefined) {
-          // Not reached (`buildsEntries` found the pair): build the pairs, then the object
-          const t = this.v(fn)
-          return this.gen(p, true, t, fail, fn, d) + `${out}=${this.const(fromEntries)}(${t});`
-        }
-        const deferred = this.v(fn)
-        const key = this.v(fn)
-        const value = this.v(fn)
-        const collect: Collect = {
-          init: `${out}={};${deferred}=void 0;`,
-          element: (f, check) =>
-            pair.parsers
-              .map((q, j) =>
-                this.gen(
-                  q,
-                  j === pair.key || j === pair.value,
-                  j === pair.key ? key : j === pair.value ? value : null,
-                  f,
-                  fn,
-                  d
-                )
-              )
-              .join("") +
-            check +
-            `if(${deferred}===void 0&&R.isPlainKey(${key}))${out}[${key}]=${value};` +
-            `else ${deferred}=R.addEntry(${out},${deferred},${key},${value});`,
-          finish: `if(${deferred}!==void 0)R.flushEntries(${out},${deferred});`
-        }
-        return Predicate.isTagged(node, "Repeat")
-          ? this.repeat(node, true, out, fail, fn, d, collect)
-          : this.separated(node, true, out, fail, fn, d, collect)
-      }
-      default:
-        return this.entries((node as { readonly self: ParserLike }).self, out, fail, fn, d)
+    if (Predicate.isTagged(node, "Mode")) {
+      const ok = this.label()
+      const bad = this.label()
+      return (
+        `${ok}:{${bad}:{${this.entries(node.self, out, `break ${bad};`, fn, d)}break ${ok};}` +
+        `if($S.mode===${JSON.stringify(node.from)})$S.mode=${JSON.stringify(node.to)};${fail}}`
+      )
     }
+    if (Predicate.isTagged(node, "Seq")) {
+      // SAFETY: `buildsEntries` passes through a sequence only when it keeps one output, by index
+      const i = node.output as number
+      return node.parsers
+        .map((q, j) => (j === i ? this.entries(q, out, fail, fn, d) : this.gen(q, false, null, fail, fn, d)))
+        .join("")
+    }
+    if (Predicate.isTagged(node, "Repeat") || Predicate.isTagged(node, "Separated")) {
+      const pair = pairOf(node.self)
+      if (pair === undefined) {
+        // Not reached (`buildsEntries` found the pair): build the pairs, then the object
+        const t = this.v(fn)
+        return this.gen(p, true, t, fail, fn, d) + `${out}=${this.const(fromEntries)}(${t});`
+      }
+      const deferred = this.v(fn)
+      const key = this.v(fn)
+      const value = this.v(fn)
+      const collect: Collect = {
+        init: `${out}={};${deferred}=void 0;`,
+        element: (f, check) =>
+          pair.parsers
+            .map((q, j) =>
+              this.gen(
+                q,
+                j === pair.key || j === pair.value,
+                j === pair.key ? key : j === pair.value ? value : null,
+                f,
+                fn,
+                d
+              )
+            )
+            .join("") +
+          check +
+          `if(${deferred}===void 0&&R.isPlainKey(${key}))${out}[${key}]=${value};` +
+          `else ${deferred}=R.addEntry(${out},${deferred},${key},${value});`,
+        finish: `if(${deferred}!==void 0)R.flushEntries(${out},${deferred});`,
+        value: out,
+        // A streaming build's checkpoint holds the object so far, with its deferred entries
+        saved: `def:${deferred},`,
+        restore: `${deferred}=cp.def;`
+      }
+      return Predicate.isTagged(node, "Repeat")
+        ? this.repeat(node, true, out, fail, fn, d, collect)
+        : this.separated(node, true, out, fail, fn, d, collect)
+    }
+    // SAFETY: the other nodes `buildsEntries` passes through are diagnostics, which all wrap a `self`
+    return this.entries((node as { readonly self: ParserLike }).self, out, fail, fn, d)
   }
 
   // ---------------------------------------------------------------------------
@@ -975,6 +1111,7 @@ class Emitter {
   ): string | undefined {
     const set = (value: string) => (out === null ? "" : `${out}=${value};`)
     const enc = node.encoding
+    // SAFETY: `leaf`, the only caller, checks `native` first, which never holds on array input (kind 2)
     const kind = this.kind as 0 | 1
     const failBT = `{${BT}${fail}}`
     switch (node._tag) {
@@ -1003,6 +1140,7 @@ class Emitter {
         const lit = node.literal
         if (enc !== undefined) {
           if (node.caseless) return undefined
+          // SAFETY: a `Literal` with an encoding is a `Text` literal, which records the string it encodes
           const encoded = enc.encode(lit as string)
           return (
             this.literalUnits(Predicate.isString(encoded) ? unitsOf(encoded) : Array.from(encoded), false, fail) +
@@ -1010,12 +1148,10 @@ class Emitter {
           )
         }
         const literalKind = Predicate.isString(lit) ? 0 : lit instanceof Uint8Array ? 1 : 2
-        if (kind === 0 && literalKind !== 0) return undefined
-        if (literalKind === 2) return undefined
-        const codes =
-          kind === 0
-            ? unitsOf(lit as string)
-            : Array.from(literalKind === 0 ? new TextEncoder().encode(lit as string) : (lit as Uint8Array))
+        let codes: Array<number>
+        if (Predicate.isString(lit)) codes = kind === 0 ? unitsOf(lit) : Array.from(new TextEncoder().encode(lit))
+        else if (kind === 1 && lit instanceof Uint8Array) codes = Array.from(lit)
+        else return undefined
         const len = codes.length
         const value =
           !node.caseless && literalKind === kind
@@ -1087,6 +1223,7 @@ class Emitter {
   private takeWhile(node: NodeOf<"TakeWhile">, out: string | null, fail: string, fn: Fn): string {
     const enc = node.encoding
     const { max, min, negate } = node
+    // SAFETY: called from `token` only, whose `kind` is not 2
     const kind = this.kind as 0 | 1
     const cs = enc === undefined ? tokenSet(node.set, kind) : textSet(node.set)
     const accept = acceptTable(cs, negate)
@@ -1097,8 +1234,7 @@ class Emitter {
     const counted = max !== Infinity || min > 1
     const count = counted ? `${n}++;` : ""
     const bound = max !== Infinity ? `&&${n}<${max}` : ""
-    const slice =
-      enc !== undefined ? `${this.const(enc.text)}(I,${st},p)` : kind === 0 ? `I.slice(${st},p)` : `I.subarray(${st},p)`
+    const slice = enc !== undefined ? this.text(enc, st) : kind === 0 ? `I.slice(${st},p)` : `I.subarray(${st},p)`
     const finish =
       (min > 0 ? `if(${counted ? n : `p-${st}`}<${min}){${BT}${fail}}` : "") + (out === null ? "" : `${out}=${slice};`)
     const head = `${st}=p;${counted ? `${n}=0;` : ""}${loop}:while(p<E${bound}){${c}=${this.unit("p")};`
@@ -1121,6 +1257,8 @@ class Emitter {
         `p+=${this.const(enc.width)}(${c})}${count}}${finish}`
       )
     }
+    const stops = negate && !counted ? stopChars(cs) : undefined
+    if (stops !== undefined) return this.stopSearch(stops, st, c, finish, fn)
     const fast = 0xd800
     const small = TableSize
     const highTest = (v: string) => this.memberHigh(cs, negate, v)
@@ -1139,6 +1277,34 @@ class Emitter {
             `else{${cp}=${c};if(p+1<I.length){const d=I.charCodeAt(p+1);if((d&64512)===56320)${cp}=((${c}-55296)<<10)+(d-56320)+65536}` +
             `if(!(${highTest(cp)}))break ${loop};p+=${cp}>65535?2:1}`
     return `${head}if(${c}<${small}){if(!(${member}))break;p++}else ${rest}${count}}${finish}`
+  }
+
+  /**
+   * `Token.takeTill` on a string, of one to `MaxStops` characters that are
+   * whole code points: the set accepts every other unit, surrogates
+   * included, so the run ends at the first stop character. The first
+   * `SearchHead` units are tested one at a time, which beats a native
+   * search on short runs; a longer run ends at the next occurrence that
+   * `nextStop` finds with `indexOf` (#75).
+   */
+  private stopSearch(stops: ReadonlyArray<number>, st: string, c: string, finish: string, fn: Fn): string {
+    const h = this.v(fn)
+    const test = stops.map((u) => `${c}!==${u}`).join("&&")
+    // One stop character is searched for inline: a run that doesn't find it ends at `E`, so it is
+    // searched for once. Several are searched for through `nextStop`'s cache, so that one which
+    // doesn't occur isn't searched for again, to the end of the input, on every run.
+    const search =
+      stops.length === 1
+        ? `{p=I.indexOf(${JSON.stringify(String.fromCharCode(stops[0]))},p);if(p<0)p=E}`
+        : `p=R.nextStop(${this.const(new StopCache(stops.map((u) => String.fromCharCode(u))))},$S,p);`
+    // A cached search costs more than a plain one, so it waits for a longer run
+    const head = stops.length === 1 ? SearchHead : 2 * SearchHead
+    return (
+      `${st}=p;${h}=p+${head}<E?p+${head}:E;` +
+      `while(p<${h}&&(${c}=I.charCodeAt(p),${test}))p++;` +
+      // A run that ends right after the head needs no search
+      `if(p===${h}&&p<E&&(${c}=I.charCodeAt(p),${test}))${search}${finish}`
+    )
   }
 
   /**
@@ -1170,12 +1336,7 @@ class Emitter {
     const onNormal = raw
       ? `if(p===${b}){$S.mode="Cut";${fail}}continue ${loop};`
       : `if(p!==${b}){${acc}+=${x};continue ${loop}}`
-    const slice =
-      enc !== undefined
-        ? `${this.const(enc.text)}(I,${st},p)`
-        : this.kind === 0
-          ? `I.slice(${st},p)`
-          : `I.subarray(${st},p)`
+    const slice = enc !== undefined ? this.text(enc, st) : this.kind === 0 ? `I.slice(${st},p)` : `I.subarray(${st},p)`
     const ctrlTest =
       rd === undefined ? `p<E&&${this.unit("p")}===${ctrl}` : `${rd.guard("p")}&&${rd.unit("p")}===${ctrl}`
     // In a resumable build, running out of a partial input (not stopping
@@ -1187,7 +1348,7 @@ class Emitter {
       `if(${okv}){${onNormal}}else{if($S.mode!=="Backtrack"){${save(b)}${fail}}p=${b}}` +
       `if(${ctrlTest}){p+=${rd?.width ?? 1};${escape}${raw ? "" : `${acc}+=${x};`}}else break ${stop};}`
     const body =
-      r === undefined ? loopCode : `${stop}:{${loopCode}if($S.partial){$S.mode="Incomplete";${save("p")}${fail}}}`
+      r === undefined ? loopCode : `${stop}:{${loopCode}if($S.partial){$S.incomplete(0);${save("p")}${fail}}}`
     if (r === undefined) {
       return `${raw ? `${st}=p;` : `${acc}="";`}${body}${raw && out !== null ? `${out}=${slice};` : ""}`
     }
@@ -1196,6 +1357,18 @@ class Emitter {
     const value = out ?? this.v(fn)
     return r.wrap(value, "p=cp;", "", `${body}${value}=${out === null ? "void 0" : slice};`)
   }
+}
+
+/**
+ * A parser that exists only as a description, for the rewrites of
+ * `Emitter.repeatRun`. `step` is never run on the paths they compile (the
+ * token code of a native `takeWhile`, and alternatives inline), so it is
+ * the step of the repetition's element, which describes the same language
+ * when its value is unused.
+ */
+const synthetic = (node: Node, step: Step): ParserLike => {
+  const described: ParserLike & { readonly [NodeId]: Node } = { step, name: undefined, [NodeId]: node }
+  return described
 }
 
 /** The UTF-16 code units of a string. */
@@ -1212,10 +1385,20 @@ interface Generated {
 const generate = (root: ParserLike, kind: 0 | 1 | 2, resumable = false): Generated => {
   const e = new Emitter(root, kind, resumable)
   const main = e.rule(root, true)
+  // Generated code reads past `end` expecting nothing to match there, which
+  // holds when `end` is the input's length, as it is in the runners; other
+  // states run the closure compiler's step, built on first use.
+  let closure: Step | undefined
+  const short = e.const((state: State<any>) =>
+    (closure ??= createClosureCompiler(kind, resumable).compile(root, true))(state)
+  )
   const source =
     `"use strict";let $I,$E,$S,P;${e.functions.join("\n")}\n` +
-    `return function run(state){const sI=$I,sE=$E,sS=$S,sP=P;$I=state.input;$E=state.end;$S=state;` +
-    `try{const v=${main}(state.pos);if(v!==F)state.pos=P;return v}finally{$I=sI;$E=sE;$S=sS;P=sP}}`
+    `return function run(state){if(state.end!==state.input.length)return ${short}(state);` +
+    `const sI=$I,sE=$E,sS=$S,sP=P;$I=state.input;$E=state.end;$S=state;` +
+    `try{const v=${main}(state.pos);if(v!==F)state.pos=P;return v}` +
+    // A call-stack overflow is a `TooDeep` failure, as `Stack.run` reports it
+    `catch(e){if(!R.isStackOverflow(e))throw e;return R.tooDeep(state)}finally{$I=sI;$E=sE;$S=sS;P=sP}}`
   return { source, constants: e.constants, fallbacks: e.fallbacks }
 }
 
@@ -1224,17 +1407,15 @@ interface JitCompiled extends CompiledRoot {
   readonly source: string
 }
 
-/** Compiles a root parser for one input kind with `new Function`. */
+/**
+ * Compiles a root parser for one input kind with `new Function`. The step
+ * is the generated entry, which handles every state and reports call-stack
+ * overflows itself.
+ */
 const compileJit = (root: ParserLike, kind: 0 | 1 | 2, resumable = false): JitCompiled => {
   const { constants, fallbacks, source } = generate(root, kind, resumable)
-  const run = globalThis.Function("C", "F", "R", source)(constants, Fail, runtime) as Step
-  // Generated code reads past `end` expecting nothing to match there, which
-  // holds when `end` is the input's length, as it is in the runners.
-  let closure: Step | undefined
-  const step: Step = (state) =>
-    state.end === state.input.length
-      ? run(state)
-      : (closure ??= createClosureCompiler(kind, resumable).compile(root, true))(state)
+  // SAFETY: the generated source returns its `run` function, which takes a state and returns a value or `Fail`
+  const step = globalThis.Function("C", "F", "R", source)(constants, Fail, runtime) as Step
   return { step, fallbacks, source }
 }
 
@@ -1251,6 +1432,7 @@ export const backend: Backend = {
         onSuccess: ({ fallbacks, source, step }) => ({
           backend: "jit" as const,
           step,
+          guarded: true,
           fallbacks,
           error: undefined,
           source

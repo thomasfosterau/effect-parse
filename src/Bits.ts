@@ -93,7 +93,7 @@ const inUnits = <A>(state: State<any>, factor: number, step: (state: State<any>)
  * @category combinators
  */
 export const bits = <A, E, R>(self: Parser<A, E, R, BitInput>): Parser<A, E, R, Uint8Array> => {
-  const step = self.step as unknown as (state: State<any>) => A | Fail
+  const step = self.step
   return make((state) => inUnits(state, 8, step), "bits")
 }
 
@@ -105,18 +105,24 @@ export const bits = <A, E, R>(self: Parser<A, E, R, BitInput>): Parser<A, E, R, 
  * @category combinators
  */
 export const bytes = <A, E, R>(self: Parser<A, E, R, Uint8Array>): Parser<A, E, R, BitInput> => {
-  const step = self.step as (state: State<any>) => A | Fail
+  const step = self.step
   return make((state: State<any>) => inUnits(state, 1 / 8, step), "bytes")
 }
 
 const readBits = (state: State<any>, count: number): number => {
+  // SAFETY: bit-level parsers run inside `bits`, on the `Uint8Array` it was given (`BitInput` only re-indexes it in bits)
   const input = state.input as Uint8Array
   let pos = state.pos
   let value = 0
-  for (let i = 0; i < count; i++) {
-    const byte = input[pos >>> 3]
-    value = value * 2 + ((byte >>> (7 - (pos & 7))) & 1)
-    pos++
+  let left = count
+  // As many bits as the current byte holds at once, not one at a time
+  while (left > 0) {
+    const avail = 8 - (pos & 7)
+    const n = left < avail ? left : avail
+    // Multiplying, not shifting: the value can have up to 53 bits
+    value = value * (1 << n) + ((input[pos >>> 3] >>> (avail - n)) & ((1 << n) - 1))
+    pos += n
+    left -= n
   }
   state.pos = pos
   return value

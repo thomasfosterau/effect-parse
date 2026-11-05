@@ -114,6 +114,15 @@ it("README examples behave as documented", () => {
     return state.atEnd() ? state.eoi("Token", ["uppercase letter"], 1) : state.backtrack("Token", ["uppercase letter"])
   })
   expect(Parser.parseSync(Parser.repeat(upper), "AB")).toEqual(["A", "B"])
+  const twice = <A>(p: Parser.Parser<A>) =>
+    Parser.combinator([p], ([step]) => (state) => {
+      const a = step(state)
+      if (a === Input.Fail) return Input.Fail
+      const b = step(state)
+      return b === Input.Fail ? Input.Fail : ([a, b] as const)
+    })
+  expect(Parser.parseSync(twice(Token.oneOf("ab")), "ba")).toEqual(["b", "a"])
+  expect(Parser.parseSync(Compiler.jit(twice(Token.oneOf("ab"))), "ba")).toEqual(["b", "a"])
 })
 
 it("README Unicode examples behave as documented", () => {

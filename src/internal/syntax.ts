@@ -105,9 +105,13 @@ const rebase = (f: Failure, start: number): Failure =>
 /** Moves a failure stored relative to a node back to absolute offsets. */
 export const absolute = (f: Failure, start: number): Failure => rebase(f, -start)
 
+/** The children, and their offsets, of every leaf: one shared empty array. */
+const none: ReadonlyArray<never> = []
+
 /**
  * Builds a green node over `[start, end)` from the children waiting on the
- * stack.
+ * stack, `entries` from index `from` on (which the caller then removes):
+ * slicing them off first would allocate an array per node.
  */
 const build = (
   kind: string,
@@ -117,24 +121,40 @@ const build = (
   end: number,
   lookahead: number,
   entries: ReadonlyArray<Child>,
+  from: number,
   value: unknown,
   error: ErrorInfo | undefined,
   diagnostics?: Diagnostics
 ): Green => {
-  const n = entries.length
+  const n = entries.length - from
+  const width = end - start
+  const looked = Math.max(lookahead, end) - start
+  if (n === 0)
+    return new Green(
+      kind,
+      named,
+      key,
+      width,
+      looked,
+      none,
+      none,
+      undefined,
+      value,
+      error,
+      error !== undefined,
+      diagnostics
+    )
   const children = new Array<Green>(n)
   const offsets = new Array<number>(n)
   let fields: Array<string | undefined> | undefined
   let hasError = error !== undefined
   for (let i = 0; i < n; i++) {
-    const e = entries[i]
+    const e = entries[from + i]
     children[i] = e.green
     offsets[i] = e.start - start
     if (e.green.hasError) hasError = true
     if (e.field !== undefined) (fields ??= new Array(n).fill(undefined))[i] = e.field
   }
-  const width = end - start
-  const looked = Math.max(lookahead, end) - start
   return new Green(kind, named, key, width, looked, children, offsets, fields, value, error, hasError, diagnostics)
 }
 
@@ -162,8 +182,8 @@ export interface Previous {
 
 /** The hooks that `Syntax` combinators and `Parser.resumeAfter`/`retryAfter` call. */
 export interface Builder {
-  node(state: State<any>, step: (state: State<any>) => unknown, key: Key, kind: string, named: boolean): unknown
-  field(state: State<any>, step: (state: State<any>) => unknown, name: string): unknown
+  node<A>(state: State<any>, step: (state: State<any>) => A, key: Key, kind: string, named: boolean): A
+  field<A>(state: State<any>, step: (state: State<any>) => A, name: string): A
   /** After error recovery: `[start, pos)` was skipped after `failure`. */
   skipped(start: number, failure: Failure, mode: ErrMode): void
   /**
@@ -224,7 +244,7 @@ export class SyntaxBuilder implements Builder {
     return this.state.pos > this.highWater ? this.state.pos : this.highWater
   }
 
-  node(state: State<any>, step: (state: State<any>) => unknown, key: Key, kind: string, named: boolean): unknown {
+  node<A>(state: State<any>, step: (state: State<any>) => A, key: Key, kind: string, named: boolean): A {
     const start = this.state.pos
     const stack = this.stack
     if (this.previous !== undefined) {
@@ -241,7 +261,8 @@ export class SyntaxBuilder implements Builder {
           if (d.hintExpected !== undefined) this.state.setHint(start + d.hintOffset, d.hintExpected)
         }
         stack.push(new Child(green, start, end, undefined))
-        return green.value
+        // SAFETY: `reusable` returns only a node built under this `key`, by this parser's `step`, whose value it holds
+        return green.value as A
       }
     }
     const mark = stack.length
@@ -255,7 +276,7 @@ export class SyntaxBuilder implements Builder {
     const a = step(state)
     const looked = this.looked()
     this.highWater = outer > looked ? outer : looked
-    const deepest = this.state.deepest as Failure | undefined
+    const deepest = this.state.deepest
     this.state.deepest = outerDeepest
     if (deepest !== undefined) this.deepen(deepest)
     if (a === Fail) {
@@ -275,10 +296,9 @@ export class SyntaxBuilder implements Builder {
             hintOffset: this.state.hintOffset - start,
             hintExpected: hinted ? this.state.hintExpected : undefined
           }
-    const entries = stack.splice(mark)
-    stack.push(
-      new Child(build(kind, named, key, start, end, looked, entries, a, undefined, diagnostics), start, end, undefined)
-    )
+    const green = build(kind, named, key, start, end, looked, stack, mark, a, undefined, diagnostics)
+    stack.length = mark
+    stack.push(new Child(green, start, end, undefined))
     return a
   }
 
@@ -292,7 +312,7 @@ export class SyntaxBuilder implements Builder {
     if (this.state.deepest === undefined || failure.offset >= this.state.deepest.offset) this.state.deepest = failure
   }
 
-  field(state: State<any>, step: (state: State<any>) => unknown, name: string): unknown {
+  field<A>(state: State<any>, step: (state: State<any>) => A, name: string): A {
     const stack = this.stack
     const mark = stack.length
     const a = step(state)
@@ -305,10 +325,11 @@ export class SyntaxBuilder implements Builder {
     let i = stack.length
     while (i > 0 && stack[i - 1].start >= start && stack[i - 1].end > start) i--
     const end = this.state.pos
-    const green = build(errorKind, true, undefined, start, end, this.looked(), stack.splice(i), undefined, {
+    const green = build(errorKind, true, undefined, start, end, this.looked(), stack, i, undefined, {
       failure: rebase(failure, start),
       mode
     })
+    stack.length = i
     stack.push(new Child(green, start, end, undefined))
   }
 
@@ -323,13 +344,13 @@ export class SyntaxBuilder implements Builder {
     if (fatal !== undefined) {
       const last = Arr.isArrayNonEmpty(entries) ? Arr.lastNonEmpty(entries).end : 0
       const start = Math.max(Math.min(errorStart, end), last)
-      const error = build(errorKind, true, undefined, start, end, end, [], undefined, {
+      const error = build(errorKind, true, undefined, start, end, end, none, 0, undefined, {
         failure: rebase(fatal.failure, start),
         mode: fatal.mode
       })
       entries.push(new Child(error, start, end, undefined))
     }
-    return build(kind, true, undefined, 0, end, Math.max(end, this.looked()), entries, value, undefined)
+    return build(kind, true, undefined, 0, end, Math.max(end, this.looked()), entries, 0, value, undefined)
   }
 
   /**

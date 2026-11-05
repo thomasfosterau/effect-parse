@@ -32,9 +32,11 @@
 import * as Predicate from "effect/Predicate"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Equal from "effect/Equal"
 import { dual } from "effect/Function"
 import { NodeInspectSymbol } from "effect/Inspectable"
 import * as Option from "effect/Option"
+import * as Rec from "effect/Record"
 import type { Pipeable } from "effect/Pipeable"
 import { pipeArguments } from "effect/Pipeable"
 import * as Result from "effect/Result"
@@ -51,7 +53,7 @@ import * as Run from "./internal/run.js"
 import * as Stack from "./internal/stack.js"
 import { TiedFailures } from "./internal/ties.js"
 import type { Node } from "./internal/node.js"
-import { bounds, NodeId } from "./internal/node.js"
+import { bounds, Defer as DeferSymbol, describedNode, NodeId } from "./internal/node.js"
 
 // -----------------------------------------------------------------------------
 // Models
@@ -146,6 +148,15 @@ export declare namespace Parser {
     : [P] extends [Parser<infer _A, infer _E, infer _R, infer I>]
       ? I
       : never
+  /**
+   * The steps {@link combinator}'s `build` receives: one per parser, in
+   * order, each returning its parser's output or `Fail`.
+   *
+   * @since 0.5.0
+   */
+  export type Steps<Ps extends ReadonlyArray<Any>> = {
+    readonly [K in keyof Ps]: (state: State<InputOf<Ps[number]>>) => Success<Ps[K]> | Fail
+  }
 }
 
 /**
@@ -225,7 +236,7 @@ class SingleShotGen<T> {
 }
 
 class ParserImpl<A, E, R, I extends Input> implements Parser<A, E, R, I> {
-  readonly [TypeId] = variance as Parser.Variance<A, E, R, I>
+  readonly [TypeId]: Parser.Variance<A, E, R, I> = variance
   /** The description used by the compiler; `undefined` for `Opaque`. */
   readonly [NodeId]: Node | undefined
   constructor(
@@ -239,7 +250,7 @@ class ParserImpl<A, E, R, I extends Input> implements Parser<A, E, R, I> {
     return pipeArguments(this, arguments)
   }
   [Symbol.iterator](): ParserIterator<Parser<A, E, R, I>> {
-    return new SingleShotGen(this) as any
+    return new SingleShotGen(this)
   }
   toString() {
     return this.name === undefined ? "Parser" : `Parser(${this.name})`
@@ -315,7 +326,61 @@ export const described = <A, E = never, R = never, I extends Input = string>(
   node: Node
 ): Parser<A, E, R, I> => new ParserImpl(step, name, node)
 
-const nodeOfParser = (p: Parser.Any): Node | undefined => (p as any)[NodeId]
+/**
+ * Creates a combinator over `parsers` that compiles: `build` makes the
+ * combinator's step from the parsers' steps. Write combinators with it
+ * rather than with {@link make} when they run other parsers: a `make`
+ * parser is opaque to the compilers, so in a compiled grammar it runs
+ * interpreted, and so does every parser it runs. Interpreted, `build`
+ * receives the parsers' own steps; compiled (see the `Compiler` module), it
+ * receives their compiled steps, so the parsers inside compile with the
+ * grammar.
+ *
+ * Each step runs its parser on the state it is given, as `Parser.run` does,
+ * and returns the parser's output or `Fail`. The steps must run on the
+ * combinator's own state (they are compiled for its input kind): a
+ * combinator that runs a parser on another input, as {@link mapParser}
+ * does, is written with `make`. `build` may be called more than once (once
+ * interpreted, and once for each compiled build), so state its step shares
+ * between calls belongs inside `build`.
+ *
+ * @example
+ * ```ts
+ * import { Ascii, Input, Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * // One or more `item`s separated by `sep`, returning their count
+ * const count = <A, B>(item: Parser.Parser<A>, sep: Parser.Parser<B>) =>
+ *   Parser.combinator([item, sep], ([itemStep, sepStep]) => (state) => {
+ *     if (itemStep(state) === Input.Fail) return Input.Fail
+ *     let n = 1
+ *     while (true) {
+ *       const start = state.pos
+ *       if (sepStep(state) === Input.Fail || itemStep(state) === Input.Fail) {
+ *         if (state.mode !== "Backtrack") return Input.Fail
+ *         state.rewind(start)
+ *         return n
+ *       }
+ *       n++
+ *     }
+ *   })
+ *
+ * Parser.parse(count(Ascii.digit1, Token.literal(",")), "1,22,333") // Result.succeed(3)
+ * ```
+ *
+ * @since 0.5.0
+ * @category constructors
+ */
+export const combinator = <const Ps extends ReadonlyArray<Parser.Any>, A, E = never>(
+  parsers: Ps,
+  build: (steps: Parser.Steps<Ps>) => (state: State<Parser.InputOf<Ps[number]>>) => A | Fail,
+  name?: string
+): Parser<A, E | Parser.Error<Ps[number]>, Parser.Services<Ps[number]>, Parser.InputOf<Ps[number]>> => {
+  const untyped = (steps: ReadonlyArray<(state: State<any>) => unknown>) =>
+    // SAFETY: `steps` holds each parser's step (or, compiled, an equivalent
+    // compiled step), in order, which returns that parser's output or `Fail`
+    build(steps as Parser.Steps<Ps>)
+  return described(untyped(parsers.map((p) => p.step)), name, { _tag: "Combinator", parsers, build: untyped })
+}
 
 /**
  * Gives a parser a name, used by `toString`.
@@ -329,7 +394,7 @@ export const named: {
 } = /*#__PURE__*/ dual(
   2,
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, name: string): Parser<A, E, R, I> =>
-    new ParserImpl(self.step, name, nodeOfParser(self))
+    new ParserImpl(self.step, name, describedNode(self))
 )
 
 /**
@@ -389,6 +454,40 @@ export const fail = <E>(error: E): Parser<never, E, never, Input> =>
   described<never, E, never, Input>((state) => state.failCause("Backtrack", "Fail", error), "fail", failBacktrack)
 
 const failBacktrack: Node = { _tag: "Fail", mode: "Backtrack" }
+
+/**
+ * A parser that fails (backtracks) with the given user error, reporting it
+ * at `offset` rather than where the parser runs. Use it for a check that
+ * can only run once a whole construct has parsed but should point at the
+ * part at fault: return it from a {@link flatMap} continuation, with an
+ * offset taken from {@link location} or {@link withSpan}. Like any failure,
+ * one at a later offset is preferred over the failures of other
+ * alternatives (the furthest failure wins). The offset is clamped to the
+ * input.
+ *
+ * @example
+ * ```ts
+ * import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * const tag = (open: string) => Parser.delimited(Token.literal(open), Ascii.alpha1, Token.literal(">"))
+ * const element = Parser.seq(tag("<"), Parser.location, tag("</")).pipe(
+ *   Parser.flatMap(([start, at, end]) =>
+ *     start === end ? Parser.succeed(start) : Parser.failAt(at, `expected </${start}>`)
+ *   )
+ * )
+ * // The error points at the end tag (offset 3), not at the start of the element
+ * Parser.parse(element, "<a></b>")
+ * ```
+ *
+ * @since 0.5.0
+ * @category constructors
+ */
+export const failAt = <E>(offset: number, error: E): Parser<never, E, never, Input> =>
+  described<never, E, never, Input>(
+    (state) => state.failCause("Backtrack", "Fail", error, offset < 0 ? 0 : offset > state.end ? state.end : offset),
+    "failAt",
+    failBacktrack
+  )
 
 /**
  * A parser that always fails (backtracks) without a cause. This is winnow's
@@ -738,6 +837,72 @@ export const tryMap: {
 )
 
 /**
+ * Transforms the output of a parser with a function that returns
+ * `Input.Fail` to reject it: the allocation-free form of {@link tryMap} and
+ * {@link filterMap}, for checks that run on nearly every token. Compiled
+ * code compares the result with the sentinel instead of allocating and
+ * unwrapping a `Result` or an `Option` on every success.
+ *
+ * On failure the parser backtracks to where it started. With `orFailWith`,
+ * the user error it builds (only on failure) becomes the `cause` of the
+ * `ParseError`, as with `tryMap`; without, the failure has no cause, as
+ * with `filterMap`.
+ *
+ * @example
+ * ```ts
+ * import { Ascii, Input, Parser } from "@thomasfosterau/effect-parse"
+ *
+ * const byte = Ascii.decUint.pipe(
+ *   Parser.mapOrFail(
+ *     (n) => (n < 256 ? n : Input.Fail),
+ *     (n) => `${n} is not a byte`
+ *   )
+ * )
+ * Parser.parse(byte, "300") // fails with the cause "300 is not a byte"
+ * ```
+ *
+ * @since 0.5.0
+ * @category mapping
+ */
+export const mapOrFail: {
+  <A, B>(f: (a: A) => B | Fail): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<Exclude<B, Fail>, E, R, I>
+  <A, B, E2>(
+    f: (a: A) => B | Fail,
+    orFailWith: (a: A) => E2
+  ): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<Exclude<B, Fail>, E | E2, R, I>
+  <A, E, R, I extends Input, B>(self: Parser<A, E, R, I>, f: (a: A) => B | Fail): Parser<Exclude<B, Fail>, E, R, I>
+  <A, E, R, I extends Input, B, E2>(
+    self: Parser<A, E, R, I>,
+    f: (a: A) => B | Fail,
+    orFailWith: (a: A) => E2
+  ): Parser<Exclude<B, Fail>, E | E2, R, I>
+} = /*#__PURE__*/ dual(
+  (args) => isParser(args[0]),
+  <A, E, R, I extends Input, B, E2>(
+    self: Parser<A, E, R, I>,
+    f: (a: A) => B | Fail,
+    orFailWith?: (a: A) => E2
+  ): Parser<B, E | E2, R, I> => {
+    const step = self.step
+    return described(
+      (state) => {
+        const start = state.pos
+        const a = step(state)
+        if (a === Fail) return Fail
+        const b = f(a)
+        if (b !== Fail) return b
+        state.rewind(start)
+        return orFailWith === undefined
+          ? state.backtrack("Verify")
+          : state.failCause("Backtrack", "Verify", orFailWith(a))
+      },
+      self.name,
+      { _tag: "MapOrFail", self, f }
+    )
+  }
+)
+
+/**
  * Like {@link tryMap}, but the function may throw. Thrown values become the
  * `cause` of the error.
  *
@@ -952,6 +1117,51 @@ export const withSpan = <A, E, R, I extends Input>(
   )
 }
 
+/**
+ * Transforms the output of a parser together with the offsets it consumed,
+ * `[start, end)`: the allocation-free spelling of
+ * `map(withSpan(p), ([a, span]) => f(a, span.start, span.end))`, which
+ * builds a tuple and a span object on every success. Compiled code passes
+ * the offsets to `f` directly.
+ *
+ * @example
+ * ```ts
+ * import { Ascii, Parser } from "@thomasfosterau/effect-parse"
+ *
+ * const name = Ascii.alpha1.pipe(Parser.mapSpan((text, start, end) => ({ text, start, end })))
+ * Parser.parse(name, "abc") // Result.succeed({ text: "abc", start: 0, end: 3 })
+ * ```
+ *
+ * @since 0.5.0
+ * @category consumed input
+ */
+export const mapSpan: {
+  <A, B>(
+    f: (a: A, start: number, end: number) => B
+  ): <E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<B, E, R, I>
+  <A, E, R, I extends Input, B>(
+    self: Parser<A, E, R, I>,
+    f: (a: A, start: number, end: number) => B
+  ): Parser<B, E, R, I>
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input, B>(
+    self: Parser<A, E, R, I>,
+    f: (a: A, start: number, end: number) => B
+  ): Parser<B, E, R, I> => {
+    const step = self.step
+    return described(
+      (state) => {
+        const start = state.pos
+        const a = step(state)
+        return a === Fail ? Fail : f(a, start, state.pos)
+      },
+      self.name,
+      { _tag: "MapSpan", self, f }
+    )
+  }
+)
+
 // -----------------------------------------------------------------------------
 // Error management
 // -----------------------------------------------------------------------------
@@ -1004,6 +1214,9 @@ export const cut = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<
         state.mode = "Cut"
         return a
       }
+      // SAFETY: `state.deepest` is declared `Failure | undefined`; the
+      // assertion only undoes the narrowing to `undefined` from the
+      // assignment above, which misses that `step` may have recorded a failure
       const inner = state.deepest as Failure | undefined
       if (deepest !== undefined && (inner === undefined || deepest.offset > inner.offset)) state.deepest = deepest
       return a
@@ -1115,6 +1328,212 @@ export const expected: {
 )
 
 /**
+ * Runs a parser without letting it add to the expectations of later errors
+ * (chumsky's `quiet`). Use it on skippers, such as whitespace and comments,
+ * that may appear between any two tokens: they stop by failing, and without
+ * `quiet` what they would have accepted (`" "`, `"(:"`, ...) is listed in
+ * every error raised after them.
+ *
+ * When the parser succeeds, the hints and the furthest failure it recorded
+ * are forgotten, as after a lookahead that succeeded. When it fails
+ * recoverably without consuming input, its failure expects nothing, so an
+ * enclosing `alt` or `opt` reports only the other alternatives. A failure
+ * after consuming input (an unterminated comment) or an unrecoverable one
+ * is kept as it is. `Parser.expected` cannot do this: it relabels a failure,
+ * and a skipper that matches zero or more times never fails.
+ *
+ * @example
+ * ```ts
+ * import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * const comment = Parser.delimited(Token.literal("(:"), Token.takeTill(":"), Token.literal(":)"))
+ * const skip = Parser.quiet(Parser.repeat(Parser.alt(Ascii.multispace1, comment)))
+ * const number = Parser.preceded(skip, Ascii.digit1)
+ * // Fails expecting only a digit: without `quiet`, also whitespace and "(:"
+ * Parser.parse(number, " (: one :) x")
+ * ```
+ *
+ * @since 0.5.0
+ * @category error management
+ */
+export const quiet = <A, E, R, I extends Input>(self: Parser<A, E, R, I>): Parser<A, E, R, I> => {
+  const step = self.step
+  return described(
+    (state) => {
+      const start = state.pos
+      const hintOffset = state.hintOffset
+      const hintExpected = state.hintExpected
+      const deepest = state.deepest
+      const a = step(state)
+      if (a !== Fail) {
+        state.hintOffset = hintOffset
+        state.hintExpected = hintExpected
+        state.deepest = deepest
+        return a
+      }
+      if (state.mode === "Backtrack" && state.failure.offset === start) {
+        const f = state.failure
+        const expected = hintOffset === start ? hintExpected : []
+        state.hintOffset = hintOffset
+        state.hintExpected = hintExpected
+        state.deepest = deepest
+        state.failure = new Failure(f.offset, f.kind, expected, f.context, f.hasCause, f.cause, f.message, f.needed)
+      }
+      return a
+    },
+    self.name,
+    { _tag: "Quiet", self }
+  )
+}
+
+/**
+ * What a fast path (see {@link withFastPath}) returns to leave the input at
+ * the current offset to its grammar.
+ *
+ * @since 0.5.0
+ * @category fast paths
+ */
+export const Defer: typeof DeferSymbol = DeferSymbol
+
+/**
+ * The type of {@link Defer}.
+ *
+ * @since 0.5.0
+ * @category fast paths
+ */
+export type Defer = typeof DeferSymbol
+
+/**
+ * Puts a hand-written fast path in front of a grammar, which stays the
+ * specification: `fast` runs on the state, at the offset where the grammar
+ * would, and either returns the value the grammar would return, with
+ * `state.pos` where the grammar would stop, or returns {@link Defer}, and
+ * the grammar runs from that offset instead. Use it where a scanner written
+ * by hand (`indexOf`, a lookup table, interned names) beats compiled code on
+ * the tokens that dominate an input, and let the grammar handle everything
+ * else.
+ *
+ * The fast path runs in compiled code only (see the `Compiler` module).
+ * Interpreted runs, and so every error, every `Syntax` tree and every trace,
+ * come from the grammar alone, so they are exactly the grammar's. It must
+ * defer wherever it would not return exactly what the grammar returns, and
+ * on partial input wherever the grammar might report `Incomplete`; check it
+ * against the grammar with {@link verifyFastPath}.
+ *
+ * @example
+ * ```ts
+ * import { Compiler, Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * const text = Token.takeTill("<", { min: 1 })
+ * // The same run, found with `indexOf`; anything else (an empty run, the end of a partial input) defers
+ * const fastText = Compiler.jit(
+ *   Parser.withFastPath(text, (state) => {
+ *     const end = state.input.indexOf("<", state.pos)
+ *     if (end <= state.pos || end > state.end) return Parser.Defer
+ *     const value = state.input.slice(state.pos, end)
+ *     state.pos = end
+ *     return value
+ *   })
+ * )
+ * ```
+ *
+ * @since 0.5.0
+ * @category fast paths
+ */
+export const withFastPath: {
+  <A, I extends Input>(fast: (state: State<I>) => A | Defer): <E, R>(grammar: Parser<A, E, R, I>) => Parser<A, E, R, I>
+  <A, E, R, I extends Input>(grammar: Parser<A, E, R, I>, fast: (state: State<I>) => A | Defer): Parser<A, E, R, I>
+} = /*#__PURE__*/ dual(
+  2,
+  <A, E, R, I extends Input>(grammar: Parser<A, E, R, I>, fast: (state: State<I>) => A | Defer): Parser<A, E, R, I> =>
+    // The interpreter runs the grammar alone: it is the reference, and it builds every error
+    described(grammar.step, grammar.name, { _tag: "FastPath", self: grammar, fast })
+)
+
+/**
+ * A place where a fast path disagrees with its grammar (see
+ * {@link verifyFastPath}).
+ *
+ * @since 0.5.0
+ * @category fast paths
+ */
+export interface FastPathMismatch<A, I extends Input> {
+  readonly input: I
+  readonly offset: number
+  readonly partial: boolean
+  /** What the fast path returned, and where it stopped. */
+  readonly fast: { readonly value: A; readonly end: number }
+  /** What the grammar returned, and where it stopped, or how it failed. */
+  readonly grammar: { readonly value: A; readonly end: number } | { readonly failed: ErrMode }
+}
+
+/**
+ * Checks a fast path against its grammar (see {@link withFastPath}): on
+ * every input, at every offset, on complete and on partial input, wherever
+ * `fast` returns a value, the grammar (run interpreted) must return an
+ * equal value (by `Equal.equals`, or `options.equivalence`) and stop at the
+ * same offset. Returns every place where it doesn't, so a test asserts that
+ * the result is empty; generated inputs, mutated and truncated, find the
+ * most. Grammars that use services are not supported.
+ *
+ * @example
+ * ```ts
+ * import { Input, Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * const text = Token.takeTill("<", { min: 1 })
+ * const fast = (state: Input.State<string>) => {
+ *   const end = state.input.indexOf("<", state.pos)
+ *   if (end <= state.pos || end > state.end) return Parser.Defer
+ *   const value = state.input.slice(state.pos, end)
+ *   state.pos = end
+ *   return value
+ * }
+ * Parser.verifyFastPath(text, fast, ["a<b", "<", "abc"]) // []
+ * ```
+ *
+ * @since 0.5.0
+ * @category fast paths
+ */
+export const verifyFastPath = <A, E, I extends Input>(
+  grammar: Parser<A, E, never, I>,
+  fast: (state: State<I>) => A | Defer,
+  inputs: Iterable<I>,
+  options?: { readonly equivalence?: ((a: A, b: A) => boolean) | undefined }
+): ReadonlyArray<FastPathMismatch<A, I>> => {
+  const equivalence = options?.equivalence ?? Equal.equals
+  const mismatches: Array<FastPathMismatch<A, I>> = []
+  for (const input of inputs) {
+    const length = new State(input).end
+    for (let offset = 0; offset <= length; offset++) {
+      for (const partial of [false, true]) {
+        const mismatch = checkFastPath(grammar, fast, input, offset, partial, equivalence)
+        if (mismatch !== undefined) mismatches.push(mismatch)
+      }
+    }
+  }
+  return mismatches
+}
+
+/** Where `fast` disagrees with `grammar` at `offset`, if it does (see {@link verifyFastPath}). */
+const checkFastPath = <A, E, I extends Input>(
+  grammar: Parser<A, E, never, I>,
+  fast: (state: State<I>) => A | Defer,
+  input: I,
+  offset: number,
+  partial: boolean,
+  equivalence: (a: A, b: A) => boolean
+): FastPathMismatch<A, I> | undefined => {
+  const state = new State(input, { offset, partial })
+  const a = fast(state)
+  if (a === Defer) return undefined
+  const expected = new State(input, { offset, partial })
+  const b = Stack.run(grammar.step, expected)
+  if (b !== Fail && expected.pos === state.pos && equivalence(a, b)) return undefined
+  const grammarOutcome = b === Fail ? { failed: expected.mode } : { value: b, end: expected.pos }
+  return { input, offset, partial, fast: { value: a, end: state.pos }, grammar: grammarOutcome }
+}
+
+/**
  * Transforms the user error (cause) of a parser's failures.
  *
  * @since 0.1.0
@@ -1132,6 +1551,8 @@ export const mapError: {
         const a = step(state)
         if (a === Fail && state.failure.hasCause) {
           const x = state.failure
+          // SAFETY: a failure with `hasCause` from `self` carries a cause raised
+          // by a `fail` / `mapError` inside it, whose user error type is `E`
           state.replaceFailure(
             new Failure(x.offset, x.kind, x.expected, x.context, true, f(x.cause as E), x.message, x.needed)
           )
@@ -1376,6 +1797,7 @@ export const seq = <const Ps extends ReadonlyArray<Parser.Any>>(
   Parser.Services<Ps[number]>,
   Parser.InputOf<Ps[number]>
 > => {
+  type Out = { -readonly [K in keyof Ps]: Parser.Success<Ps[K]> }
   const steps = parsers.map((p) => p.step)
   const n = steps.length
   return described(
@@ -1386,10 +1808,55 @@ export const seq = <const Ps extends ReadonlyArray<Parser.Any>>(
         if (a === Fail) return Fail
         out[i] = a
       }
-      return out as any
+      // SAFETY: `out` has one slot per parser, and slot `i` holds the
+      // output of `parsers[i]`, which is `Parser.Success<Ps[i]>`
+      return out as Out
     },
     "seq",
     { _tag: "Seq", parsers, output: "tuple" }
+  )
+}
+
+/**
+ * Runs parsers in sequence and combines their outputs with `f`, which
+ * receives one argument per parser: the allocation-free spelling of
+ * `map(seq(...parsers), ([a, b, ...]) => f(a, b, ...))`, which builds a
+ * tuple on every success. Compiled code calls `f` with the values directly.
+ * {@link zipWith} is the two-parser, pipeable form.
+ *
+ * @example
+ * ```ts
+ * import { Ascii, Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * const point = Parser.seqWith(
+ *   [Ascii.decInt, Token.literal(","), Ascii.decInt],
+ *   (x, _, y) => ({ x, y })
+ * )
+ * Parser.parse(point, "3,-4") // Result.succeed({ x: 3, y: -4 })
+ * ```
+ *
+ * @since 0.5.0
+ * @category sequencing
+ */
+export const seqWith = <const Ps extends ReadonlyArray<Parser.Any>, B>(
+  parsers: Ps,
+  f: (...values: { -readonly [K in keyof Ps]: Parser.Success<Ps[K]> }) => B
+): Parser<B, Parser.Error<Ps[number]>, Parser.Services<Ps[number]>, Parser.InputOf<Ps[number]>> => {
+  const steps = parsers.map((p) => p.step)
+  const n = steps.length
+  const g: (...values: Array<any>) => B = f
+  return described(
+    (state: State<any>) => {
+      const values = new Array<unknown>(n)
+      for (let i = 0; i < n; i++) {
+        const a = steps[i](state)
+        if (a === Fail) return Fail
+        values[i] = a
+      }
+      return g(...values)
+    },
+    "seqWith",
+    { _tag: "SeqWith", parsers, f }
   )
 }
 
@@ -1409,18 +1876,21 @@ export const struct = <const Fields extends Readonly<Record<string, Parser.Any>>
   Parser.Services<Fields[keyof Fields]>,
   Parser.InputOf<Fields[keyof Fields]>
 > => {
-  const keys = Object.keys(fields)
+  type Out = Simplify<{ -readonly [K in keyof Fields]: Parser.Success<Fields[K]> }>
+  const keys = Rec.keys(fields)
   const steps = keys.map((k) => fields[k].step)
   const n = keys.length
   return described(
     (state: State<any>) => {
-      const out: Record<string, unknown> = {}
+      const out: Record<string, Parser.Success<Fields[keyof Fields]>> = {}
       for (let i = 0; i < n; i++) {
         const a = steps[i](state)
         if (a === Fail) return Fail
         out[keys[i]] = a
       }
-      return out as any
+      // SAFETY: the loop has set every own key of `fields`, each to the
+      // output of that key's parser, `Parser.Success<Fields[K]>`
+      return out as Out
     },
     "struct",
     { _tag: "Struct", keys, parsers: keys.map((k) => fields[k]) }
@@ -1676,9 +2146,14 @@ export const gen = <Eff extends Parser.Any, AEff>(
     while (!next.done) {
       const a = next.value.step(state)
       if (a === Fail) {
-        iterator.return?.(undefined as any)
+        // SAFETY: the value passed to `return` only becomes the completion value
+        // of the abandoned generator, which nothing reads
+        iterator.return?.(undefined as AEff)
         return Fail
       }
+      // SAFETY: `a` is the output of the parser just yielded, which is what its
+      // `yield*` evaluates to (typed by `ParserIterator`'s return value, not by
+      // the generator's `never` next type)
       next = iterator.next(a as never)
     }
     return next.value
@@ -1786,7 +2261,7 @@ export const alt = <const Ps extends ReadonlyArray<Parser.Any>>(
 > => {
   const steps = parsers.map((p) => p.step)
   const n = steps.length
-  if (n === 0) return reject as any
+  if (n === 0) return reject
   if (n === 1) return parsers[0]
   return described(
     (state: State<any>) => {
@@ -1840,6 +2315,36 @@ export const alt = <const Ps extends ReadonlyArray<Parser.Any>>(
 }
 
 /**
+ * The overloads of {@link dispatch}.
+ *
+ * @since 0.5.0
+ * @category choice
+ */
+export interface DispatchFn {
+  <K, E, R, I extends Input, P extends Parser.Any>(
+    selector: Parser<K, E, R, I>,
+    cases: (key: K) => P | undefined
+  ): Parser<Parser.Success<P>, E | Parser.Error<P>, R | Parser.Services<P>, I & Parser.InputOf<P>>
+  <
+    K extends PropertyKey,
+    E,
+    R,
+    I extends Input,
+    const Cases extends { readonly [key in K]?: Parser.Any },
+    Otherwise extends Parser.Any = never
+  >(
+    selector: Parser<K, E, R, I>,
+    cases: Cases,
+    otherwise?: Otherwise
+  ): Parser<
+    Parser.Success<NonNullable<Cases[keyof Cases]> | Otherwise>,
+    E | Parser.Error<NonNullable<Cases[keyof Cases]> | Otherwise>,
+    R | Parser.Services<NonNullable<Cases[keyof Cases]> | Otherwise>,
+    I & Parser.InputOf<NonNullable<Cases[keyof Cases]> | Otherwise>
+  >
+}
+
+/**
  * Selects the parser to run next based on the output of `selector`, like a
  * `match` over the input (winnow's `dispatch!`). If no case matches, the
  * parser backtracks to where it started.
@@ -1873,29 +2378,7 @@ export const alt = <const Ps extends ReadonlyArray<Parser.Any>>(
  * @since 0.1.0
  * @category choice
  */
-export const dispatch: {
-  <K, E, R, I extends Input, P extends Parser.Any>(
-    selector: Parser<K, E, R, I>,
-    cases: (key: K) => P | undefined
-  ): Parser<Parser.Success<P>, E | Parser.Error<P>, R | Parser.Services<P>, I & Parser.InputOf<P>>
-  <
-    K extends PropertyKey,
-    E,
-    R,
-    I extends Input,
-    const Cases extends { readonly [key in K]?: Parser.Any },
-    Otherwise extends Parser.Any = never
-  >(
-    selector: Parser<K, E, R, I>,
-    cases: Cases,
-    otherwise?: Otherwise
-  ): Parser<
-    Parser.Success<NonNullable<Cases[keyof Cases]> | Otherwise>,
-    E | Parser.Error<NonNullable<Cases[keyof Cases]> | Otherwise>,
-    R | Parser.Services<NonNullable<Cases[keyof Cases]> | Otherwise>,
-    I & Parser.InputOf<NonNullable<Cases[keyof Cases]> | Otherwise>
-  >
-} = (
+export const dispatch: DispatchFn = (
   selector: Parser.Any,
   cases: ((key: any) => Parser.Any | undefined) | Record<PropertyKey, Parser.Any>,
   otherwise?: Parser.Any
@@ -1943,37 +2426,44 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
   Parser.Services<Ps[number]>,
   Parser.InputOf<Ps[number]>
 > => {
-  const steps = parsers.map((p) => p.step)
-  const n = steps.length
-  return make((state: State<any>) => {
-    // A round's failures, merged only if no parser matches in it (#44)
-    const ties = new TiedFailures()
-    const done = new Array<boolean>(n).fill(false)
-    const out = new Array(n)
-    let remaining = n
-    while (remaining > 0) {
-      ties.clear()
-      let matched = false
-      for (let i = 0; i < n; i++) {
-        if (done[i]) continue
-        const start = state.pos
-        const a = steps[i](state)
-        if (a !== Fail) {
-          out[i] = a
-          done[i] = true
-          remaining--
-          matched = true
-          break
+  type Out = { -readonly [K in keyof Ps]: Parser.Success<Ps[K]> }
+  const n = parsers.length
+  // The parsers inside compile: the step is built from theirs (see `combinator`)
+  return combinator(
+    parsers,
+    (steps) => (state: State<any>) => {
+      // A round's failures, merged only if no parser matches in it (#44)
+      const ties = new TiedFailures()
+      const done = new Array<boolean>(n).fill(false)
+      const out = new Array(n)
+      let remaining = n
+      while (remaining > 0) {
+        ties.clear()
+        let matched = false
+        for (let i = 0; i < n; i++) {
+          if (done[i]) continue
+          const start = state.pos
+          const a = steps[i](state)
+          if (a !== Fail) {
+            out[i] = a
+            done[i] = true
+            remaining--
+            matched = true
+            break
+          }
+          if (state.mode !== "Backtrack") return Fail
+          state.rewind(start)
+          ties.add(state)
         }
-        if (state.mode !== "Backtrack") return Fail
-        state.rewind(start)
-        ties.add(state)
+        // Some parser is not done yet, and each one that fails is folded in
+        if (!matched) return ties.fail(state)
       }
-      // Some parser is not done yet, and each one that fails is folded in
-      if (!matched) return ties.fail(state)
-    }
-    return out as any
-  }, "permutation")
+      // SAFETY: every parser has matched once (`remaining` is 0), and slot
+      // `i` holds the output of `parsers[i]`, which is `Parser.Success<Ps[i]>`
+      return out as Out
+    },
+    "permutation"
+  )
 }
 
 // -----------------------------------------------------------------------------
@@ -2021,9 +2511,13 @@ const foldImpl = <A, B, E, R, I extends Input>(
       const entry = state.pos
       let acc: B
       let count = 0
+      // SAFETY: `key` belongs to this parser, which saves only
+      // `FoldCheckpoint<B>`s under it (and a `Resume.Done`, narrowed below)
       const resumed = state.resume === undefined ? undefined : (Resume.take(state, key, entry) as FoldCheckpoint<B>)
       if (resumed instanceof Resume.Done) {
         state.pos = resumed.pos
+        // SAFETY: a `Done` under `key` is recorded by `Resume.done` below,
+        // with this fold's result, a `B`
         return resumed.value as B
       }
       if (resumed !== undefined) {
@@ -2262,10 +2756,14 @@ export const separated: {
       (state) => {
         const entry = state.pos
         let acc: Array<A>
+        // SAFETY: `key` belongs to this parser, which saves only
+        // `SeparatedCheckpoint<A>`s under it (and a `Resume.Done`, narrowed below)
         const resumed =
           state.resume === undefined ? undefined : (Resume.take(state, key, entry) as SeparatedCheckpoint<A>)
         if (resumed instanceof Resume.Done) {
           state.pos = resumed.pos
+          // SAFETY: a `Done` under `key` is recorded by `Resume.done` below,
+          // with the elements collected, an `Array<A>`
           return resumed.value as Array<A>
         }
         if (resumed !== undefined) {
@@ -2345,10 +2843,15 @@ export const separatedFoldl1 = <A, E, R, I extends Input, S, E2, R2, I2 extends 
   return described(
     (state) => {
       const entry = state.pos
+      // SAFETY: `key` belongs to this parser, which saves only
+      // `FoldCheckpoint<A>`s under it, through `saveFold` (and a
+      // `Resume.Done`, narrowed below)
       const resumed = state.resume === undefined ? undefined : (Resume.take(state, key, entry) as FoldCheckpoint<A>)
       let acc: A | Fail
       if (resumed instanceof Resume.Done) {
         state.pos = resumed.pos
+        // SAFETY: a `Done` under `key` is recorded by `Resume.done` below,
+        // with the folded value, an `A`
         return resumed.value as A
       }
       if (resumed !== undefined) {
@@ -2365,7 +2868,7 @@ export const separatedFoldl1 = <A, E, R, I extends Input, S, E2, R2, I2 extends 
           if (state.mode === "Incomplete" && state.resume !== undefined) saveFold(state, key, entry, acc, start)
           if (state.mode !== "Backtrack") return Fail
           recover(state, start)
-          return Resume.done(state, key, entry, resumed !== undefined, acc as A)
+          return Resume.done(state, key, entry, resumed !== undefined, acc)
         }
         if (state.pos === start) return assertConsumes(state, "separatedFoldl1")
         const a = step(state)
@@ -2373,7 +2876,7 @@ export const separatedFoldl1 = <A, E, R, I extends Input, S, E2, R2, I2 extends 
           if (state.mode === "Incomplete" && state.resume !== undefined) saveFold(state, key, entry, acc, start)
           if (state.mode !== "Backtrack") return Fail
           state.rewind(start)
-          return Resume.done(state, key, entry, resumed !== undefined, acc as A)
+          return Resume.done(state, key, entry, resumed !== undefined, acc)
         }
         acc = op(acc, s, a)
       }
@@ -2423,9 +2926,9 @@ export const separatedFoldr1 = <A, E, R, I extends Input, S, E2, R2, I2 extends 
         seps.push(s)
         values.push(a)
       }
-      let acc = values[values.length - 1] as A
+      let acc = values[values.length - 1]
       for (let i = seps.length - 1; i >= 0; i--) {
-        acc = op(values[i] as A, seps[i] as S, acc)
+        acc = op(values[i], seps[i], acc)
       }
       return acc
     },
@@ -2501,7 +3004,7 @@ export const provideService: {
     return described(
       (state) => {
         const prev = state.context
-        state.context = Context.add(prev, key, service) as Context.Context<never>
+        state.context = Context.add(prev, key, service)
         try {
           return step(state)
         } finally {
@@ -2538,7 +3041,7 @@ export const provide: {
     return described(
       (state) => {
         const prev = state.context
-        state.context = Context.merge(prev, context) as Context.Context<never>
+        state.context = Context.merge(prev, context)
         try {
           return step(state)
         } finally {
@@ -2734,18 +3237,20 @@ const NotCompiled: unique symbol = /*#__PURE__*/ Symbol("NotCompiled")
  * input), in which case the state must be thrown away. `resumable` selects
  * the build that handles partial input.
  */
-const runCompiled = <I extends Input>(
-  self: Parser.Any,
+const runCompiled = <A, I extends Input>(
+  self: Parser<A, unknown, unknown, I>,
   state: State<I>,
   whole: boolean,
   resumable = false
-): unknown => {
+): A | Fail | typeof NotCompiled => {
   if (state.tracer !== undefined || state.recovered !== undefined) return NotCompiled
-  const step = Registry.stepFor(self, state, resumable)
-  if (step === undefined) return NotCompiled
-  const a = Stack.run(step, state)
+  const compiled = Registry.compiled(self, state.inputKind, resumable)
+  if (compiled?.step === undefined) return NotCompiled
+  const a = Run.runCompiled(compiled.step, compiled.guarded, state)
   if (a === Fail || (whole && state.pos < state.end)) return Fail
-  return a
+  // SAFETY: the compilers never change semantics (the differential suites
+  // check it), so `self`'s compiled step returns what its step returns, an `A`
+  return a as A
 }
 
 // -----------------------------------------------------------------------------
@@ -2816,7 +3321,7 @@ const parseComplete = <A, E, R, I extends Input>(
   const state = makeState(input, options, false)
   const a = runCompiled(self, state, true)
   if (a === NotCompiled) return runComplete(self, state)
-  if (a !== Fail) return Result.succeed(a as A)
+  if (a !== Fail) return Result.succeed(a)
   // Re-run interpreted for the diagnostics
   return runComplete(self, makeState(input, options, false))
 }
@@ -2835,6 +3340,25 @@ const runComplete = <A, E, R, I extends Input>(
 }
 
 /**
+ * The overloads of {@link parse}.
+ *
+ * @since 0.5.0
+ * @category running
+ */
+export interface ParseFn {
+  <A, E, I extends Input>(
+    self: Parser<A, E, never, I>,
+    input: NoInfer<Source<I>>,
+    options?: ParseOptions
+  ): Result.Result<A, ParseError.ParseError<E>>
+  <A, E, R, I extends Input>(
+    self: Parser<A, E, R, I>,
+    input: NoInfer<Source<I>>,
+    options: ParseOptionsWithContext<R>
+  ): Result.Result<A, ParseError.ParseError<E>>
+}
+
+/**
  * Runs a parser against a complete input, requiring the whole input to be
  * consumed (winnow's `Parser::parse`).
  *
@@ -2850,22 +3374,26 @@ const runComplete = <A, E, R, I extends Input>(
  * @since 0.1.0
  * @category running
  */
-export const parse: {
-  <A, E, I extends Input>(
-    self: Parser<A, E, never, I>,
-    input: NoInfer<Source<I>>,
-    options?: ParseOptions
-  ): Result.Result<A, ParseError.ParseError<E>>
-  <A, E, R, I extends Input>(
-    self: Parser<A, E, R, I>,
-    input: NoInfer<Source<I>>,
-    options: ParseOptionsWithContext<R>
-  ): Result.Result<A, ParseError.ParseError<E>>
-} = <A, E, R, I extends Input>(
+export const parse: ParseFn = <A, E, R, I extends Input>(
   self: Parser<A, E, R, I>,
   input: I | Source<I>,
   options?: ParseOptions & { readonly context?: Context.Context<R> }
 ): Result.Result<A, ParseError.ParseError<E>> => parseComplete(self, input, options)
+
+/**
+ * The overloads of {@link parseSync}.
+ *
+ * @since 0.5.0
+ * @category running
+ */
+export interface ParseSyncFn {
+  <A, E, I extends Input>(self: Parser<A, E, never, I>, input: NoInfer<Source<I>>, options?: ParseOptions): A
+  <A, E, R, I extends Input>(
+    self: Parser<A, E, R, I>,
+    input: NoInfer<Source<I>>,
+    options: ParseOptionsWithContext<R>
+  ): A
+}
 
 /**
  * Like {@link parse}, but throws the `ParseError` on failure.
@@ -2873,14 +3401,7 @@ export const parse: {
  * @since 0.1.0
  * @category running
  */
-export const parseSync: {
-  <A, E, I extends Input>(self: Parser<A, E, never, I>, input: NoInfer<Source<I>>, options?: ParseOptions): A
-  <A, E, R, I extends Input>(
-    self: Parser<A, E, R, I>,
-    input: NoInfer<Source<I>>,
-    options: ParseOptionsWithContext<R>
-  ): A
-} = <A, E, R, I extends Input>(
+export const parseSync: ParseSyncFn = <A, E, R, I extends Input>(
   self: Parser<A, E, R, I>,
   input: I | Source<I>,
   options?: ParseOptions & { readonly context?: Context.Context<R> }
@@ -2888,6 +3409,25 @@ export const parseSync: {
   const result = parseComplete(self, input, options)
   if (Result.isSuccess(result)) return result.success
   throw result.failure
+}
+
+/**
+ * The overloads of {@link parsePeek}.
+ *
+ * @since 0.5.0
+ * @category running
+ */
+export interface ParsePeekFn {
+  <A, E, I extends Input>(
+    self: Parser<A, E, never, I>,
+    input: NoInfer<Source<I>>,
+    options?: ParseOptions
+  ): Result.Result<[remaining: Slice<I>, output: A], ParseError.ParseError<E>>
+  <A, E, R, I extends Input>(
+    self: Parser<A, E, R, I>,
+    input: NoInfer<Source<I>>,
+    options: ParseOptionsWithContext<R>
+  ): Result.Result<[remaining: Slice<I>, output: A], ParseError.ParseError<E>>
 }
 
 /**
@@ -2902,18 +3442,7 @@ export const parseSync: {
  * @since 0.1.0
  * @category running
  */
-export const parsePeek: {
-  <A, E, I extends Input>(
-    self: Parser<A, E, never, I>,
-    input: NoInfer<Source<I>>,
-    options?: ParseOptions
-  ): Result.Result<[remaining: Slice<I>, output: A], ParseError.ParseError<E>>
-  <A, E, R, I extends Input>(
-    self: Parser<A, E, R, I>,
-    input: NoInfer<Source<I>>,
-    options: ParseOptionsWithContext<R>
-  ): Result.Result<[remaining: Slice<I>, output: A], ParseError.ParseError<E>>
-} = <A, E, R, I extends Input>(
+export const parsePeek: ParsePeekFn = <A, E, R, I extends Input>(
   self: Parser<A, E, R, I>,
   input: I | Source<I>,
   options?: ParseOptions & { readonly context?: Context.Context<R> }
@@ -2921,7 +3450,7 @@ export const parsePeek: {
   let state = makeState(input, options, false)
   const compiled = runCompiled(self, state, false)
   if (compiled !== NotCompiled && compiled !== Fail) {
-    return Result.succeed([state.slice(state.pos, state.end), compiled as A])
+    return Result.succeed([state.slice(state.pos, state.end), compiled])
   }
   if (compiled === Fail) state = makeState(input, options, false)
   const a = Stack.run(self.step, state)
@@ -2941,6 +3470,25 @@ export const parsePeek: {
 export type PartialResult<A> =
   | { readonly _tag: "Done"; readonly value: A; readonly offset: number }
   | { readonly _tag: "Incomplete"; readonly needed: Option.Option<number> }
+
+/**
+ * The overloads of {@link parsePartial}.
+ *
+ * @since 0.5.0
+ * @category running
+ */
+export interface ParsePartialFn {
+  <A, E, I extends Input>(
+    self: Parser<A, E, never, I>,
+    input: NoInfer<Source<I>>,
+    options?: ParseOptions
+  ): Result.Result<PartialResult<A>, ParseError.ParseError<E>>
+  <A, E, R, I extends Input>(
+    self: Parser<A, E, R, I>,
+    input: NoInfer<Source<I>>,
+    options: ParseOptionsWithContext<R>
+  ): Result.Result<PartialResult<A>, ParseError.ParseError<E>>
+}
 
 /**
  * Runs a parser against a *partial* input, i.e. a chunk of a stream that may
@@ -2971,18 +3519,7 @@ export type PartialResult<A> =
  * @since 0.1.0
  * @category running
  */
-export const parsePartial: {
-  <A, E, I extends Input>(
-    self: Parser<A, E, never, I>,
-    input: NoInfer<Source<I>>,
-    options?: ParseOptions
-  ): Result.Result<PartialResult<A>, ParseError.ParseError<E>>
-  <A, E, R, I extends Input>(
-    self: Parser<A, E, R, I>,
-    input: NoInfer<Source<I>>,
-    options: ParseOptionsWithContext<R>
-  ): Result.Result<PartialResult<A>, ParseError.ParseError<E>>
-} = <A, E, R, I extends Input>(
+export const parsePartial: ParsePartialFn = <A, E, R, I extends Input>(
   self: Parser<A, E, R, I>,
   input: I | Source<I>,
   options?: ParseOptions & { readonly context?: Context.Context<R> }
@@ -2990,17 +3527,23 @@ export const parsePartial: {
   let state = makeState(input, options, true)
   const compiled = runCompiled(self, state, false, true)
   if (compiled !== NotCompiled && compiled !== Fail) {
-    return Result.succeed({ _tag: "Done", value: compiled as A, offset: state.pos })
+    return Result.succeed({ _tag: "Done", value: compiled, offset: state.pos })
   }
+  // Compiled code reports `Incomplete` where the interpreter does, with the same failure: the leaf that
+  // ran out of input is the interpreter's own step, or records what it would. Only an error needs the re-run.
+  if (compiled === Fail && state.mode === "Incomplete") return Result.succeed(incompleteOf(state))
   // Re-run interpreted for `needed` and the diagnostics
   if (compiled === Fail) state = makeState(input, options, true)
   const a = Stack.run(self.step, state)
   if (a !== Fail) return Result.succeed({ _tag: "Done", value: a, offset: state.pos })
-  if (state.mode === "Incomplete") {
-    const needed = state.failure.needed
-    return Result.succeed({ _tag: "Incomplete", needed: needed > 0 ? Option.some(needed) : Option.none() })
-  }
+  if (state.mode === "Incomplete") return Result.succeed(incompleteOf(state))
   return Result.fail(toError(state))
+}
+
+/** The `Incomplete` result of a state whose parse ran out of partial input. */
+const incompleteOf = <A>(state: State<any>): PartialResult<A> => {
+  const needed = state.failure.needed
+  return { _tag: "Incomplete", needed: needed > 0 ? Option.some(needed) : Option.none() }
 }
 
 /**
@@ -3121,14 +3664,12 @@ export interface RecoverableResult<A, E> {
 }
 
 /**
- * Runs a parser with error recovery enabled (winnow's `Recoverable`
- * stream). Failures handled by {@link resumeAfter} and {@link retryAfter}
- * are collected instead of aborting the parse.
+ * The overloads of {@link parseRecoverable}.
  *
- * @since 0.1.0
+ * @since 0.5.0
  * @category running
  */
-export const parseRecoverable: {
+export interface ParseRecoverableFn {
   <A, E, I extends Input>(
     self: Parser<A, E, never, I>,
     input: NoInfer<Source<I>>,
@@ -3139,7 +3680,17 @@ export const parseRecoverable: {
     input: NoInfer<Source<I>>,
     options: ParseOptionsWithContext<R>
   ): RecoverableResult<A, E>
-} = <A, E, R, I extends Input>(
+}
+
+/**
+ * Runs a parser with error recovery enabled (winnow's `Recoverable`
+ * stream). Failures handled by {@link resumeAfter} and {@link retryAfter}
+ * are collected instead of aborting the parse.
+ *
+ * @since 0.1.0
+ * @category running
+ */
+export const parseRecoverable: ParseRecoverableFn = <A, E, R, I extends Input>(
   self: Parser<A, E, R, I>,
   input: I | Source<I>,
   options?: ParseOptions & { readonly context?: Context.Context<R> }

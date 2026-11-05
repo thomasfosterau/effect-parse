@@ -1,7 +1,9 @@
+import * as Formatter from "effect/Formatter"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import { describe, expect, it } from "vite-plus/test"
 import * as Json from "../examples/json-syntax.js"
+
 import type { Input } from "../src/index.js"
 import { Ascii, Compiler, Expression, Parser, Syntax, Text, Token } from "../src/index.js"
 import { randomJson, rng } from "./generators.js"
@@ -165,10 +167,7 @@ describe("Syntax", () => {
         [2, 4]
       ])
       expect(tree.root.child(0)?.text).toEqual(new Uint8Array([0xc3, 0xa9]))
-      const tokens = Syntax.node(
-        Token.any as unknown as Parser.Parser<number, never, never, ReadonlyArray<number>>,
-        "t"
-      )
+      const tokens = Syntax.node(Token.anyToken<ReadonlyArray<number>>(), "t")
       expect(Syntax.parse(Parser.repeat(tokens), [1, 2, 3]).root.namedChildren.map((n) => n.value)).toEqual([1, 2, 3])
     })
   })
@@ -321,7 +320,7 @@ describe("Syntax", () => {
       cases.forEach(([p, input, at, text]) => {
         const grammar = Parser.seq(Syntax.node(p, "x"), Token.rest)
         const edited = Syntax.replace(Syntax.parse(grammar, input), at, at + 1, text)
-        expect(snapshot(edited), `${p.name} on ${JSON.stringify(input)}`).toEqual(
+        expect(snapshot(edited), `${p.name} on ${Formatter.formatJson(input)}`).toEqual(
           snapshot(Syntax.parse(grammar, edited.input))
         )
         expect(edited.reused).toBe(0)
@@ -400,7 +399,7 @@ describe("Syntax", () => {
               ? Syntax.replace(tree, start, end, insert)
               : Syntax.reparse(tree, text.slice(0, start) + insert + text.slice(end))
           const fresh = Syntax.parse(grammar, next.input)
-          expect(snapshot(next), JSON.stringify({ before: text, after: next.input })).toEqual(snapshot(fresh))
+          expect(snapshot(next), Formatter.formatJson({ before: text, after: next.input })).toEqual(snapshot(fresh))
           // Parse the old text again from the edited tree, too
           // (every third edit)
           const again =
@@ -457,6 +456,10 @@ describe("Syntax", () => {
       ]
       const alphabet = ["/", "*", "\r", "\n", "f", "u", "n", "c", "t", "i", "o", "l", "e", " ", "=", ";", "1", "x"]
       Array.from({ length: 25 }).forEach((_, seed) => differential(program, docs, alphabet, seed))
+      // A quiet skipper: reused nodes replay the hints it leaves (none)
+      const skip = Parser.quiet(Parser.repeat(Parser.alt(comment, Token.takeWhile(" \n", { min: 1 }))))
+      const quiet = Parser.terminated(Parser.repeat(Parser.preceded(skip, binding)), skip)
+      Array.from({ length: 10 }).forEach((_, seed) => differential(quiet, docs, alphabet, seed))
     })
 
     it("re-parses little of a large document", () => {
@@ -466,7 +469,7 @@ describe("Syntax", () => {
         tags: ["a", "b"],
         ok: i % 2 === 0
       }))
-      const text = JSON.stringify(records, null, 2)
+      const text = Formatter.formatJson(records, { space: 2 })
       const tree = Syntax.parse(Json.json, text)
       const total = [...tree.root.descendants()].length
       const at = text.indexOf('"n150"')
@@ -475,7 +478,8 @@ describe("Syntax", () => {
       // Every record but the edited one is reused whole, as one node
       expect(edited.reused).toBeGreaterThan(299)
       // The nodes built again: those not shared with the old tree
-      const old = new Set([...tree.root.descendants()].map((n) => n.green))
+      const old = new WeakSet([...tree.root.descendants()].map((n) => n.green))
+
       const fresh = [...edited.root.descendants()].filter((n) => !old.has(n.green)).length
       expect(fresh).toBeLessThan(total / 100)
       expect(snapshot(edited)).toEqual(snapshot(Syntax.parse(Json.json, edited.input)))

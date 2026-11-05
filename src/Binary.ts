@@ -44,45 +44,61 @@ export type Endianness = "big" | "little" | "native"
 
 const nativeLittle = /*#__PURE__*/ new Uint8Array(/*#__PURE__*/ new Uint16Array([1]).buffer)[0] === 1
 
-const fixed = <A>(
-  size: number,
-  name: string,
-  read: (view: DataView, offset: number) => A
-): Parser<A, never, never, Uint8Array> => {
+/** Reads a number at an offset of a state's bytes. */
+type Read<A> = (bytes: Uint8Array, offset: number, state: State<Uint8Array>) => A
+
+/**
+ * A `DataView` of a state's bytes, for the numbers integer arithmetic can't
+ * read: created once per state (whose input never changes), as one per
+ * read cost most of a number's time.
+ */
+const viewOf = (state: State<Uint8Array>): DataView => {
+  const b = state.input
+  return (state.view ??= new DataView(b.buffer, b.byteOffset, b.byteLength))
+}
+
+/** A {@link Read} through the state's view. */
+const viewed =
+  <A>(read: (view: DataView, offset: number) => A): Read<A> =>
+  (_, o, s) =>
+    read(viewOf(s), o)
+
+const fixed = <A>(size: number, name: string, read: Read<A>): Parser<A, never, never, Uint8Array> => {
   const expected = [`${size} byte${size === 1 ? "" : "s"}`]
-  return P.make((state: State<Uint8Array>) => {
-    const pos = state.pos
-    const avail = state.end - pos
-    if (avail < size) return state.eoi("Token", expected, size - avail)
-    const bytes = state.input
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-    state.pos = pos + size
-    return read(view, pos)
-  }, name)
+  return P.described(
+    (state: State<Uint8Array>) => {
+      const pos = state.pos
+      const avail = state.end - pos
+      if (avail < size) return state.eoi("Token", expected, size - avail)
+      state.pos = pos + size
+      return read(state.input, pos, state)
+    },
+    name,
+    { _tag: "Fixed", size, read }
+  )
 }
 
-const readU24 = (little: boolean) => (v: DataView, o: number) =>
-  little
-    ? v.getUint8(o) | (v.getUint8(o + 1) << 8) | (v.getUint8(o + 2) << 16)
-    : (v.getUint8(o) << 16) | (v.getUint8(o + 1) << 8) | v.getUint8(o + 2)
+// Integers of up to 32 bits are read from the bytes; the rest through a view
+const readU24 =
+  (little: boolean): Read<number> =>
+  (b, o) =>
+    little ? b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) : (b[o] << 16) | (b[o + 1] << 8) | b[o + 2]
 
-const readI24 = (little: boolean) => {
+const readI24 = (little: boolean): Read<number> => {
   const u = readU24(little)
-  return (v: DataView, o: number) => {
-    const x = u(v, o)
-    return x & 0x800000 ? x - 0x1000000 : x
-  }
+  return (b, o, s) => (u(b, o, s) << 8) >> 8
 }
 
-const readU128 = (little: boolean) => (v: DataView, o: number) => {
-  const a = v.getBigUint64(o, little)
-  const b = v.getBigUint64(o + 8, little)
-  return little ? (b << 64n) | a : (a << 64n) | b
-}
+const readU128 = (little: boolean): Read<bigint> =>
+  viewed((v, o) => {
+    const a = v.getBigUint64(o, little)
+    const b = v.getBigUint64(o + 8, little)
+    return little ? (b << 64n) | a : (a << 64n) | b
+  })
 
-const readI128 = (little: boolean) => {
+const readI128 = (little: boolean): Read<bigint> => {
   const u = readU128(little)
-  return (v: DataView, o: number) => BigInt.asIntN(128, u(v, o))
+  return (b, o, s) => BigInt.asIntN(128, u(b, o, s))
 }
 
 /**
@@ -91,7 +107,7 @@ const readI128 = (little: boolean) => {
  * @since 0.1.0
  * @category integers
  */
-export const u8: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(1, "u8", (v, o) => v.getUint8(o))
+export const u8: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(1, "u8", (b, o) => b[o])
 
 /**
  * A signed byte.
@@ -99,23 +115,31 @@ export const u8: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
  * @since 0.1.0
  * @category integers
  */
-export const i8: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(1, "i8", (v, o) => v.getInt8(o))
+export const i8: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(1, "i8", (b, o) => (b[o] << 24) >> 24)
 
 /** @since 0.1.0 @category integers */
-export const beU16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(2, "beU16", (v, o) =>
-  v.getUint16(o, false)
+export const beU16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  2,
+  "beU16",
+  (b, o) => (b[o] << 8) | b[o + 1]
 )
 /** @since 0.1.0 @category integers */
-export const leU16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(2, "leU16", (v, o) =>
-  v.getUint16(o, true)
+export const leU16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  2,
+  "leU16",
+  (b, o) => b[o] | (b[o + 1] << 8)
 )
 /** @since 0.1.0 @category integers */
-export const beI16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(2, "beI16", (v, o) =>
-  v.getInt16(o, false)
+export const beI16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  2,
+  "beI16",
+  (b, o) => (((b[o] << 8) | b[o + 1]) << 16) >> 16
 )
 /** @since 0.1.0 @category integers */
-export const leI16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(2, "leI16", (v, o) =>
-  v.getInt16(o, true)
+export const leI16: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  2,
+  "leI16",
+  (b, o) => ((b[o] | (b[o + 1] << 8)) << 16) >> 16
 )
 /** @since 0.1.0 @category integers */
 export const beU24: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
@@ -142,36 +166,52 @@ export const leI24: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fix
   /*#__PURE__*/ readI24(true)
 )
 /** @since 0.1.0 @category integers */
-export const beU32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "beU32", (v, o) =>
-  v.getUint32(o, false)
+export const beU32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  4,
+  "beU32",
+  (b, o) => ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0
 )
 /** @since 0.1.0 @category integers */
-export const leU32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "leU32", (v, o) =>
-  v.getUint32(o, true)
+export const leU32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  4,
+  "leU32",
+  (b, o) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0
 )
 /** @since 0.1.0 @category integers */
-export const beI32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "beI32", (v, o) =>
-  v.getInt32(o, false)
+export const beI32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  4,
+  "beI32",
+  (b, o) => (b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]
 )
 /** @since 0.1.0 @category integers */
-export const leI32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "leI32", (v, o) =>
-  v.getInt32(o, true)
+export const leI32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  4,
+  "leI32",
+  (b, o) => b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)
 )
 /** @since 0.1.0 @category integers */
-export const beU64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "beU64", (v, o) =>
-  v.getBigUint64(o, false)
+export const beU64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  8,
+  "beU64",
+  /*#__PURE__*/ viewed((v, o) => v.getBigUint64(o, false))
 )
 /** @since 0.1.0 @category integers */
-export const leU64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "leU64", (v, o) =>
-  v.getBigUint64(o, true)
+export const leU64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  8,
+  "leU64",
+  /*#__PURE__*/ viewed((v, o) => v.getBigUint64(o, true))
 )
 /** @since 0.1.0 @category integers */
-export const beI64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "beI64", (v, o) =>
-  v.getBigInt64(o, false)
+export const beI64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  8,
+  "beI64",
+  /*#__PURE__*/ viewed((v, o) => v.getBigInt64(o, false))
 )
 /** @since 0.1.0 @category integers */
-export const leI64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "leI64", (v, o) =>
-  v.getBigInt64(o, true)
+export const leI64: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  8,
+  "leI64",
+  /*#__PURE__*/ viewed((v, o) => v.getBigInt64(o, true))
 )
 /** @since 0.1.0 @category integers */
 export const beU128: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fixed(
@@ -199,20 +239,28 @@ export const leI128: Parser<bigint, never, never, Uint8Array> = /*#__PURE__*/ fi
 )
 
 /** @since 0.1.0 @category floats */
-export const beF32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "beF32", (v, o) =>
-  v.getFloat32(o, false)
+export const beF32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  4,
+  "beF32",
+  /*#__PURE__*/ viewed((v, o) => v.getFloat32(o, false))
 )
 /** @since 0.1.0 @category floats */
-export const leF32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(4, "leF32", (v, o) =>
-  v.getFloat32(o, true)
+export const leF32: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  4,
+  "leF32",
+  /*#__PURE__*/ viewed((v, o) => v.getFloat32(o, true))
 )
 /** @since 0.1.0 @category floats */
-export const beF64: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "beF64", (v, o) =>
-  v.getFloat64(o, false)
+export const beF64: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  8,
+  "beF64",
+  /*#__PURE__*/ viewed((v, o) => v.getFloat64(o, false))
 )
 /** @since 0.1.0 @category floats */
-export const leF64: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(8, "leF64", (v, o) =>
-  v.getFloat64(o, true)
+export const leF64: Parser<number, never, never, Uint8Array> = /*#__PURE__*/ fixed(
+  8,
+  "leF64",
+  /*#__PURE__*/ viewed((v, o) => v.getFloat64(o, true))
 )
 
 const byEndian =
@@ -288,6 +336,27 @@ export const f64: (endian: Endianness) => Parser<number, never, never, Uint8Arra
 
 const toCount = (n: number | bigint): number => (Predicate.isBigInt(n) ? Number(n) : n)
 
+/** How many counts {@link byCount} keeps the parsers of. */
+const CountCache = 256
+
+/**
+ * `build`, keeping the parsers it built for the first {@link CountCache}
+ * counts seen: length-prefixed data repeats a few lengths, and building a
+ * parser per value cost several times the parse.
+ */
+const byCount = <A>(build: (n: number) => A): ((n: number | bigint) => A) => {
+  const built = new Map<number, A>()
+  return (n) => {
+    const count = toCount(n)
+    let a = built.get(count)
+    if (a === undefined) {
+      a = build(count)
+      if (built.size < CountCache) built.set(count, a)
+    }
+    return a
+  }
+}
+
 /**
  * Parses a length with `count`, then takes that many tokens (winnow's
  * `length_take`, nom's `length_data`).
@@ -298,12 +367,19 @@ const toCount = (n: number | bigint): number => (Predicate.isBigInt(n) ? Number(
 export const lengthTake = <E, R, I extends Input = Uint8Array>(
   count: Parser<number | bigint, E, R, I>
 ): Parser<Slice<I>, E, R, I> => {
-  const countStep = count.step
-  return P.make((state: State<I>) => {
-    const n = countStep(state)
-    if (n === Fail) return Fail
-    return (Token.take<I>(toCount(n)).step as any)(state)
-  }, "lengthTake")
+  const take = byCount((n) => Token.take<I>(n).step)
+  // The count compiles with the grammar: the step is built from its (see `Parser.combinator`)
+  return P.combinator(
+    [count],
+    ([countStep]) =>
+      (state: State<I>) => {
+        // SAFETY: the count parser's step, interpreted or compiled, returns its output (a number or bigint) or `Fail`
+        const n = countStep(state) as number | bigint | Fail
+        if (n === Fail) return Fail
+        return take(n)(state)
+      },
+    "lengthTake"
+  )
 }
 
 /**
@@ -317,7 +393,10 @@ export const lengthRepeat = <E, R, I extends Input, A, E2, R2, I2 extends Input>
   count: Parser<number | bigint, E, R, I>,
   parser: Parser<A, E2, R2, I2>
 ): Parser<Array<A>, E | E2, R | R2, I & I2> =>
-  P.flatMap(count, (n) => P.repeat(parser, toCount(n)) as Parser<Array<A>, E2, R2, I2>)
+  P.flatMap(
+    count,
+    byCount((n) => P.repeat(parser, n))
+  )
 
 /**
  * Parses a length with `count`, takes that many tokens, and applies
@@ -331,4 +410,5 @@ export const lengthAndThen = <E, R, I extends Input, A, E2, R2>(
   count: Parser<number | bigint, E, R, I>,
   parser: Parser<A, E2, R2, Slice<I> & Input>
 ): Parser<A, E | E2, R | R2, I> =>
+  // SAFETY: a slice of an input is itself an input (a string, a `Uint8Array` or an array), so `Slice<I>` is an `Input`
   P.mapParser(lengthTake(count) as Parser<Slice<I> & Input, E, R, I>, P.complete(parser))

@@ -27,9 +27,10 @@ export const pairOf = (p: ParserLike): EntryPair | undefined => {
 /** Whether a node only changes diagnostics: its parser parses as its child does. */
 export const isDiagnostic = (
   node: Node
-): node is NodeOf<"Context" | "Expected" | "MapError" | "OrFail" | "Trace" | "Syntax" | "RetryAfter"> =>
+): node is NodeOf<"Context" | "Expected" | "Quiet" | "MapError" | "OrFail" | "Trace" | "Syntax" | "RetryAfter"> =>
   Predicate.isTagged(node, "Context") ||
   Predicate.isTagged(node, "Expected") ||
+  Predicate.isTagged(node, "Quiet") ||
   Predicate.isTagged(node, "MapError") ||
   Predicate.isTagged(node, "OrFail") ||
   Predicate.isTagged(node, "Trace") ||

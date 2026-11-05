@@ -70,8 +70,10 @@ describe("Expression", () => {
 
   it("builds trees", () => {
     type Ast = number | { readonly op: string; readonly args: ReadonlyArray<Ast> }
+    const operand: Parser.Parser<Ast, string> = Ascii.decUint
     const tree: Parser.Parser<Ast, string> = Expression.make({
-      operand: Ascii.decUint as Parser.Parser<Ast, string>,
+      operand,
+
       operators: [
         Expression.infixLeft(Token.oneOf("+-"), 1, (l: Ast, op, r: Ast): Ast => ({ op, args: [l, r] })),
         Expression.infixLeft(Token.oneOf("*/"), 2, (l: Ast, op, r: Ast): Ast => ({ op, args: [l, r] }))

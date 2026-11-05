@@ -5,6 +5,7 @@
 import * as Predicate from "effect/Predicate"
 import type { Input } from "../Input.js"
 import { Fail } from "../Input.js"
+import type { FromCharCodes } from "./text.js"
 import { latin1 } from "./text.js"
 
 /** The text of an input slice: as is for a string, Latin-1 for bytes, joined for tokens. */
@@ -290,4 +291,5 @@ export const scanFloatBytes = (b: Uint8Array, i: number, end: number): number | 
 
 /** The text of ASCII bytes. */
 const asciiText = (b: Uint8Array, start: number, end: number): string =>
-  String.fromCharCode.apply(null, b.subarray(start, end) as unknown as Array<number>)
+  // SAFETY: `apply` takes any array-like argument list, so each byte of the view is passed as a char code
+  (String.fromCharCode as FromCharCodes).apply(null, b.subarray(start, end))

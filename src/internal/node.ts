@@ -34,6 +34,13 @@ interface Bounds {
  */
 type Enc = Encoding<any> | undefined
 
+/**
+ * A user callback building a value from parser outputs: `map`, `mapOrFail`
+ * (one output), `mapSpan` (an output and its span), `zipWith` and `seqWith`
+ * (one argument per parser).
+ */
+type Mapper = (...values: Array<any>) => unknown
+
 export type Node =
   // Constants
   | { readonly _tag: "Opaque"; readonly step: Step }
@@ -51,6 +58,12 @@ export type Node =
   | ({ readonly _tag: "TakeWhile"; readonly set: unknown; readonly negate: boolean; readonly encoding: Enc } & Bounds)
   | ({ readonly _tag: "TakeUntil"; readonly literal: Input; readonly encoding: Enc } & Bounds)
   | { readonly _tag: "Rest"; readonly encoding: Enc }
+  // `Binary`'s fixed-size numbers: `read` reads `size` bytes at an offset of the state's bytes
+  | {
+      readonly _tag: "Fixed"
+      readonly size: number
+      readonly read: (bytes: Uint8Array, offset: number, state: State<Uint8Array>) => unknown
+    }
   | { readonly _tag: "RestLen" }
   | { readonly _tag: "TillLineEnding"; readonly encoding: Enc }
   | { readonly _tag: "Identifier"; readonly encoding: Enc }
@@ -66,11 +79,13 @@ export type Node =
       readonly encoding: Enc
     }
   // Mapping
-  | { readonly _tag: "Map"; readonly self: P; readonly f: (a: any) => unknown }
+  | { readonly _tag: "Map"; readonly self: P; readonly f: Mapper }
   | { readonly _tag: "As"; readonly self: P; readonly value: unknown }
   | { readonly _tag: "Tap"; readonly self: P; readonly f: (a: any) => void }
   | { readonly _tag: "TryMap"; readonly self: P; readonly f: (a: any) => Result.Result<unknown, unknown> }
   | { readonly _tag: "FilterMap"; readonly self: P; readonly f: (a: any) => Option.Option<unknown> }
+  /** `mapOrFail`: `f` returns `Fail` to reject the value. */
+  | { readonly _tag: "MapOrFail"; readonly self: P; readonly f: Mapper }
   | { readonly _tag: "Filter"; readonly self: P; readonly predicate: (a: any) => boolean }
   | { readonly _tag: "FlatMap"; readonly self: P; readonly f: (a: any) => P }
   // Consumed input
@@ -78,10 +93,15 @@ export type Node =
   | { readonly _tag: "WithTaken"; readonly self: P }
   | { readonly _tag: "Span"; readonly self: P }
   | { readonly _tag: "WithSpan"; readonly self: P }
+  /** `mapSpan`: `f(output, start, end)`. */
+  | { readonly _tag: "MapSpan"; readonly self: P; readonly f: Mapper }
+  /** `withFastPath`: `fast` runs first in compiled code; `Defer` runs `self`. */
+  | { readonly _tag: "FastPath"; readonly self: P; readonly fast: Step }
   // Errors
   | { readonly _tag: "Mode"; readonly self: P; readonly from: ErrMode; readonly to: ErrMode }
   | { readonly _tag: "Context"; readonly self: P; readonly label: string }
   | { readonly _tag: "Expected"; readonly self: P; readonly description: string }
+  | { readonly _tag: "Quiet"; readonly self: P }
   | { readonly _tag: "MapError"; readonly self: P }
   | { readonly _tag: "OrFail"; readonly self: P }
   // Control
@@ -97,7 +117,9 @@ export type Node =
       readonly output: "tuple" | number | readonly [number, number]
     }
   | { readonly _tag: "Struct"; readonly keys: ReadonlyArray<string>; readonly parsers: ReadonlyArray<P> }
-  | { readonly _tag: "ZipWith"; readonly self: P; readonly that: P; readonly f: (a: any, b: any) => unknown }
+  | { readonly _tag: "ZipWith"; readonly self: P; readonly that: P; readonly f: Mapper }
+  /** `seqWith`: `f` receives one output per parser. */
+  | { readonly _tag: "SeqWith"; readonly parsers: ReadonlyArray<P>; readonly f: Mapper }
   // Choice
   | { readonly _tag: "Alt"; readonly parsers: ReadonlyArray<P> }
   | {
@@ -128,6 +150,17 @@ export type Node =
       readonly op: (l: any, s: any, r: any) => unknown
       readonly right: boolean
     }
+  /**
+   * A combinator whose algorithm the compilers don't know (`Expression.make`,
+   * `permutation`): `build` makes its step from the steps of `parsers`. The
+   * interpreter passes their own steps; the closure compiler (and the JIT,
+   * through it) passes their compiled steps, so the parsers inside compile.
+   */
+  | {
+      readonly _tag: "Combinator"
+      readonly parsers: ReadonlyArray<P>
+      readonly build: (steps: ReadonlyArray<Step>) => Step
+    }
   // Services, recovery, debugging
   | { readonly _tag: "Service" }
   | { readonly _tag: "Provide"; readonly self: P }
@@ -147,11 +180,21 @@ export type Tag = Node["_tag"]
 
 export type NodeOf<T extends Tag> = Extract<Node, { readonly _tag: T }>
 
+/** What a fast path returns to leave the input to its grammar (`Parser.Defer`). */
+export const Defer: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/Parser/Defer")
+
 /** Where a parser's description is stored. */
 export const NodeId: unique symbol = /*#__PURE__*/ Symbol.for("effect-parse/Parser/node")
 
+/** The description recorded for a parser, if it has one. */
+export const describedNode = (p: ParserLike): Node | undefined =>
+  // SAFETY: `Parser.described` stores a parser's `Node` under `NodeId`;
+  // reading it from any other parser (or one built by `Parser.make`, which
+  // stores `undefined`) yields `undefined`
+  (p as ParserLike & { readonly [NodeId]?: Node })[NodeId]
+
 /** The description of a parser: `Opaque` when it has none. */
-export const nodeOf = (p: ParserLike): Node => (p as any)[NodeId] ?? { _tag: "Opaque", step: p.step }
+export const nodeOf = (p: ParserLike): Node => describedNode(p) ?? { _tag: "Opaque", step: p.step }
 
 /** Normalizes a range, as `repeat`, `takeWhile`, ... do. */
 export const bounds = (
@@ -187,15 +230,19 @@ export const children = (node: Node): ReadonlyArray<P> => {
     case "Tap":
     case "TryMap":
     case "FilterMap":
+    case "MapOrFail":
     case "Filter":
     case "FlatMap":
     case "Taken":
     case "WithTaken":
     case "Span":
     case "WithSpan":
+    case "MapSpan":
     case "Mode":
     case "Context":
     case "Expected":
+    case "Quiet":
+    case "FastPath":
     case "MapError":
     case "OrFail":
     case "Opt":
@@ -213,14 +260,16 @@ export const children = (node: Node): ReadonlyArray<P> => {
       return [node.self, node.recover]
     case "Seq":
     case "Struct":
+    case "SeqWith":
     case "Alt":
+    case "Combinator":
       return node.parsers
     case "ZipWith":
       return [node.self, node.that]
     case "Dispatch": {
       const out: Array<P> = [node.selector]
       if (node.cases !== undefined) {
-        for (const key of Reflect.ownKeys(node.cases)) out.push(node.cases[key as any])
+        for (const key of Reflect.ownKeys(node.cases)) out.push(node.cases[key])
       }
       if (node.otherwise !== undefined) out.push(node.otherwise)
       return out

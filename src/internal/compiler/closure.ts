@@ -9,15 +9,15 @@
  */
 import * as Predicate from "effect/Predicate"
 import type { Encoding } from "../../Encoding.js"
-import type { ErrMode, State } from "../../Input.js"
+import type { ErrMode, Input, State } from "../../Input.js"
 import { Fail } from "../../Input.js"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import type { Node, NodeOf, ParserLike } from "../node.js"
 import { addEntry, flushEntries, fromEntries, isPlainKey } from "../entries.js"
-import { nodeOf, scansFloat } from "../node.js"
+import { Defer, nodeOf, scansFloat } from "../node.js"
 import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from "../numbers.js"
-import { charOf, fastLimit, firstCodePoint, fold, utf16be, utf16le, validate } from "../text.js"
+import { charOf, fastLimit, firstCodePoint, fold, textIn, utf16be, utf16le, utf8, utf8Text, validate } from "../text.js"
 import { countTokens, indexOf } from "../tokens.js"
 import type { AltPlan } from "./first.js"
 import { Key } from "../key.js"
@@ -26,6 +26,7 @@ import type { Backend } from "./registry.js"
 import type { EntryPair } from "./entries.js"
 import { buildsEntries, pairOf } from "./entries.js"
 import { FirstSets, planAlt } from "./first.js"
+import { nextStop, SearchHead, StopCache, stopChars } from "./search.js"
 import { acceptTable, kindOfEncoding, TableSize, textSet, tokenSet } from "./sets.js"
 
 export type Step = (state: State<any>) => any
@@ -137,6 +138,11 @@ class Compiler {
     switch (node._tag) {
       case "Opaque":
         return this.fallback(p, node, "not describable (Parser.make, gen, ...)")
+      case "Fixed":
+        // `Binary`'s numbers: the step is already what a closure would be
+        return p.step
+      case "Combinator":
+        return node.build(node.parsers.map((q) => this.compile(q, true)))
       case "Succeed": {
         const value = node.value
         return () => value
@@ -158,10 +164,8 @@ class Compiler {
             s.mode = BT
             return Fail
           }
-          if (s.partial) {
-            s.mode = INC
-            return Fail
-          }
+          // `eof`'s own failure: `Incomplete`, needing one more unit
+          if (s.partial) return s.incomplete(1)
           return undefined
         }
       case "Location":
@@ -199,7 +203,7 @@ class Compiler {
           if (step !== undefined) return step
         }
         // Streaming builds keep the array, which their checkpoints hold
-        if (node.f === fromEntries && !this.resumable && buildsEntries(node.self)) return this.entries(node.self)
+        if (node.f === fromEntries && buildsEntries(node.self)) return this.entries(node.self)
         const c = this.compile(node.self, true)
         const f = node.f
         return (s) => {
@@ -246,6 +250,28 @@ class Compiler {
           return Fail
         }
       }
+      case "FastPath": {
+        const c = this.compile(node.self, used)
+        const fast = node.fast
+        return (s) => {
+          const start = s.pos
+          const a = fast(s)
+          if (a !== Defer) return a
+          s.pos = start
+          return c(s)
+        }
+      }
+      case "MapOrFail": {
+        const c = this.compile(node.self, true)
+        const f = node.f
+        return (s) => {
+          const a = c(s)
+          if (a === Fail) return Fail
+          const b = f(a)
+          if (b === Fail) s.mode = BT
+          return b
+        }
+      }
       case "Filter": {
         const c = this.compile(node.self, true)
         const predicate = node.predicate
@@ -280,6 +306,16 @@ class Compiler {
           return a === Fail ? Fail : [a, s.slice(start, s.pos)]
         }
       }
+      case "MapSpan": {
+        const c = this.compile(node.self, used)
+        if (!used) return c
+        const f = node.f
+        return (s) => {
+          const start = s.pos
+          const a = c(s)
+          return a === Fail ? Fail : f(a, start, s.pos)
+        }
+      }
       case "Span": {
         const c = this.compile(node.self, false)
         if (!used) return c
@@ -308,6 +344,7 @@ class Compiler {
       }
       case "Context":
       case "Expected":
+      case "Quiet":
       case "MapError":
       case "OrFail":
       case "Trace":
@@ -377,6 +414,11 @@ class Compiler {
           return out
         }
       }
+      case "SeqWith": {
+        const steps = node.parsers.map((q) => this.compile(q, used))
+        if (!used) return this.chain(steps)
+        return this.seqWith(steps, node.f)
+      }
       case "ZipWith": {
         const c1 = this.compile(node.self, used)
         const c2 = this.compile(node.that, used)
@@ -394,8 +436,26 @@ class Compiler {
       case "Dispatch":
         return this.dispatch(p, node, used)
       case "Repeat":
-      case "Fold":
+      case "Fold": {
+        // A run of a character set whose characters are not kept scans as a `takeWhile` (#79)
+        const element = Predicate.isTagged(node, "Repeat") && !used ? nodeOf(node.self) : undefined
+        if (
+          element !== undefined &&
+          Predicate.isTagged(element, "OneOf") &&
+          this.kind !== 2 &&
+          this.native(element.encoding)
+        ) {
+          const { encoding, negate, set } = element
+          const run: NodeOf<"TakeWhile"> = { _tag: "TakeWhile", set, negate, encoding, min: node.min, max: node.max }
+          // The repetition's own step is the exact fallback near the end of a partial input
+          return this.partialSafe(
+            p,
+            encoding === undefined ? this.token(p, run, false) : this.text(p, run, encoding, false),
+            Margin
+          )
+        }
         return this.repeat(node, used)
+      }
       case "RepeatTill":
         return this.repeatTill(node)
       case "Separated":
@@ -408,13 +468,51 @@ class Compiler {
     }
   }
 
+  /** `seqWith`: up to three parsers without an array of values. */
+  seqWith(steps: ReadonlyArray<Step>, f: NodeOf<"SeqWith">["f"]): Step {
+    const n = steps.length
+    if (n === 0) return () => f()
+    const [c1, c2, c3] = steps
+    if (n === 1)
+      return (s) => {
+        const a = c1(s)
+        return a === Fail ? Fail : f(a)
+      }
+    if (n === 2)
+      return (s) => {
+        const a = c1(s)
+        if (a === Fail) return Fail
+        const b = c2(s)
+        return b === Fail ? Fail : f(a, b)
+      }
+    if (n === 3)
+      return (s) => {
+        const a = c1(s)
+        if (a === Fail) return Fail
+        const b = c2(s)
+        if (b === Fail) return Fail
+        const c = c3(s)
+        return c === Fail ? Fail : f(a, b, c)
+      }
+    return (s) => {
+      const values = new Array(n)
+      for (let i = 0; i < n; i++) {
+        const a = steps[i](s)
+        if (a === Fail) return Fail
+        values[i] = a
+      }
+      return f(...values)
+    }
+  }
+
   /** Runs steps in order, for their effect on the cursor only. */
   chain(steps: ReadonlyArray<Step>): Step {
     const n = steps.length
     if (n === 0) return () => undefined
     if (n === 1) return steps[0]
     if (n === 2) {
-      const [a, b] = steps as [Step, Step]
+      const a = steps[0]
+      const b = steps[1]
       return (s) => (a(s) === Fail ? Fail : b(s))
     }
     return (s) => {
@@ -443,7 +541,8 @@ class Compiler {
     }
     if (Predicate.isNumber(output)) {
       if (n === 2) {
-        const [a, b] = steps as [Step, Step]
+        const a = steps[0]
+        const b = steps[1]
         return output === 0
           ? (s) => {
               const x = a(s)
@@ -479,8 +578,8 @@ class Compiler {
   /** The unit at the cursor, or -1 at the end of the input. */
   private unitReader(): (s: State<any>) => number {
     return this.kind === 0
-      ? (s) => (s.pos < s.end ? (s.input as string).charCodeAt(s.pos) : -1)
-      : (s) => (s.pos < s.end ? (s.input as Uint8Array)[s.pos] : -1)
+      ? (s: State<string>) => (s.pos < s.end ? s.input.charCodeAt(s.pos) : -1)
+      : (s: State<Uint8Array>) => (s.pos < s.end ? s.input[s.pos] : -1)
   }
 
   alt(node: NodeOf<"Alt">, used: boolean): Step {
@@ -533,7 +632,7 @@ class Compiler {
     const compiled = new Map<ParserLike, Step>()
     if (node.cases !== undefined) {
       for (const key of Reflect.ownKeys(node.cases)) {
-        const q = node.cases[key as any]
+        const q = node.cases[key]
         if (!compiled.has(q)) compiled.set(q, this.compile(q, used))
       }
     }
@@ -557,9 +656,9 @@ class Compiler {
       return general
     }
     // Switch on the next unit when the selector is `any` or `peek(any)`
-    let sel = nodeOf(node.selector)
-    const peek = Predicate.isTagged(sel, "Peek")
-    if (peek) sel = nodeOf((sel as NodeOf<"Peek">).self)
+    const top = nodeOf(node.selector)
+    const peek = Predicate.isTagged(top, "Peek")
+    const sel = peek ? nodeOf(top.self) : top
     if (!Predicate.isTagged(sel, "Any") || !this.native(sel.encoding)) return general
     const enc = sel.encoding
     // Units below `limit` are whole tokens, so the key is known in advance
@@ -597,17 +696,17 @@ class Compiler {
     const { max, min } = node
     const checkLoop = max === Infinity
     const isFold = Predicate.isTagged(node, "Fold")
-    const cond = isFold ? (node as NodeOf<"Fold">).while : undefined
+    const cond = isFold ? node.while : undefined
     const c = this.compile(node.self, used)
     const resumable = this.resumable
     const key = new Key()
     // The accumulator: an array, the fold's value, or nothing when unused (and unneeded by `while`)
     const tracked = used || cond !== undefined
-    const init: () => unknown = !tracked ? () => undefined : isFold ? (node as NodeOf<"Fold">).init : () => []
+    const init: () => unknown = !tracked ? () => undefined : isFold ? node.init : () => []
     const add: (acc: any, a: unknown) => unknown = !tracked
       ? (acc) => acc
       : isFold
-        ? (node as NodeOf<"Fold">).f
+        ? node.f
         : (acc, a) => {
             acc.push(a)
             return acc
@@ -618,6 +717,7 @@ class Compiler {
       let count = 0
       let resumed = false
       if (resumable && s.resume !== undefined) {
+        // SAFETY: only this loop saves checkpoints under `key`: `{ acc, count, pos }` when it runs out, a `Done` when it completes
         const cp = Resume.take(s, key, entry) as Resume.Done | { acc: unknown; count: number; pos: number } | undefined
         if (cp instanceof Resume.Done) {
           s.pos = cp.pos
@@ -657,44 +757,43 @@ class Compiler {
    */
   private entries(p: ParserLike): Step {
     const node = nodeOf(p)
-    switch (node._tag) {
-      case "Mode": {
-        const c = this.entries(node.self)
-        const from = node.from
-        const to = node.to
-        return (s) => {
-          const a = c(s)
-          if (a === Fail && s.mode === from) s.mode = to
-          return a
-        }
+    if (Predicate.isTagged(node, "Mode")) {
+      const c = this.entries(node.self)
+      const from = node.from
+      const to = node.to
+      return (s) => {
+        const a = c(s)
+        if (a === Fail && s.mode === from) s.mode = to
+        return a
       }
-      case "Seq": {
-        const i = node.output as number
-        const steps = node.parsers.map((q, j) => (j === i ? this.entries(q) : this.compile(q, false)))
-        return (s) => {
-          let out: unknown
-          for (let j = 0; j < steps.length; j++) {
-            const a = steps[j](s)
-            if (a === Fail) return Fail
-            if (j === i) out = a
-          }
-          return out
-        }
-      }
-      case "Repeat":
-      case "Separated": {
-        const pair = pairOf(node.self)
-        if (pair !== undefined) return this.entriesLoop(node, pair)
-        // Not reached (`buildsEntries` found the pair): build the pairs, then the object
-        const c = this.compile(p, true)
-        return (s) => {
-          const a = c(s)
-          return a === Fail ? Fail : fromEntries(a as Iterable<readonly [PropertyKey, unknown]>)
-        }
-      }
-      default:
-        return this.entries((node as { readonly self: ParserLike }).self)
     }
+    if (Predicate.isTagged(node, "Seq")) {
+      // SAFETY: `buildsEntries` passes through a sequence only when it keeps one output, by index
+      const i = node.output as number
+      const steps = node.parsers.map((q, j) => (j === i ? this.entries(q) : this.compile(q, false)))
+      return (s) => {
+        let out: unknown
+        for (let j = 0; j < steps.length; j++) {
+          const a = steps[j](s)
+          if (a === Fail) return Fail
+          if (j === i) out = a
+        }
+        return out
+      }
+    }
+    if (Predicate.isTagged(node, "Repeat") || Predicate.isTagged(node, "Separated")) {
+      const pair = pairOf(node.self)
+      if (pair !== undefined) return this.entriesLoop(node, pair)
+      // Not reached (`buildsEntries` found the pair): build the pairs, then the object
+      const c = this.compile(p, true)
+      return (s) => {
+        const a = c(s)
+        // SAFETY: a used `repeat` or `separated` returns the array of its elements, here the pairs
+        return a === Fail ? Fail : fromEntries(a as Iterable<readonly [PropertyKey, unknown]>)
+      }
+    }
+    // SAFETY: the other nodes `buildsEntries` passes through are diagnostics, which all wrap a `self`
+    return this.entries((node as { readonly self: ParserLike }).self)
   }
 
   private entriesLoop(node: NodeOf<"Repeat"> | NodeOf<"Separated">, pair: EntryPair): Step {
@@ -715,10 +814,17 @@ class Compiler {
     }
     const { max, min } = node
     const checkLoop = max === Infinity
+    // A streaming build's checkpoint holds the object built so far (see `repeat`)
+    const resumable = this.resumable
+    const site = new Key()
     if (Predicate.isTagged(node, "Repeat")) {
       return (s) => {
-        const acc = new EntriesAcc()
-        for (let count = 0; count < max; count++) {
+        const at = s.pos
+        const cp = resumable && s.resume !== undefined ? resumeEntries(s, site, at) : undefined
+        if (cp instanceof Resume.Done) return cp.value
+        const resumed = cp !== undefined
+        const acc = cp?.acc ?? new EntriesAcc()
+        for (let count = cp?.count ?? 0; count < max; count++) {
           const start = s.pos
           let key: unknown
           let value: unknown
@@ -733,9 +839,7 @@ class Compiler {
             else if (j === vi) value = a
           }
           if (!ok) {
-            if (s.mode !== BT || count < min) return Fail
-            s.pos = start
-            return acc.result()
+            return stopEntries(s, site, at, resumed, acc, count, start, min)
           }
           if (checkLoop && s.pos === start) {
             s.mode = CUT
@@ -743,40 +847,42 @@ class Compiler {
           }
           acc.add(key, value)
         }
-        return acc.result()
+        return entriesDone(s, site, at, resumed, acc)
       }
     }
     const sep = this.compile(node.separator, false)
     return (s) => {
-      const acc = new EntriesAcc()
-      let count = 0
-      if (max === 0) return acc.result()
-      let start = s.pos
-      if (!entry(s, acc)) {
-        if (s.mode !== BT || min > 0) return Fail
-        s.pos = start
-        return acc.result()
-      }
-      count++
-      while (count < max) {
-        start = s.pos
-        if (sep(s) === Fail) {
-          if (s.mode !== BT || count < min) return Fail
+      const at = s.pos
+      const cp = resumable && s.resume !== undefined ? resumeEntries(s, site, at) : undefined
+      if (cp instanceof Resume.Done) return cp.value
+      const resumed = cp !== undefined
+      const acc = cp?.acc ?? new EntriesAcc()
+      let count = cp?.count ?? 0
+      if (!resumed) {
+        if (max === 0) return acc.result()
+        const start = s.pos
+        if (!entry(s, acc)) {
+          if (s.mode !== BT || min > 0) return Fail
           s.pos = start
           return acc.result()
+        }
+        count++
+      }
+      while (count < max) {
+        const start = s.pos
+        if (sep(s) === Fail) {
+          return stopEntries(s, site, at, resumed, acc, count, start, min)
         }
         if (checkLoop && s.pos === start) {
           s.mode = CUT
           return Fail
         }
         if (!entry(s, acc)) {
-          if (s.mode !== BT || count < min) return Fail
-          s.pos = start
-          return acc.result()
+          return stopEntries(s, site, at, resumed, acc, count, start, min)
         }
         count++
       }
-      return acc.result()
+      return entriesDone(s, site, at, resumed, acc)
     }
   }
 
@@ -819,6 +925,7 @@ class Compiler {
       let count = 0
       let resumed = false
       if (resumable && s.resume !== undefined) {
+        // SAFETY: only this loop saves checkpoints under `key`: `{ acc, count, pos }` when it runs out, a `Done` when it completes
         const cp = Resume.take(s, key, entry) as
           | Resume.Done
           | { acc: Array<unknown>; count: number; pos: number }
@@ -885,6 +992,7 @@ class Compiler {
         let acc: unknown
         let resumed = false
         if (resumable && s.resume !== undefined) {
+          // SAFETY: only this loop saves checkpoints under `key`: `{ acc, pos }` when it runs out, a `Done` when it completes
           const cp = Resume.take(s, key, entry) as Resume.Done | { acc: unknown; pos: number } | undefined
           if (cp instanceof Resume.Done) {
             s.pos = cp.pos
@@ -961,21 +1069,22 @@ class Compiler {
   // ---------------------------------------------------------------------------
 
   token(p: ParserLike, node: TokenNode, used: boolean): Step {
+    // SAFETY: `build` compiles a token node without an encoding only when `native` holds, that is when `kind` is not 2
     const kind = this.kind as 0 | 1
     switch (node._tag) {
       case "Any":
         if (kind === 1) {
-          return (s) => {
+          return (s: State<Uint8Array>) => {
             const pos = s.pos
             if (pos >= s.end) return fail(s)
             s.pos = pos + 1
-            return (s.input as Uint8Array)[pos]
+            return s.input[pos]
           }
         }
         return (s) => {
           const pos = s.pos
           if (pos >= s.end) return fail(s)
-          const str = s.input as string
+          const str: string = s.input
           const c = str.charCodeAt(pos)
           if (c >= 0xd800 && c <= 0xdbff && pos + 1 < str.length && (str.charCodeAt(pos + 1) & 0xfc00) === 0xdc00) {
             s.pos = pos + 2
@@ -992,10 +1101,10 @@ class Compiler {
         const accept = acceptTable(set, negate)
         const test = set.test
         if (kind === 1) {
-          return (s) => {
+          return (s: State<Uint8Array>) => {
             const pos = s.pos
             if (pos >= s.end) return fail(s)
-            const b = (s.input as Uint8Array)[pos]
+            const b = s.input[pos]
             if (accept[b] === 0) return fail(s)
             s.pos = pos + 1
             return b
@@ -1004,7 +1113,7 @@ class Compiler {
         return (s) => {
           const pos = s.pos
           if (pos >= s.end) return fail(s)
-          const str = s.input as string
+          const str: string = s.input
           const c = str.charCodeAt(pos)
           if (c < TableSize) {
             if (accept[c] === 0) return fail(s)
@@ -1025,15 +1134,15 @@ class Compiler {
       case "Take": {
         const count = node.count
         if (kind === 1) {
-          return (s) => {
+          return (s: State<Uint8Array>) => {
             const start = s.pos
             if (s.end - start < count) return failAt(s, s.end)
             s.pos = start + count
-            return used ? (s.input as Uint8Array).subarray(start, start + count) : undefined
+            return used ? s.input.subarray(start, start + count) : undefined
           }
         }
         return (s) => {
-          const str = s.input as string
+          const str: string = s.input
           const start = s.pos
           const end = s.end
           let i = start
@@ -1078,15 +1187,15 @@ class Compiler {
     const lit = node.literal
     const literalKind = Predicate.isString(lit) ? 0 : lit instanceof Uint8Array ? 1 : 2
     if (this.kind === 0) {
-      if (literalKind !== 0) return this.fallback(p, node, "byte or array literal on string input")
-      const str = lit as string
+      if (!Predicate.isString(lit)) return this.fallback(p, node, "byte or array literal on string input")
+      const str = lit
       const len = str.length
       if (node.caseless) {
         const lowered = Array.from({ length: len }, (_, i) => lowerAscii(str.charCodeAt(i)))
         return (s) => {
           const pos = s.pos
           if (s.end - pos < len) return fail(s)
-          const input = s.input as string
+          const input: string = s.input
           for (let i = 0; i < len; i++) {
             if (lowerAscii(input.charCodeAt(pos + i)) !== lowered[i]) return fail(s)
           }
@@ -1096,8 +1205,8 @@ class Compiler {
       }
       return stringLiteral(str, str)
     }
-    if (literalKind === 2) return this.fallback(p, node, "array literal on byte input")
-    const bytes = literalKind === 0 ? new TextEncoder().encode(lit as string) : (lit as Uint8Array)
+    const bytes = Predicate.isString(lit) ? new TextEncoder().encode(lit) : lit instanceof Uint8Array ? lit : undefined
+    if (bytes === undefined) return this.fallback(p, node, "array literal on byte input")
     const len = bytes.length
     const sameKind = literalKind === 1 && !node.caseless
     const expect = node.caseless ? Array.from(bytes, lowerAscii) : Array.from(bytes)
@@ -1105,7 +1214,7 @@ class Compiler {
     return (s) => {
       const pos = s.pos
       if (s.end - pos < len) return fail(s)
-      const input = s.input as Uint8Array
+      const input: Uint8Array = s.input
       for (let i = 0; i < len; i++) {
         const b = input[pos + i]
         if ((caseless ? lowerAscii(b) : b) !== expect[i]) return fail(s)
@@ -1116,13 +1225,14 @@ class Compiler {
   }
 
   tokenTakeWhile(node: NodeOf<"TakeWhile">, used: boolean): Step {
+    // SAFETY: called from `token` only, whose `kind` is not 2
     const kind = this.kind as 0 | 1
     const { max, min, negate } = node
     const set = tokenSet(node.set, kind)
     const accept = acceptTable(set, negate)
     if (kind === 1) {
       return (s) => {
-        const bytes = s.input as Uint8Array
+        const bytes: Uint8Array = s.input
         const start = s.pos
         const limit = max === Infinity ? s.end : Math.min(s.end, start + max)
         let i = start
@@ -1132,9 +1242,11 @@ class Compiler {
         return used ? bytes.subarray(start, i) : undefined
       }
     }
+    const stops = negate && min <= 1 && max === Infinity ? stopChars(set) : undefined
+    if (stops !== undefined) return stopTakeTill(stops, min, used)
     const test = set.test
     return (s) => {
-      const str = s.input as string
+      const str: string = s.input
       const start = s.pos
       const end = s.end
       let i = start
@@ -1172,7 +1284,9 @@ class Compiler {
     const { fast, unitAt, width: unitWidth } = unitReader(this.kind, enc)
     const decode = enc.decode
     const width = enc.width
-    const toText = enc.text
+    // UTF-8 decodes through the state's ASCII run (see `utf8Text`)
+    const toText: (s: State<any>, start: number, end: number) => string =
+      enc === utf8 ? utf8Text : (s, start, end) => enc.text(s.input, start, end)
     switch (node._tag) {
       case "Any":
         return (s) => {
@@ -1190,6 +1304,7 @@ class Compiler {
           return used ? charOf(cp) : undefined
         }
       case "Literal": {
+        // SAFETY: a `Literal` with an encoding is a `Text` literal, which records the string it encodes
         const lit = node.literal as string
         if (node.caseless) {
           const folded = Array.from(lit, (c) => fold(firstCodePoint(c)))
@@ -1214,18 +1329,18 @@ class Compiler {
               if (fold(cp) !== folded[i]) return failAt(s, pos)
             }
             s.pos = pos
-            return used ? toText(input, start, pos) : undefined
+            return used ? toText(s, start, pos) : undefined
           }
         }
         const encoded = enc.encode(lit)
         if (Predicate.isString(encoded)) return stringLiteral(encoded, lit)
-        const bytes = encoded as Uint8Array
+        const bytes: Uint8Array = encoded
         const len = bytes.length
         if (len === 1) {
           const b0 = bytes[0]
-          return (s) => {
+          return (s: State<Uint8Array>) => {
             const pos = s.pos
-            if (pos < s.end && (s.input as Uint8Array)[pos] === b0) {
+            if (pos < s.end && s.input[pos] === b0) {
               s.pos = pos + 1
               return lit
             }
@@ -1235,7 +1350,7 @@ class Compiler {
         return (s) => {
           const pos = s.pos
           if (s.end - pos < len) return fail(s)
-          const input = s.input as Uint8Array
+          const input: Uint8Array = s.input
           for (let i = 0; i < len; i++) if (input[pos + i] !== bytes[i]) return fail(s)
           s.pos = pos + len
           return lit
@@ -1280,7 +1395,7 @@ class Compiler {
             }
           }
           s.pos = pos
-          return used ? toText(input, start, pos) : undefined
+          return used ? toText(s, start, pos) : undefined
         }
       }
       case "TakeWhile": {
@@ -1307,9 +1422,9 @@ class Compiler {
     if (enc === undefined) {
       if (!used) return c
       if (this.kind === 0) {
-        return (s) => {
+        return (s: State<string>) => {
           const start = s.pos
-          return c(s) === Fail ? Fail : (s.input as string).slice(start, s.pos)
+          return c(s) === Fail ? Fail : s.input.slice(start, s.pos)
         }
       }
       return (s) => {
@@ -1319,7 +1434,9 @@ class Compiler {
     }
     // `Text.taken` checks that the text is well formed, then decodes it
     const { fast, unitAt, width } = unitReader(this.kind, enc)
-    const toText = enc.text
+    // UTF-8 decodes through the state's ASCII run (see `utf8Text`)
+    const toText: (s: State<any>, start: number, end: number) => string =
+      enc === utf8 ? utf8Text : (s, start, end) => enc.text(s.input, start, end)
     return (s) => {
       const start = s.pos
       if (c(s) === Fail) return Fail
@@ -1328,7 +1445,7 @@ class Compiler {
       let i = start
       while (i < end && unitAt(input, i, end) < fast) i += width
       if (i < end && validate(enc, s, i, end) < 0) return fail(s)
-      return used ? toText(input, start, end) : undefined
+      return used ? toText(s, start, end) : undefined
     }
   }
 
@@ -1341,11 +1458,7 @@ class Compiler {
     if (!floatTexts.has(node.self) || this.kind === 2) return undefined
     if (!scansFloat(node.self, (enc) => this.native(enc))) return undefined
     const c = this.compile(node.self, true)
-    const scan = (this.kind === 0 ? scanFloatString : scanFloatBytes) as (
-      input: unknown,
-      i: number,
-      end: number
-    ) => unknown
+    const scan = this.kind === 0 ? scanFloatString : scanFloatBytes
     const resumable = this.resumable
     return (s) => {
       const v = scan(s.input, s.pos, s.end)
@@ -1372,15 +1485,15 @@ class Compiler {
     if (enc === undefined || (ctrl < fastLimit(enc) && ctrl < TableSize)) {
       control =
         kind === 0
-          ? (s) => {
-              if (s.pos < s.end && (s.input as string).charCodeAt(s.pos) === ctrl) {
+          ? (s: State<string>) => {
+              if (s.pos < s.end && s.input.charCodeAt(s.pos) === ctrl) {
                 s.pos++
                 return true
               }
               return false
             }
-          : (s) => {
-              if (s.pos < s.end && (s.input as Uint8Array)[s.pos] === ctrl) {
+          : (s: State<Uint8Array>) => {
+              if (s.pos < s.end && s.input[s.pos] === ctrl) {
                 s.pos++
                 return true
               }
@@ -1407,19 +1520,20 @@ class Compiler {
     const resumable = this.resumable
     const key = new Key()
     /** Fails as incomplete, keeping a checkpoint in a streaming parse. */
-    const incomplete = (s: State<any>, start: number, checkpoint: unknown): typeof Fail => {
+    const incomplete = (s: State<any>, start: number, checkpoint: EscapedCheckpoint): typeof Fail => {
       if (s.resume !== undefined) Resume.save(s, key, start, checkpoint)
       s.mode = INC
       return Fail
     }
     if (raw) {
-      const slice: (s: State<any>, start: number) => unknown =
-        enc === undefined ? (s, start) => s.slice(start, s.pos) : (s, start) => enc.text(s.input, start, s.pos)
+      const slice: (s: State<any>, start: number) => Input =
+        enc === undefined ? (s, start) => s.slice(start, s.pos) : (s, start) => textIn(enc, s, start, s.pos)
       return (s) => {
         const start = s.pos
         let resumed = false
         if (resumable && s.resume !== undefined) {
-          const cp = Resume.take(s, key, start) as Resume.Done | number | undefined
+          // SAFETY: only this raw loop saves checkpoints under `key`: the position it stopped at, or a `Done` when it completes
+          const cp = Resume.take(s, key, start) as Resume.Done | Extract<EscapedCheckpoint, number> | undefined
           if (cp instanceof Resume.Done) {
             s.pos = cp.pos
             return cp.value
@@ -1447,7 +1561,11 @@ class Compiler {
             return resumed ? Resume.done(s, key, start, true, slice(s, start)) : slice(s, start)
           }
         }
-        if (s.partial) return incomplete(s, start, s.pos)
+        if (s.partial) {
+          // The text ran out of input: `escaped`'s own failure, needing more
+          s.incomplete(0)
+          return incomplete(s, start, s.pos)
+        }
         return resumed ? Resume.done(s, key, start, true, slice(s, start)) : slice(s, start)
       }
     }
@@ -1456,7 +1574,8 @@ class Compiler {
       let out = ""
       let resumed = false
       if (resumable && s.resume !== undefined) {
-        const cp = Resume.take(s, key, start) as Resume.Done | { out: string; pos: number } | undefined
+        // SAFETY: only this loop saves checkpoints under `key`: `{ out, pos }` when it runs out, a `Done` when it completes
+        const cp = Resume.take(s, key, start) as Resume.Done | Exclude<EscapedCheckpoint, number> | undefined
         if (cp instanceof Resume.Done) {
           s.pos = cp.pos
           return cp.value
@@ -1488,13 +1607,24 @@ class Compiler {
           return resumed ? Resume.done(s, key, start, true, out) : out
         }
       }
-      if (s.partial) return incomplete(s, start, { out, pos: s.pos })
+      if (s.partial) {
+        // The text ran out of input: `escaped`'s own failure, needing more
+        s.incomplete(0)
+        return incomplete(s, start, { out, pos: s.pos })
+      }
       return resumed ? Resume.done(s, key, start, true, out) : out
     }
   }
 }
 
 type TokenNode = NodeOf<"Any" | "Literal" | "OneOf" | "Take" | "TakeWhile" | "TakeUntil" | "Rest">
+
+/**
+ * Where a compiled `escaped` that ran out of input resumes: the position
+ * (`takeEscaped`, which slices the input), or the text unescaped so far and
+ * the position after it.
+ */
+type EscapedCheckpoint = number | { readonly out: string; readonly pos: number }
 
 const fail = (s: State<any>): typeof Fail => {
   s.mode = BT
@@ -1651,18 +1781,18 @@ const stringLiteral = (str: string, value: unknown): Step => {
   if (len === 0) return () => value
   if (len === 1) {
     const c0 = str.charCodeAt(0)
-    return (s) => {
+    return (s: State<string>) => {
       const pos = s.pos
-      if (pos < s.end && (s.input as string).charCodeAt(pos) === c0) {
+      if (pos < s.end && s.input.charCodeAt(pos) === c0) {
         s.pos = pos + 1
         return value
       }
       return fail(s)
     }
   }
-  return (s) => {
+  return (s: State<string>) => {
     const pos = s.pos
-    if (s.end - pos >= len && (s.input as string).startsWith(str, pos)) {
+    if (s.end - pos >= len && s.input.startsWith(str, pos)) {
       s.pos = pos + len
       return value
     }
@@ -1670,7 +1800,81 @@ const stringLiteral = (str: string, value: unknown): Step => {
   }
 }
 
-/** A closure compiler for one input kind; it memoizes what it compiles. */
+/**
+ * `Token.takeTill` on a string, of one to three stop characters that are
+ * whole code points (see `search.ts`): every other unit, surrogates
+ * included, is accepted, so the run ends at the first stop character, or
+ * at the state's end.
+ */
+const stopTakeTill = (stops: ReadonlyArray<number>, min: number, used: boolean): Step => {
+  const head = stops.length === 1 ? SearchHead : 2 * SearchHead
+  const c0 = stops[0]
+  const c1 = stops.length > 1 ? stops[1] : -1
+  const c2 = stops.length > 2 ? stops[2] : -1
+  const one = String.fromCharCode(c0)
+  const site = new StopCache(stops.map((u) => String.fromCharCode(u)))
+  return (s: State<string>) => {
+    const str = s.input
+    const start = s.pos
+    const end = s.end
+    const h = start + head < end ? start + head : end
+    let i = start
+    let c = -1
+    while (i < h && (c = str.charCodeAt(i)) !== c0 && c !== c1 && c !== c2) i++
+    // A run that ends right after the head needs no search
+    if (i === h && i < end && (c = str.charCodeAt(i)) !== c0 && c !== c1 && c !== c2) {
+      if (stops.length === 1) {
+        const at = str.indexOf(one, i)
+        i = at < 0 || at > end ? end : at
+      } else i = nextStop(site, s, i)
+    }
+    if (i - start < min) return failAt(s, i)
+    s.pos = i
+    return used ? str.slice(start, i) : undefined
+  }
+}
+
+/** A checkpoint of `entriesLoop`: the object so far, the entries parsed and where the next one starts. */
+interface EntriesCheckpoint {
+  readonly acc: EntriesAcc
+  readonly count: number
+  readonly pos: number
+}
+
+/** Takes the checkpoint `entriesLoop` saved at `at`, restoring the position of a completed one. */
+const resumeEntries = (s: State<any>, key: Key, at: number): Resume.Done | EntriesCheckpoint | undefined => {
+  // SAFETY: only `entriesLoop` saves checkpoints under its `key`: an `EntriesCheckpoint` when it runs out, a `Done` when it completes
+  const cp = Resume.take(s, key, at) as Resume.Done | EntriesCheckpoint | undefined
+  if (cp instanceof Resume.Done) s.pos = cp.pos
+  else if (cp !== undefined) s.pos = cp.pos
+  return cp
+}
+
+/** The object `entriesLoop` built, recorded as done when the loop resumed. */
+const entriesDone = (s: State<any>, key: Key, at: number, resumed: boolean, acc: EntriesAcc): object =>
+  resumed ? Resume.done(s, key, at, true, acc.result()) : acc.result()
+
+/**
+ * Where `entriesLoop` stops at an entry (or separator) that failed at
+ * `start`: a checkpoint when the input ran out, `Fail` unless the failure
+ * backtracks after `min` entries, otherwise the object.
+ */
+const stopEntries = (
+  s: State<any>,
+  site: Key,
+  at: number,
+  resumed: boolean,
+  acc: EntriesAcc,
+  count: number,
+  start: number,
+  min: number
+): object | typeof Fail => {
+  if (s.mode === INC && s.resume !== undefined) Resume.save(s, site, at, { acc, count, pos: start })
+  if (s.mode !== BT || count < min) return Fail
+  s.pos = start
+  return entriesDone(s, site, at, resumed, acc)
+}
+
 /** The object of `Object.fromEntries`, built an entry at a time (see `internal/entries.ts`). */
 class EntriesAcc {
   readonly o: Record<string, unknown> = {}
@@ -1721,8 +1925,20 @@ export const backend: Backend = {
     Result.match(
       Result.try(() => compileClosure(p, kind, resumable)),
       {
-        onSuccess: ({ fallbacks, step }) => ({ backend: "closure" as const, step, fallbacks, error: undefined }),
-        onFailure: (error) => ({ backend: "interpreted" as const, step: undefined, fallbacks: [], error })
+        onSuccess: ({ fallbacks, step }) => ({
+          backend: "closure" as const,
+          step,
+          guarded: false,
+          fallbacks,
+          error: undefined
+        }),
+        onFailure: (error) => ({
+          backend: "interpreted" as const,
+          step: undefined,
+          guarded: false,
+          fallbacks: [],
+          error
+        })
       }
     )
 }

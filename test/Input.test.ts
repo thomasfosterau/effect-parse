@@ -1,5 +1,7 @@
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Record from "effect/Record"
+
 import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
 import { describe, expect, it } from "vite-plus/test"
@@ -22,8 +24,8 @@ describe("binary inputs", () => {
     const view = Input.fromSource(buffer)
     expect(view).toBeInstanceOf(Uint8Array)
     expect(view.buffer).toBe(buffer)
-    expect(Array.from(Input.fromSource(new DataView(buffer, 1, 2)) as Uint8Array)).toEqual([2, 3])
-    expect(Array.from(Input.fromSource(new Uint16Array([0x0201])) as Uint8Array)).toEqual([1, 2])
+    expect(Array.from(Input.fromSource(new DataView(buffer, 1, 2)))).toEqual([2, 3])
+    expect(Array.from(Input.fromSource(new Uint16Array([0x0201])))).toEqual([1, 2])
     expect(Input.fromSource(new SharedArrayBuffer(3))).toHaveLength(3)
     // A view of a resizable buffer keeps the length it had when parsing started
     // (`resize` is ES2024, newer than this project's `lib`)
@@ -86,7 +88,10 @@ describe("binary inputs", () => {
 
 describe("State.reset", () => {
   // Everything a driver can observe after a step
-  const observe = <I extends Input.Input>(state: Input.State<I>, step: (state: Input.State<I>) => unknown) => {
+  const observe = <I extends Input.Input, A>(
+    state: Input.State<I>,
+    step: (state: Input.State<I>) => A | Input.Fail
+  ) => {
     const a = step(state)
     if (a !== Input.Fail) return { value: a, pos: state.pos }
     const failure = state.reportedFailure()
@@ -159,7 +164,7 @@ describe("State.reset", () => {
 
     state.reset(2)
     const fresh = new Input.State(bytes, { offset: 2 })
-    ;(Object.keys(fresh) as Array<keyof Input.State>).forEach((key) => {
+    Record.keys(fresh).forEach((key) => {
       expect([key, state[key]]).toEqual([key, fresh[key]])
     })
     expect(state.context).toBe(fresh.context)
