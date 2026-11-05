@@ -6,6 +6,7 @@
 
 /** Value types. */
 export const I32 = 0x7f
+export const I64 = 0x7e
 export const F64 = 0x7c
 const Void = 0x40
 
@@ -30,14 +31,17 @@ export const Op = {
   globalGet: 0x23,
   globalSet: 0x24,
   i32Load: 0x28,
+  i64Load: 0x29,
   f64Load: 0x2b,
   i32Load8U: 0x2d,
   i32Load16U: 0x2f,
   i32Store: 0x36,
+  i64Store: 0x37,
   i32Store8: 0x3a,
   i32Store16: 0x3b,
   f64Store: 0x39,
   i32Const: 0x41,
+  i64Const: 0x42,
   f64Const: 0x44,
   i32Eqz: 0x45,
   i32Eq: 0x46,
@@ -50,6 +54,7 @@ export const Op = {
   i32LeU: 0x4d,
   i32GeS: 0x4e,
   i32GeU: 0x4f,
+  i64Eqz: 0x50,
   f64Eq: 0x61,
   f64Ne: 0x62,
   i32Add: 0x6a,
@@ -60,6 +65,10 @@ export const Op = {
   i32Xor: 0x73,
   i32Shl: 0x74,
   i32ShrU: 0x76,
+  i64And: 0x83,
+  i64Or: 0x84,
+  i64Shl: 0x86,
+  i64ShrU: 0x88,
   f64Abs: 0x99,
   f64Neg: 0x9a,
   f64Add: 0xa0,
@@ -95,6 +104,29 @@ export const sleb = (n: number, out: Array<number> = []): Array<number> => {
   }
 }
 
+/** SIMD opcodes, after the `0xfd` prefix. */
+export const Simd = {
+  v128Load: 0x00,
+  v128Store: 0x0b,
+  i8x16Bitmask: 0x64,
+  i16x8ExtendLowI8x16U: 0x89,
+  i16x8ExtendHighI8x16U: 0x8a
+} as const
+
+/** Signed LEB128 of a 64-bit integer. */
+const sleb64 = (n: bigint, out: Array<number>): Array<number> => {
+  let v = BigInt.asIntN(64, n)
+  for (;;) {
+    const b = Number(v & 0x7fn)
+    v >>= 7n
+    if ((v === 0n && (b & 0x40) === 0) || (v === -1n && (b & 0x40) !== 0)) {
+      out.push(b)
+      return out
+    }
+    out.push(b | 0x80)
+  }
+}
+
 /** A branch target: a block, a loop or an `if`. */
 export class Label {
   readonly _label = true
@@ -106,14 +138,16 @@ export class Label {
  */
 export class Body {
   readonly code: Array<number> = []
-  private readonly i32s: Array<number> = []
-  private readonly f64s: Array<number> = []
+  /** The types of the locals after the parameters. */
+  private readonly types: Array<number> = []
   private readonly labels: Array<Label> = []
   private next: number
   /** Trace writes since the last check that dominates the code that follows (see the compiler). */
   writes = 0
   /** The local holding the trace pointer, in the compiler's rule functions. */
   tp = -1
+  /** The local holding the end of the input, in the compiler's rule functions (-1: read the global). */
+  endLocal = -1
 
   constructor(readonly params: number) {
     this.next = params
@@ -121,23 +155,26 @@ export class Body {
 
   /** A new local of type `i32`. */
   local(): number {
-    const l = this.next++
-    this.i32s.push(l)
-    return l
+    this.types.push(I32)
+    return this.next++
+  }
+
+  /** A new local of type `i64`. */
+  localI64(): number {
+    this.types.push(I64)
+    return this.next++
   }
 
   /** A new local of type `f64`. */
   localF64(): number {
-    const l = this.next++
-    this.f64s.push(l)
-    return l
+    this.types.push(F64)
+    return this.next++
   }
 
   /** The locals declaration, in index order (runs of one type each). */
   locals(): Array<number> {
     const groups: Array<[number, number]> = []
-    for (let l = this.params; l < this.next; l++) {
-      const type = this.f64s.includes(l) ? F64 : I32
+    for (const type of this.types) {
       const last = groups[groups.length - 1]
       if (last !== undefined && last[1] === type) last[0]++
       else groups.push([1, type])
@@ -158,6 +195,12 @@ export class Body {
   i32(n: number): this {
     this.code.push(Op.i32Const)
     sleb(n, this.code)
+    return this
+  }
+
+  i64(n: bigint): this {
+    this.code.push(Op.i64Const)
+    sleb64(n, this.code)
     return this
   }
 
@@ -201,6 +244,17 @@ export class Body {
   call(f: number): this {
     this.code.push(Op.call)
     uleb(f, this.code)
+    return this
+  }
+
+  /** A SIMD instruction, with a memory access's alignment and offset for loads and stores. */
+  simd(op: number, align = -1, offset = 0): this {
+    this.code.push(0xfd)
+    uleb(op, this.code)
+    if (align >= 0) {
+      uleb(align, this.code)
+      uleb(offset, this.code)
+    }
     return this
   }
 

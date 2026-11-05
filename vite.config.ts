@@ -99,7 +99,7 @@ export default defineConfig({
       // a defect, not headroom. The remaining sites are listed in
       // effect-parse#35. Flip a rule back to the
       // preset's `error` and delete its line when its count reaches zero.
-      "effect/require-safety-comment-for-type-assertion": "warn", // 301
+      "effect/require-safety-comment-for-type-assertion": "warn", // 300
       "effect/avoid-any": "warn", // 60
       "effect/avoid-direct-tag-checks": "warn", // 10, all `switch (x._tag)`: the compilers, `children` and examples/sexpr
       "effect/avoid-direct-json": "warn", // 35 outside bench/
@@ -126,7 +126,7 @@ export default defineConfig({
       // `?: T | undefined` under `exactOptionalPropertyTypes`, `Input.State`
       // fields) and the step protocol's per-step results. Changing the public
       // spelling breaks every consumer; boxing a step result in `Option`
-      // allocates on every parse step. 226 sites.
+      // allocates on every parse step. 227 sites.
       "effect/prefer-option-over-null": "warn",
       // `unknown` is the honest type at the interpreter's erased boundary: a
       // step returns the value of whatever parser it runs, and the compilers

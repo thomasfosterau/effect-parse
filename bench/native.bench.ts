@@ -101,14 +101,21 @@ interface Case {
 const casesFor = (doc: Doc): Array<Case> => {
   const bytes = new TextEncoder().encode(doc.text)
   const text = doc.text
+  // Two copies of each input, parsed in turn: no parser can reuse the previous run's input (the
+  // WebAssembly compiler keeps the latest string it copied into its memory)
+  const texts = [text, JSON.parse(JSON.stringify(text))]
+  const byteses = [bytes, bytes.slice()]
+  let turn = 0
+  const nextText = (): string => texts[turn++ & 1]
+  const nextBytes = (): Uint8Array => byteses[turn++ & 1]
   const compiledCases = (["jit", "wasm"] as const).flatMap((backend) => {
     const g = byBackend[backend]
     return [
-      { name: `Token/Ascii, string (${backend})`, run: () => Parser.parseSync(g.tokenAscii, text) },
-      { name: `Text.string, string (${backend})`, run: () => Parser.parseSync(g.textString, text) },
-      { name: `Text.utf8, bytes (${backend})`, run: () => Parser.parseSync(g.textUtf8, bytes) },
-      { name: `json-fast, Text.string, string (${backend})`, run: () => Parser.parseSync(g.fastString, text) },
-      { name: `json-fast, Text.utf8, bytes (${backend})`, run: () => Parser.parseSync(g.fastUtf8, bytes) }
+      { name: `Token/Ascii, string (${backend})`, run: () => Parser.parseSync(g.tokenAscii, nextText()) },
+      { name: `Text.string, string (${backend})`, run: () => Parser.parseSync(g.textString, nextText()) },
+      { name: `Text.utf8, bytes (${backend})`, run: () => Parser.parseSync(g.textUtf8, nextBytes()) },
+      { name: `json-fast, Text.string, string (${backend})`, run: () => Parser.parseSync(g.fastString, nextText()) },
+      { name: `json-fast, Text.utf8, bytes (${backend})`, run: () => Parser.parseSync(g.fastUtf8, nextBytes()) }
     ]
   })
   return [

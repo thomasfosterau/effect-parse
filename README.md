@@ -254,7 +254,7 @@ On the JSON example, compiled parsing runs at 5–6 times the speed of the inter
 
 There are three compilers, one function each:
 
-- `Compiler.wasm` scans the input in WebAssembly and builds the value with generated JavaScript. It is the fastest on strings and bytes: on the JSON benchmark it takes 17–34% less time than the JIT. It uses the JIT for array input, for streaming, and where `WebAssembly` or `new Function` is unavailable.
+- `Compiler.wasm` scans the input in WebAssembly and builds the value with generated JavaScript. It is the fastest on strings and bytes: on the JSON benchmark it takes 17–36% less time than the JIT. It uses the JIT for array input, for streaming, and where `WebAssembly` or `new Function` is unavailable.
 - `Compiler.jit` generates JavaScript where `new Function` is allowed, and falls back to the closure compiler where it isn't.
 - `Compiler.closure` never generates code. It is meant for pages with a Content Security Policy.
 

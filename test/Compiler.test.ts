@@ -1508,6 +1508,68 @@ describe("the WebAssembly compiler", () => {
     expect(Registry.compiled(fast, 0)?.fallbacks).toEqual([])
   })
 
+  it("copies strings exactly, lone surrogates and U+FFFD included", () => {
+    const random = rng(21)
+    const pieces = ["a", "é", "日", "😀", "\ud800", "\udc00", "\ufffd", "\u0000", "abcdefghijklmnopq"]
+    const units = Parser.repeat(Token.any)
+    const codePoints = Parser.repeat(Text.string.any)
+    const fastUnits = Compiler.wasm(Parser.named(units, "units"))
+    const fastCodePoints = Compiler.wasm(Parser.named(codePoints, "codePoints"))
+    Arr.makeBy(2000, () =>
+      Arr.makeBy(Math.floor(random() * 50), () => pieces[Math.floor(random() * pieces.length)]).join("")
+    ).forEach((input) => {
+      expect(Parser.parse(fastUnits, input)).toEqual(Parser.parse(units, input))
+      expect(Parser.parse(fastCodePoints, input)).toEqual(Parser.parse(codePoints, input))
+    })
+    expect(Registry.compiled(fastUnits, 0)?.backend).toBe("wasm")
+  })
+
+  it("parses bytes in a SharedArrayBuffer", () => {
+    const text = '{"key": ["é", "😀", 1.5, true], "other": "a\\nb"}'
+    const encoded = new TextEncoder().encode(text)
+    const shared = new Uint8Array(new SharedArrayBuffer(encoded.length))
+    shared.set(encoded)
+    sameAsInterpreted(JsonFast.jsonGrammar(Text.utf8), shared)
+  })
+
+  it("copies the input of every parse that needs it", () => {
+    const word = <I extends string | Uint8Array>(T: Text.TextParsers<I>) =>
+      Parser.preceded(T.takeWhile(" "), T.takeWhile(Ascii.isAlpha, { min: 1 }))
+    // Strings: the latest is kept in memory, and replaced by another
+    const text = word(Text.string)
+    const fastText = Compiler.wasm(word(Text.string))
+    ;["abc", "xyz", "abc", " def"].forEach((input) => {
+      expect(Parser.parsePeek(fastText, input)).toEqual(Parser.parsePeek(text, input))
+    })
+    // Bytes may change in place between parses
+    const bytes = word(Text.utf8)
+    const fastBytes = Compiler.wasm(word(Text.utf8))
+    const buffer = new TextEncoder().encode("hello world")
+    expect(Parser.parsePeek(fastBytes, buffer)).toEqual(Parser.parsePeek(bytes, buffer))
+    buffer.set(new TextEncoder().encode("howdy"))
+    expect(Parser.parsePeek(fastBytes, buffer)).toEqual(Parser.parsePeek(bytes, buffer))
+  })
+
+  it("lexes one token at a time, from strings and from large buffers", () => {
+    const token = <I extends string | Uint8Array>(T: Text.TextParsers<I>) =>
+      Parser.preceded(T.takeWhile(" "), Parser.alt(T.takeWhile(Ascii.isAlphanumeric, { min: 1 }), T.oneOf("{}();,")))
+    /** The tokens of `input`, one `parsePeek` from each offset. */
+    const lex = <I extends string | Uint8Array>(p: Parser.Parser<string, never, never, I>, input: I) =>
+      Arr.unfold(0, (offset) => {
+        if (offset >= input.length) return Option.none()
+        const r = Parser.parsePeek(p, input, { offset })
+        return Result.isFailure(r)
+          ? Option.none()
+          : Option.some([r.success[1], input.length - r.success[0].length] as const)
+      })
+    // Longer than the rest that a parse from a later offset copies (beyond it, they run the JIT)
+    const text = "foo bar 12 ( baz ; qux ) { 7 } ".repeat(400)
+    const expected = lex(token(Text.string), text)
+    expect(expected).toHaveLength(4400)
+    expect(lex(Compiler.wasm(token(Text.string)), text)).toEqual(expected)
+    expect(lex(Compiler.wasm(token(Text.utf8)), new TextEncoder().encode(text))).toEqual(expected)
+  })
+
   it("uses the JIT where WebAssembly is unavailable", () => {
     vi.stubGlobal("WebAssembly", undefined)
     onTestFinished(() => {

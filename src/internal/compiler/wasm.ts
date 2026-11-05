@@ -40,7 +40,7 @@ import type { Backend, Compiled } from "./registry.js"
 import type { CharSet } from "./sets.js"
 import { kindOfEncoding, TableSize, textSet, tokenSet } from "./sets.js"
 import type { Label } from "./wasmAsm.js"
-import { Body, encodeModule, F64, I32, Op } from "./wasmAsm.js"
+import { Body, encodeModule, F64, I32, Op, Simd } from "./wasmAsm.js"
 
 // -----------------------------------------------------------------------------
 // Layout
@@ -58,9 +58,10 @@ const importCount = 5
 
 /**
  * Function types: rules and decoders `(i32) -> i32`, imports and helpers of
- * two arguments `(i32, i32) -> i32`, `grow` `() -> i32`, `float` `(i32, i32) -> f64`.
+ * two arguments `(i32, i32) -> i32`, `grow` `() -> i32`, `float` `(i32, i32) -> f64`,
+ * `start` `(i32 × 5) -> i32`.
  */
-const Ty = { rule: 0, pair: 1, grow: 2, toF64: 3 } as const
+const Ty = { rule: 0, pair: 1, grow: 2, toF64: 3, start: 4 } as const
 
 /** Linear memory: membership tables from 0, powers of ten, then the input, then the trace. */
 const TablesEnd = 61440
@@ -76,6 +77,9 @@ const PageSize = 65536
 const Slack = 65536
 /** Trace words a function may write past the last check that dominates them (see `put`). */
 const MaxWrites = 4096
+
+/** Bytes left after the cursor beyond which a driver's parse of the same buffer runs the JIT (see `run`). */
+const LargeRest = 4096
 
 /** Values of `G.mode`. */
 const Backtrack = 0
@@ -182,40 +186,34 @@ const acceptedRuns = (cs: CharSet, negate: boolean, max: number): Option.Option<
   return Option.some(out)
 }
 
-/** Whether a builder is available: it is generated with `new Function`. */
-const supported = (): boolean => Predicate.isObject(globalThis.WebAssembly) && jitSupported()
-
-// -----------------------------------------------------------------------------
-// Copying strings into linear memory
-// -----------------------------------------------------------------------------
-
-/** Node's `Buffer`, as far as the copy uses it: `write` in UTF-16LE, which copies the units as they are. */
-interface Ucs2Buffer {
-  readonly write: (s: string, offset: number, encoding: "utf16le") => number
-}
+let simdChecked = false
+let simdSupported = false
 
 /**
- * A `Buffer` over an `ArrayBuffer`, where Node's `Buffer` is available: its
- * `write` copies a string's UTF-16 units about ten times faster than a loop.
- * It is read from `globalThis` as `unknown` rather than named, since its
- * type is `any` where other platforms' types are loaded; only `from` and
- * `write` are used, after checking them.
+ * Whether WebAssembly SIMD is available, for the widener of strings (checked
+ * once): a module of one `v128` load validates.
  */
-const ucs2Buffer: (buffer: ArrayBuffer) => Option.Option<Ucs2Buffer> = /*#__PURE__*/ (() => {
-  const B: unknown = Predicate.hasProperty(globalThis, "Buffer") ? globalThis.Buffer : undefined
-  if (!Predicate.hasProperty(B, "from") || !Predicate.isFunction(B.from)) return () => Option.none()
-  const from = B.from
-  return (buffer: ArrayBuffer) => {
-    const view: unknown = from.call(B, buffer)
-    return Predicate.hasProperty(view, "write") && Predicate.isFunction(view.write)
-      ? // SAFETY: a Node `Buffer`, whose `write(string, offset, "utf16le")` returns the bytes written
-        Option.some(view as Ucs2Buffer)
-      : Option.none()
+const simd = (): boolean => {
+  if (!simdChecked) {
+    simdChecked = true
+    const probe = new Body(1)
+    probe.get(0).simd(Simd.v128Load, 0, 0).simd(Simd.i8x16Bitmask)
+    const bytes = encodeModule({
+      types: [{ params: [I32], results: [I32] }],
+      imports: [],
+      memoryPages: 1,
+      functions: [[0, probe]],
+      globals: [],
+      exports: [],
+      data: []
+    })
+    simdSupported = WebAssembly.validate(bytes)
   }
-})()
+  return simdSupported
+}
 
-/** Whether typed arrays are little endian here, as WebAssembly memory is. */
-const isLittleEndian = (): boolean => new Uint8Array(new Uint16Array([1]).buffer)[0] === 1
+/** Whether a builder is available: it is generated with `new Function`. */
+const supported = (): boolean => Predicate.isObject(globalThis.WebAssembly) && jitSupported()
 
 // -----------------------------------------------------------------------------
 // The compiler
@@ -295,6 +293,9 @@ class WasmCompiler {
       // The trace pointer lives in a local, written back before calls and on success
       body.tp = body.local()
       body.gget(G.tp).set(body.tp)
+      // So is the end of the input, which never changes during a parse
+      body.endLocal = body.local()
+      body.gget(G.end).set(body.endLocal)
       this.check(body)
       body.writes = 0
       let built = ""
@@ -341,9 +342,14 @@ class WasmCompiler {
     else b.get(pos).mem(Op.i32Load8U, 0, Input + delta)
   }
 
+  /** Pushes the end of the input: from a local in rule functions, from the global in helpers. */
+  private end(b: Body): Body {
+    return b.endLocal >= 0 ? b.get(b.endLocal) : b.gget(G.end)
+  }
+
   /** Pushes `p >= E`. */
   private atEnd(b: Body, pos: number): void {
-    b.get(pos).gget(G.end).op(Op.i32GeU)
+    this.end(b.get(pos)).op(Op.i32GeU)
   }
 
   /** `p += n`. */
@@ -1285,7 +1291,7 @@ class WasmCompiler {
       return {
         width: 2,
         fast: 0xd800,
-        guard: (b, pos) => b.get(pos).i32(1).op(Op.i32Add).gget(G.end).op(Op.i32LtU),
+        guard: (b, pos) => this.end(b.get(pos).i32(1).op(Op.i32Add)).op(Op.i32LtU),
         unit: (b, pos) => {
           this.load(b, pos, lo)
           this.load(b, pos, hi)
@@ -1297,7 +1303,7 @@ class WasmCompiler {
     return {
       width: 1,
       fast: enc === latin1 ? TableSize : fastLimit(enc),
-      guard: (b, pos) => b.get(pos).gget(G.end).op(Op.i32LtU),
+      guard: (b, pos) => this.end(b.get(pos)).op(Op.i32LtU),
       unit: (b, pos) => this.load(b, pos),
       decode: enc === latin1 ? -1 : this.decoder(enc)
     }
@@ -1630,7 +1636,7 @@ class WasmCompiler {
     const st = b.local()
     b.get(0).set(st)
     if (len > 0) {
-      b.gget(G.end).get(0).op(Op.i32Sub).i32(len).op(Op.i32LtS)
+      this.end(b).get(0).op(Op.i32Sub).i32(len).op(Op.i32LtS)
       this.failIf(b, fail)
       codes.forEach((code, i) => {
         this.load(b, 0, i)
@@ -1932,6 +1938,144 @@ class WasmCompiler {
   // Helper functions
   // ---------------------------------------------------------------------------
 
+  /**
+   * `(pos, end, len, tp, tlim) -> p | -1`: sets up the globals of a parse
+   * and runs the root, in one call from JavaScript (setting a global from
+   * JavaScript costs about as much as a call).
+   */
+  starter(root: number): number {
+    const [index, b] = this.reserve(Ty.start, 5)
+    b.get(1).gset(G.end).get(2).gset(G.len).get(3).gset(G.tp).get(4).gset(G.tlim)
+    b.i32(0).gset(G.nv).i32(0).gset(G.mode)
+    b.get(0).call(root)
+    return index
+  }
+
+  /**
+   * `(src, n) -> count`, for string input: widens the `n` bytes of UTF-8 at
+   * `src`, which `TextEncoder#encodeInto` wrote, to the string's UTF-16
+   * units at `Input`, sixteen ASCII bytes at a time with SIMD (where it is
+   * available) and eight without. `encodeInto` writes each
+   * lone surrogate as U+FFFD, which is one unit as well, so every unit is in
+   * place; the units that are U+FFFD (or were a lone surrogate) are listed
+   * as 32-bit indices from `(src + n + 3) & -4`, for JavaScript to copy from
+   * the string. Returns their number.
+   */
+  widener(): number {
+    const [index, b] = this.reserve(Ty.pair, 2)
+    const src = 0
+    const n = 1
+    const end = b.local()
+    const k = b.local()
+    const c = b.local()
+    const cp = b.local()
+    const count = b.local()
+    const list = b.local()
+    const x = b.localI64()
+    const byte = (at: number) => b.get(src).mem(Op.i32Load8U, 0, at)
+    const cont = (at: number, shift: number) => {
+      byte(at)
+      b.i32(0x3f).op(Op.i32And)
+      if (shift > 0) b.i32(shift).op(Op.i32Shl)
+      b.op(Op.i32Or)
+    }
+    const unit = (delta: number, push: () => void) => {
+      b.get(k).i32(1).op(Op.i32Shl)
+      push()
+      b.mem(Op.i32Store16, 1, Input + 2 * delta)
+    }
+    const step = (bytes: number, units: number, again: Label) => {
+      b.get(src).i32(bytes).op(Op.i32Add).set(src)
+      b.get(k).i32(units).op(Op.i32Add).set(k)
+      b.br(again)
+    }
+    /** Spreads four bytes (the low 32 bits of `x`, shifted right by `shift`) to four 16-bit units. */
+    const spread = (shift: number) => {
+      b.get(x)
+      if (shift > 0) b.i64(BigInt(shift)).op(Op.i64ShrU)
+      b.i64(0xffffffffn).op(Op.i64And)
+      b.tee(x).get(x).i64(16n).op(Op.i64Shl).op(Op.i64Or).i64(0x0000ffff0000ffffn).op(Op.i64And)
+      b.tee(x).get(x).i64(8n).op(Op.i64Shl).op(Op.i64Or).i64(0x00ff00ff00ff00ffn).op(Op.i64And)
+    }
+    b.get(src).get(n).op(Op.i32Add).tee(end).i32(3).op(Op.i32Add).i32(-4).op(Op.i32And).set(list)
+    b.block((done) =>
+      b.loop((again) => {
+        b.get(src).get(end).op(Op.i32GeU).brIf(done)
+        // Eight ASCII bytes
+        if (simd()) {
+          // Sixteen ASCII bytes, with SIMD
+          b.get(src).i32(16).op(Op.i32Add).get(end).op(Op.i32LeU)
+          b.if(() => {
+            b.get(src).simd(Simd.v128Load, 0, 0).simd(Simd.i8x16Bitmask).op(Op.i32Eqz)
+            b.if(() => {
+              b.get(k).i32(1).op(Op.i32Shl)
+              b.get(src).simd(Simd.v128Load, 0, 0).simd(Simd.i16x8ExtendLowI8x16U).simd(Simd.v128Store, 0, Input)
+              b.get(k).i32(1).op(Op.i32Shl)
+              b.get(src)
+                .simd(Simd.v128Load, 0, 0)
+                .simd(Simd.i16x8ExtendHighI8x16U)
+                .simd(Simd.v128Store, 0, Input + 16)
+              step(16, 16, again)
+            })
+          })
+        }
+        b.get(src).i32(8).op(Op.i32Add).get(end).op(Op.i32LeU)
+        b.if(() => {
+          b.get(src).mem(Op.i64Load, 0, 0).tee(x).i64(-0x7f7f7f7f7f7f7f80n).op(Op.i64And).op(Op.i64Eqz)
+          b.if(() => {
+            const word = b.localI64()
+            b.get(x).set(word)
+            b.get(k).i32(1).op(Op.i32Shl)
+            spread(0)
+            b.mem(Op.i64Store, 0, Input)
+            b.get(word).set(x)
+            b.get(k).i32(1).op(Op.i32Shl)
+            spread(32)
+            b.mem(Op.i64Store, 0, Input + 8)
+            step(8, 8, again)
+          })
+        })
+        byte(0)
+        b.tee(c).i32(0x80).op(Op.i32LtU)
+        b.if(() => {
+          unit(0, () => b.get(c))
+          step(1, 1, again)
+        })
+        b.get(c).i32(0xe0).op(Op.i32LtU)
+        b.if(() => {
+          unit(0, () => {
+            b.get(c).i32(0x1f).op(Op.i32And).i32(6).op(Op.i32Shl)
+            cont(1, 0)
+          })
+          step(2, 1, again)
+        })
+        b.get(c).i32(0xf0).op(Op.i32LtU)
+        b.if(() => {
+          b.get(c).i32(0x0f).op(Op.i32And).i32(12).op(Op.i32Shl)
+          cont(1, 6)
+          cont(2, 0)
+          b.tee(cp).i32(0xfffd).op(Op.i32Eq)
+          b.if(() => {
+            b.get(count).i32(2).op(Op.i32Shl).get(list).op(Op.i32Add).get(k).mem(Op.i32Store, 2, 0)
+            b.get(count).i32(1).op(Op.i32Add).set(count)
+          })
+          unit(0, () => b.get(cp))
+          step(3, 1, again)
+        })
+        b.get(c).i32(0x07).op(Op.i32And).i32(18).op(Op.i32Shl)
+        cont(1, 12)
+        cont(2, 6)
+        cont(3, 0)
+        b.i32(0x10000).op(Op.i32Sub).set(cp)
+        unit(0, () => b.get(cp).i32(10).op(Op.i32ShrU).i32(0xd800).op(Op.i32Or))
+        unit(1, () => b.get(cp).i32(0x3ff).op(Op.i32And).i32(0xdc00).op(Op.i32Or))
+        step(4, 2, again)
+      })
+    )
+    b.get(count)
+    return index
+  }
+
   /** The decoder of a built-in encoding: `(p) -> code point | -1 | -2`, the width in `G.w`. */
   private decoder(enc: Encoding<any>): number {
     const known = this.decoders.get(enc)
@@ -1947,7 +2091,7 @@ class WasmCompiler {
     }
     const fail = (code: number) => b.i32(code).op(Op.return)
     const at = (k: number) => this.load(b, 0, k)
-    const inRange = (k: number) => b.get(0).i32(k).op(Op.i32Add).gget(G.end).op(Op.i32GeU)
+    const inRange = (k: number) => this.end(b.get(0).i32(k).op(Op.i32Add)).op(Op.i32GeU)
     if (enc === string) {
       at(0)
       b.tee(c).i32(0xf800).op(Op.i32And).i32(0xd800).op(Op.i32Ne)
@@ -2088,7 +2232,7 @@ class WasmCompiler {
     const isDigit = () => b.get(c).i32(48).op(Op.i32Sub).i32(9).op(Op.i32LeU)
     /** `c = unit(k)`, or -1 if there is no whole unit at `k` */
     const read = (k: number) => {
-      if (r === undefined) b.get(k).gget(G.end).op(Op.i32LtU)
+      if (r === undefined) this.end(b.get(k)).op(Op.i32LtU)
       else r.guard(b, k)
       b.ifI32(
         () => unit(k),
@@ -2366,19 +2510,24 @@ const runtime = { some: Option.some, none: Option.none, charOf, isPlainKey, addE
 type Value = ReturnType<Step>
 
 /**
- * The generated builder: the value of the root (`w < 0`) or of value island
- * `w`, from the trace at index `i`.
+ * The generated builder. `bind` gives it the views of the memory, the
+ * input and the state of a parse (again whenever the memory grows, which
+ * replaces the views), `unbind` drops them; then `root` builds the value of
+ * the root and `value` that of value island `w`, from the trace at index `i`.
  */
-type Builder = (
-  t: Int32Array,
-  f: Float64Array,
-  input: string | Uint8Array,
-  end: number,
-  values: Array<Value>,
-  state: State<any>,
-  i: number,
-  w: number
-) => Value
+interface Builder {
+  readonly bind: (
+    t: Int32Array,
+    f: Float64Array,
+    input: string | Uint8Array,
+    end: number,
+    values: Array<Value>,
+    state: State<any>
+  ) => void
+  readonly unbind: () => void
+  readonly root: (i: number) => Value
+  readonly value: (w: number, i: number) => Value
+}
 
 /** The state outside a parse: islands only run during one. */
 const idle = /*#__PURE__*/ new State("")
@@ -2388,6 +2537,8 @@ const compileWasm = (root: ParserLike, kind: 0 | 1): Result.Result<Compiled, str
   c.countRefs(root)
   const rootIndex = c.rule(root, true)
   c.flush()
+  const widen = kind === 0 ? c.widener() : -1
+  const start = c.starter(rootIndex)
   if (c.functions.some(([, body]) => body.invalid)) return Result.fail("a branch to a label out of scope")
   const globals = [
     { type: I32, init: 0 },
@@ -2406,7 +2557,8 @@ const compileWasm = (root: ParserLike, kind: 0 | 1): Result.Result<Compiled, str
       { params: [I32], results: [I32] },
       { params: [I32, I32], results: [I32] },
       { params: [], results: [I32] },
-      { params: [I32, I32], results: [F64] }
+      { params: [I32, I32], results: [F64] },
+      { params: [I32, I32, I32, I32, I32], results: [I32] }
     ],
     imports: [
       ["env", "island", Ty.pair],
@@ -2420,6 +2572,8 @@ const compileWasm = (root: ParserLike, kind: 0 | 1): Result.Result<Compiled, str
     globals,
     exports: [
       ["root", 0, rootIndex],
+      ...(widen < 0 ? [] : [["widen", 0, widen] as const]),
+      ["start", 0, start],
       ["mode", 3, G.mode],
       ["end", 3, G.end],
       ["len", 3, G.len],
@@ -2435,8 +2589,8 @@ const compileWasm = (root: ParserLike, kind: 0 | 1): Result.Result<Compiled, str
   const source =
     `"use strict";let T,F,I,E,V,S,N=0;${c.builders.join("")}${c.valueFns.join("")}` +
     `const W=[${c.valueFns.map((_, k) => `w${k}`).join(",")}];` +
-    `return function(t,f,inp,e,vals,s,i,w){T=t;F=f;I=inp;E=e;V=vals;S=s;` +
-    `try{return w<0?b${rootIndex}(i):W[w](i)}finally{T=F=I=V=S=void 0}}`
+    `return{bind(t,f,inp,e,vals,s){T=t;F=f;I=inp;E=e;V=vals;S=s},unbind(){T=F=I=V=S=void 0},` +
+    `root(i){return b${rootIndex}(i)},value(w,i){return W[w](i)}}`
   const build: Builder = new globalThis.Function("C", "R", source)(c.constants, runtime)
   return run(root, c, bytes, kind, build, source)
 }
@@ -2456,24 +2610,22 @@ const run = (
   source: string
 ): Result.Result<Compiled, string> => {
   const memory = new WebAssembly.Memory({ initial: 2 })
-  const littleEndian = isLittleEndian()
+  // `memory.buffer` is slow to read: its size, as of the latest growth
+  let size = memory.buffer.byteLength
   let i32 = new Int32Array(memory.buffer)
   let f64 = new Float64Array(memory.buffer)
   let u8 = new Uint8Array(memory.buffer)
-  let u16 = new Uint16Array(memory.buffer)
-  let ucs2 = kind === 0 && littleEndian ? ucs2Buffer(memory.buffer) : Option.none<Ucs2Buffer>()
   const views = () => {
     i32 = new Int32Array(memory.buffer)
     f64 = new Float64Array(memory.buffer)
     u8 = new Uint8Array(memory.buffer)
-    u16 = new Uint16Array(memory.buffer)
-    ucs2 = kind === 0 && littleEndian ? ucs2Buffer(memory.buffer) : Option.none()
   }
   /** Grows the memory to at least `bytes`, doubling it. */
   const reserve = (bytes: number) => {
-    const have = memory.buffer.byteLength
+    const have = size
     if (have >= bytes) return
     memory.grow(Math.ceil((Math.max(bytes, have * 2) - have) / PageSize))
+    size = memory.buffer.byteLength
     views()
   }
   const steps: Array<Step> = c.islands.map(({ parser }) => jitBackend.build(parser, kind, false).step ?? parser.step)
@@ -2495,14 +2647,16 @@ const run = (
       },
       // Doubles the memory, returning the new limit of the trace
       grow: (): number => {
-        reserve(memory.buffer.byteLength * 2)
-        return memory.buffer.byteLength - Slack
+        reserve(size * 2)
+        // The views changed
+        build.bind(i32, f64, state.input, state.end, values, state)
+        return size - Slack
       },
       test: (id: number, cp: number): number => tests[id](cp),
       // A value island: the value of its parser, built from its trace at `from`, and the callback
       check: (id: number, from: number): number => {
         const s = state
-        const a = checks[id](build(i32, f64, s.input, s.end, values, s, from >> 2, id))
+        const a = checks[id](build.value(id, from >> 2))
         if (a === Fail) {
           s.mode = "Backtrack"
           return 0
@@ -2524,10 +2678,14 @@ const run = (
   const exported = instance.exports
   const rootFn = exported.root
   if (!Predicate.isFunction(rootFn)) return Result.fail("no root function")
-  const names = ["mode", "end", "len", "tp", "tlim", "nv"] as const
+  const widenFn = kind === 0 ? exported.widen : rootFn
+  if (!Predicate.isFunction(widenFn)) return Result.fail("no widen function")
+  const startFn = exported.start
+  if (!Predicate.isFunction(startFn)) return Result.fail("no start function")
+  const names = ["mode"] as const
   const globals = Result.all(names.map((name) => exportedGlobal(exported, name)))
   if (Result.isFailure(globals)) return Result.fail(globals.failure)
-  const [mode, end, len, tp, tlim, nv] = globals.success
+  const [mode] = globals.success
   let busy = false
   /** The JIT's step for the parser, built on first use. */
   let fallback: Step = (s) => {
@@ -2535,54 +2693,78 @@ const run = (
     return fallback(s)
   }
   /** Copies the input into memory, scans it and builds the value. */
-  /** Copies a string's UTF-16 units into memory. */
-  const copyString = (input: string) => {
-    if (Option.isSome(ucs2)) {
-      ucs2.value.write(input, Input, "utf16le")
-      return
-    }
-    const n = input.length
-    if (littleEndian) {
-      const base = Input >> 1
-      for (let k = 0; k < n; k++) u16[base + k] = input.charCodeAt(k)
-      return
-    }
+  /**
+   * Copies a string's UTF-16 units into memory, at `staging` for its UTF-8
+   * (see `widener`): standard `ArrayBuffer` views and `TextEncoder`, so the
+   * same code runs everywhere, and a memory backed by a `SharedArrayBuffer`
+   * would take it as well.
+   */
+  const copyString = (input: string, staging: number) => {
+    const { written } = utf8Encoder.encodeInto(input, u8.subarray(staging, staging + 3 * input.length))
+    const replaced: number = widenFn(staging, written)
+    if (replaced === 0) return
+    // U+FFFD in the string, or a lone surrogate that `encodeInto` replaced by it: its unit, as it is
     const view = new DataView(memory.buffer)
-    for (let k = 0; k < n; k++) view.setUint16(Input + 2 * k, input.charCodeAt(k), true)
+    const list = (staging + written + 3) >> 2
+    for (let r = 0; r < replaced; r++) {
+      const at = i32[list + r]
+      view.setUint16(Input + 2 * at, input.charCodeAt(at), true)
+    }
   }
+  /** The string whose units are in memory, if any (`""`: none). */
+  let copied = ""
   const parse = (s: State<any>): Value => {
     const input: string | Uint8Array = s.input
     const n = input.length
     const inputBytes = kind === 0 ? 2 * n : n
     const traceStart = (Input + inputBytes + 15) & -16
-    reserve(traceStart + Math.max(Slack * 4, inputBytes * 4))
-    if (Predicate.isString(input)) copyString(input)
-    else u8.set(input, Input)
-    end.value = s.end
-    len.value = n
-    tp.value = traceStart
-    tlim.value = memory.buffer.byteLength - Slack
-    nv.value = 0
-    mode.value = 0
+    // Strings are staged where the trace goes: 3 bytes of UTF-8 and 4 of list at most per unit
+    reserve(traceStart + Math.max(Slack * 4, inputBytes * 4, kind === 0 ? 7 * n + 16 : 0))
+    if (Predicate.isString(input)) {
+      // Strings never change: one already in memory (parsed again, or from another offset) stays there
+      if (input !== copied) {
+        copied = ""
+        copyString(input, traceStart)
+        copied = input
+      }
+    } else {
+      // Bytes may change between parses: copy what the scan can read, from the cursor to the end
+      u8.set(s.pos === 0 && s.end === n ? input : input.subarray(s.pos, s.end), Input + s.pos)
+    }
     values.length = 0
     state = s
-    const r: number = rootFn(s.pos)
+    build.bind(i32, f64, input, s.end, values, s)
+    const r: number = startFn(s.pos, s.end, n, traceStart, size - Slack)
     if (r < 0) {
       s.mode = mode.value === Cut ? "Cut" : "Backtrack"
       return Fail
     }
     s.pos = r
-    return build(i32, f64, input, s.end, values, s, traceStart >> 2, -1)
+    return build.root(traceStart >> 2)
   }
+  /** The bytes copied by the latest parse: parsing them again from further on is a driver at work. */
+  let lastBytes: Uint8Array = new Uint8Array(0)
+  /** The state of the parse `parsePending` runs: `Result.try` takes a function without arguments. */
+  let pending: State<any> = idle
+  const parsePending = () => parse(pending)
   const step: Step = (s) => {
     // A callback that parses with the same parser, while this one runs, runs the JIT
-    if (busy) {
-      return fallback(s)
+    if (busy) return fallback(s)
+    const input: string | Uint8Array = s.input
+    if (!Predicate.isString(input)) {
+      // Bytes can change, so they are copied on every parse; a driver parsing one token at a time
+      // from a large buffer would copy the rest of it for each token, where the JIT copies nothing
+      const again = input === lastBytes && s.pos > 0 && s.end - s.pos > LargeRest
+      lastBytes = input
+      if (again) return fallback(s)
     }
     busy = true
     // Whatever happens (a callback may throw), the next parse starts afresh
-    const result = Result.try(() => parse(s))
+    pending = s
+    const result = Result.try(parsePending)
+    build.unbind()
     state = idle
+    pending = idle
     busy = false
     values.length = 0
     if (Result.isFailure(result)) throw result.failure
