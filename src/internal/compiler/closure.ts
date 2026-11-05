@@ -1722,7 +1722,7 @@ export const backend: Backend = {
       Result.try(() => compileClosure(p, kind, resumable)),
       {
         onSuccess: ({ fallbacks, step }) => ({ backend: "closure" as const, step, fallbacks, error: undefined }),
-        onFailure: (error) => ({ backend: undefined, step: undefined, fallbacks: [], error })
+        onFailure: (error) => ({ backend: "interpreted" as const, step: undefined, fallbacks: [], error })
       }
     )
 }

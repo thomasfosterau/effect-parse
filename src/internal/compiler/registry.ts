@@ -11,8 +11,8 @@ import type { Fallback, Step } from "./closure.js"
 
 /** What was compiled for a parser and an input kind. */
 export interface Compiled {
-  /** The compiler actually used. */
-  readonly backend: "jit" | "closure" | undefined
+  /** The compiler actually used: `interpreted` when compilation failed. */
+  readonly backend: "wasm" | "jit" | "closure" | "interpreted"
   readonly step: Step | undefined
   /** Parts of the grammar that run interpreted, and why. */
   readonly fallbacks: ReadonlyArray<Fallback>
@@ -20,6 +20,8 @@ export interface Compiled {
   readonly error: unknown
   /** Why the JIT failed, if it did (the closure compiler is then used). */
   readonly jitError?: unknown
+  /** Why the WebAssembly compiler failed, if it did (the JIT is then used). */
+  readonly wasmError?: unknown
   /** The generated source, for the JIT. */
   readonly source?: string
 }

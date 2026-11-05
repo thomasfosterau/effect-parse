@@ -99,18 +99,18 @@ export default defineConfig({
       // a defect, not headroom. The remaining sites are listed in
       // effect-parse#35. Flip a rule back to the
       // preset's `error` and delete its line when its count reaches zero.
-      "effect/require-safety-comment-for-type-assertion": "warn", // 303
+      "effect/require-safety-comment-for-type-assertion": "warn", // 300
       "effect/avoid-any": "warn", // 60
-      "effect/avoid-direct-tag-checks": "warn", // 11, all `switch (x._tag)`: the compilers, `children` and examples/sexpr
+      "effect/avoid-direct-tag-checks": "warn", // 10, all `switch (x._tag)`: the compilers, `children` and examples/sexpr
       "effect/avoid-direct-json": "warn", // 35 outside bench/
-      "effect/avoid-native-object-helpers": "warn", // 43 outside bench/
+      "effect/avoid-native-object-helpers": "warn", // 40 outside bench/
       // 17: eleven are overloaded exports written as `const f: { …signatures } = impl`
       // (`Parser.parse` and its runners, `dispatch`, `Input.fromSource`, …) and one
       // is `SyntaxNode.toJSON(): unknown`; each needs a change to the published
       // `.d.ts` (a named exported interface, or `function` overloads). Five are
       // `bench/json-fused.ts`'s `let v: unknown`.
       "effect/no-known-value-widening": "warn",
-      "effect/prefer-match-over-switch": "warn", // 22
+      "effect/prefer-match-over-switch": "warn", // 21
       "effect/no-chained-type-assertions": "warn", // 13
       // `avoid-try-catch`: 6. Four are `try`/`finally` (`provideService` /
       // `provide` restoring `state.context`, and two tests), which `Result.try`
@@ -126,7 +126,7 @@ export default defineConfig({
       // `?: T | undefined` under `exactOptionalPropertyTypes`, `Input.State`
       // fields) and the step protocol's per-step results. Changing the public
       // spelling breaks every consumer; boxing a step result in `Option`
-      // allocates on every parse step. 228 sites.
+      // allocates on every parse step. 227 sites.
       "effect/prefer-option-over-null": "warn",
       // `unknown` is the honest type at the interpreter's erased boundary: a
       // step returns the value of whatever parser it runs, and the compilers
@@ -183,8 +183,9 @@ export default defineConfig({
       },
       // The JIT compiler's whole job is building a step function from
       // generated source with `new Function`; there is no other way to do it.
+      // The WebAssembly compiler builds its value builders the same way.
       {
-        files: ["src/internal/compiler/jit.ts"],
+        files: ["src/internal/compiler/jit.ts", "src/internal/compiler/wasm.ts"],
         rules: {
           "typescript/no-implied-eval": "off"
         }

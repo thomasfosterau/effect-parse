@@ -88,7 +88,7 @@ const reachable = async (entry) => {
   await visit(entry)
   return seen
 }
-const compilers = ["internal/compiler/closure.js", "internal/compiler/jit.js"]
+const compilers = ["internal/compiler/closure.js", "internal/compiler/jit.js", "internal/compiler/wasm.js"]
 let compilerFailures = 0
 for (const file of (await readdir(dist)).filter((f) => f.endsWith(".js") && f !== "index.js" && f !== "Compiler.js")) {
   for (const compiler of compilers) {

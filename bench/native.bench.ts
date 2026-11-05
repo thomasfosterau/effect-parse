@@ -80,11 +80,18 @@ const docs: Array<Doc> = [
 ]
 
 const decoder = new TextDecoder()
-const tokenAscii = Compiler.jit(json)
-const textString = Compiler.jit(jsonGrammar(Text.string))
-const textUtf8 = Compiler.jit(jsonGrammar(Text.utf8))
-const fastString = Compiler.jit(fastJsonGrammar(Text.string))
-const fastUtf8 = Compiler.jit(fastJsonGrammar(Text.utf8))
+// One compiled copy of each grammar per compiler, since compilation is per parser
+const compiled = <P extends Parser.Parser.Any>(p: P, backend: "jit" | "wasm"): P =>
+  // SAFETY: `named` and the compilers return the parser they are given, typed as it
+  Compiler[backend](Parser.named(p, p.name ?? "json")) as P
+const grammars = (backend: "jit" | "wasm") => ({
+  tokenAscii: compiled(json, backend),
+  textString: compiled(jsonGrammar(Text.string), backend),
+  textUtf8: compiled(jsonGrammar(Text.utf8), backend),
+  fastString: compiled(fastJsonGrammar(Text.string), backend),
+  fastUtf8: compiled(fastJsonGrammar(Text.utf8), backend)
+})
+const byBackend = { jit: grammars("jit"), wasm: grammars("wasm") }
 
 interface Case {
   readonly name: string
@@ -94,14 +101,27 @@ interface Case {
 const casesFor = (doc: Doc): Array<Case> => {
   const bytes = new TextEncoder().encode(doc.text)
   const text = doc.text
+  // Two copies of each input, parsed in turn: no parser can reuse the previous run's input (the
+  // WebAssembly compiler keeps the latest string it copied into its memory)
+  const texts = [text, JSON.parse(JSON.stringify(text))]
+  const byteses = [bytes, bytes.slice()]
+  let turn = 0
+  const nextText = (): string => texts[turn++ & 1]
+  const nextBytes = (): Uint8Array => byteses[turn++ & 1]
+  const compiledCases = (["jit", "wasm"] as const).flatMap((backend) => {
+    const g = byBackend[backend]
+    return [
+      { name: `Token/Ascii, string (${backend})`, run: () => Parser.parseSync(g.tokenAscii, nextText()) },
+      { name: `Text.string, string (${backend})`, run: () => Parser.parseSync(g.textString, nextText()) },
+      { name: `Text.utf8, bytes (${backend})`, run: () => Parser.parseSync(g.textUtf8, nextBytes()) },
+      { name: `json-fast, Text.string, string (${backend})`, run: () => Parser.parseSync(g.fastString, nextText()) },
+      { name: `json-fast, Text.utf8, bytes (${backend})`, run: () => Parser.parseSync(g.fastUtf8, nextBytes()) }
+    ]
+  })
   return [
     { name: "JSON.parse(string)", run: () => JSON.parse(text) },
-    { name: "Token/Ascii, string", run: () => Parser.parseSync(tokenAscii, text) },
-    { name: "Text.string, string", run: () => Parser.parseSync(textString, text) },
     { name: "JSON.parse(TextDecoder(bytes))", run: () => JSON.parse(decoder.decode(bytes)) },
-    { name: "Text.utf8, bytes", run: () => Parser.parseSync(textUtf8, bytes) },
-    { name: "json-fast, Text.string, string", run: () => Parser.parseSync(fastString, text) },
-    { name: "json-fast, Text.utf8, bytes", run: () => Parser.parseSync(fastUtf8, bytes) }
+    ...compiledCases
   ]
 }
 
@@ -130,10 +150,10 @@ for (const doc of docs) {
   cases.forEach((c, i) => {
     const ms = best[i]
     // Compare each parser with the native parse of the same input kind
-    const native = best[c.name.includes("bytes") ? 3 : 0]
-    const ratio = i === 0 || i === 3 ? "" : `  ${(ms / native).toFixed(1)}x native`
+    const native = best[c.name.includes("bytes") ? 1 : 0]
+    const ratio = i < 2 ? "" : `  ${(ms / native).toFixed(1)}x native`
     const timing = ms < 0.1 ? `${(ms * 1000).toFixed(1).padStart(7)} µs` : `${ms.toFixed(2).padStart(7)} ms`
-    console.log(`  ${c.name.padEnd(32)} ${timing}  ${(mb / (ms / 1000)).toFixed(0).padStart(5)} MB/s${ratio}`)
+    console.log(`  ${c.name.padEnd(39)} ${timing}  ${(mb / (ms / 1000)).toFixed(0).padStart(5)} MB/s${ratio}`)
   })
   console.log()
 }

@@ -12,6 +12,7 @@
  *
  * Run with `pnpm build && pnpm bench`.
  */
+import * as Predicate from "effect/Predicate"
 import { Compiler, Encoding, Parser, Text } from "@thomasfosterau/effect-parse"
 import { json } from "../examples/json.ts"
 import { jsonGrammar as fastJsonGrammar } from "../examples/json-fast.ts"
@@ -35,7 +36,7 @@ const utf8 = new TextEncoder().encode(doc)
 const utf16 = Encoding.utf16le.encode(doc)
 const decoder = new TextDecoder()
 
-const backends = ["interpreted", "closure", "jit"] as const
+const backends = ["interpreted", "closure", "jit", "wasm"] as const
 type Backend = (typeof backends)[number]
 
 /** A separate parser object per backend, since compilation is per parser. */
@@ -59,10 +60,20 @@ const grammars = [
   ["json-fast.ts, Text.string", fastJsonGrammar(Text.string), doc],
   ["json-fast.ts, Text.utf8", fastJsonGrammar(Text.utf8), utf8]
 ] as const
+/**
+ * Two copies of an input, parsed in turn: a parser can't reuse anything of
+ * the previous run's input (the WebAssembly compiler keeps the latest string
+ * it copied into its memory, which the same string parsed again would reuse).
+ */
+const twin = (input: string | Uint8Array): string | Uint8Array =>
+  Predicate.isString(input) ? JSON.parse(JSON.stringify(input)) : input.slice()
+let turn = 0
+
 for (const [group, grammar, input] of grammars) {
   for (const backend of backends) {
     const p = variant(grammar as Parser.Parser<unknown, never, never, any>, backend)
-    cases.push({ group, name: backend, run: () => Parser.parseSync(p, input) })
+    const inputs = [input, twin(input)]
+    cases.push({ group, name: backend, run: () => Parser.parseSync(p, inputs[turn++ & 1]) })
   }
 }
 const jsonString = variant(jsonGrammar(Text.string), "jit")
