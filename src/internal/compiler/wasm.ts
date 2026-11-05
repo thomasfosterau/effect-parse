@@ -564,6 +564,14 @@ class WasmCompiler {
     if (Predicate.isTagged(node, "Suspend")) {
       return Option.some(this.call(this.rule(node.resolve(), s.out !== ""), s.out, b, fail))
     }
+    if (Predicate.isTagged(node, "Fixed") && this.kind === 1) {
+      // `Binary`'s numbers on bytes: the scan checks there are `size` bytes, the builder reads the number
+      this.end(b.get(0).i32(node.size).op(Op.i32Add)).op(Op.i32GtU)
+      this.failIf(b, fail)
+      if (s.out !== "") this.put(b, [() => b.get(0)])
+      this.advance(b, node.size)
+      return Option.some(this.set(s, `${this.const(node.read)}(I,T[i++],S)`))
+    }
     return Option.none()
   }
 
@@ -2770,7 +2778,7 @@ const run = (
     if (Result.isFailure(result)) throw result.failure
     return result.success
   }
-  return Result.succeed({ backend: "wasm", step, fallbacks: c.fallbacks, error: undefined, source })
+  return Result.succeed({ backend: "wasm", step, guarded: false, fallbacks: c.fallbacks, error: undefined, source })
 }
 
 /**

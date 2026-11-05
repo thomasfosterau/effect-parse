@@ -50,18 +50,28 @@ export type Chunkable = string | Uint8Array | ReadonlyArray<unknown>
 const concat = <I extends Chunkable>(first: I, b: I): I => {
   // Widened so the checks below narrow it (a type parameter does not narrow).
   const a: Chunkable = first
-  if (Predicate.isString(a)) return (a + (b as string)) as I
+  if (Predicate.isString(a)) {
+    // SAFETY: both are chunks of one stream of `I`, so `b` is a string when `a` is, and so is their concatenation
+    return (a + (b as string)) as I
+  }
   if (a instanceof Uint8Array) {
     if (a.byteLength === 0) return b
+    // SAFETY: both are chunks of one stream of `I`, so `b` is a `Uint8Array` when `a` is
     const out = new Uint8Array(a.length + (b as Uint8Array).length)
     out.set(a)
+    // SAFETY: both are chunks of one stream of `I`, so `b` is a `Uint8Array` when `a` is
     out.set(b as Uint8Array, a.length)
+    // SAFETY: `I` is `a`'s type, a `Uint8Array` here, and `out` is a new `Uint8Array`
     return out as I
   }
-  return [...a, ...(b as ReadonlyArray<unknown>)] as unknown as I
+  // SAFETY: both are chunks of one stream of `I`, so `b` is an array when `a` is
+  const joined: Chunkable = [...a, ...(b as ReadonlyArray<unknown>)]
+  // SAFETY: `I` is `a`'s type, an array here, and `joined` is a new array of both chunks' elements
+  return joined as I
 }
 
 const sliceFrom = <I extends Chunkable>(input: I, offset: number): I =>
+  // SAFETY: slicing a string, `Uint8Array` or array returns a value of the same kind
   (Predicate.isString(input) ? input.slice(offset) : input.slice(offset)) as I
 
 const noProgress = (input: Input, offset: number) =>
@@ -92,8 +102,9 @@ export interface ParseManyOptions<I> {
  *
  * A parser compiled with the `Compiler` module runs compiled, with the
  * build that handles partial input (see `Parser.run`); a value that fails
- * or needs more input is parsed again interpreted, so errors and
- * `Incomplete` are the interpreter's.
+ * is parsed again interpreted, so errors are the interpreter's. A value
+ * cut short by its chunk is not: compiled code reports `Incomplete` where
+ * the interpreter does.
  *
  * @since 0.1.0
  * @category combinators
@@ -128,9 +139,12 @@ export const parseMany: {
         let offset = 0
         while (offset < input.length) {
           state.reset(offset, { partial, context })
-          const a = Run.runOn(parser, step, state)
+          // A compiled `Incomplete` is the interpreter's: only an error needs the interpreted run
+          const a = Run.runOn(parser, step, state, false)
           if (a === Fail) {
             if (partial && state.mode === "Incomplete") break
+            state.reset(offset, { partial, context })
+            Run.runOn(parser, step, state)
             return Effect.fail(ParseError.fromFailure<E>(input, state.reportedFailure(), state.mode, state.encoding))
           }
           if (state.pos === offset) return Effect.fail(noProgress(input, offset))
@@ -213,15 +227,19 @@ class Incremental<A, E, I extends Chunkable> {
   }
 
   private input(): I {
-    switch (this.kind) {
-      case 1:
-        return this.bytes.subarray(0, this.length) as I
-      case 2:
-        // Items are only appended between attempts, after each state has read its `end`
-        return this.items as unknown as I
-      default:
-        return this.text as I
+    if (this.kind === 1) {
+      // SAFETY: `kind` 1 is set by the first chunk being a `Uint8Array`, so `I` is `Uint8Array`
+      return this.bytes.subarray(0, this.length) as I
     }
+    if (this.kind === 2) {
+      // Items are only appended between attempts, after each state has read its `end`
+      const items: Chunkable = this.items
+      // SAFETY: `kind` 2 is set by the first chunk being an array, so `I` is an array of the items' type
+      return items as I
+    }
+    // SAFETY: `kind` 0 means the first chunk was a string, so `I` is `string`; while `kind` is unset (no
+    // chunk arrived) `I` is unknown and the empty string stands for the empty input
+    return this.text as I
   }
 
   push(chunk: I): void {
@@ -247,8 +265,9 @@ class Incremental<A, E, I extends Chunkable> {
    * The step attempts run: the parser's compiled code if it was compiled
    * (the resumable build, unless `resumable` is false), else the interpreter.
    */
-  private step(state: State<I>, resumable = true): unknown {
-    return Stack.run(Registry.stepFor(this.parser, state, resumable) ?? this.parser.step, state)
+  private step(state: State<I>, resumable = true): A | Fail {
+    // SAFETY: a compiled step (typed `any` by the compilers) returns what the parser's own step returns
+    return Stack.run(Registry.stepFor(this.parser, state, resumable) ?? this.parser.step, state) as A | Fail
   }
 
   private attempt(): void {
@@ -257,7 +276,7 @@ class Incremental<A, E, I extends Chunkable> {
     const a = this.step(state)
     this.attempted = this.length
     if (a !== Fail) {
-      this.settled = { value: a as A, pos: state.pos }
+      this.settled = { value: a, pos: state.pos }
     } else if (state.mode === "Incomplete") {
       this.restart = state.failure.offset
     } else {
@@ -276,7 +295,7 @@ class Incremental<A, E, I extends Chunkable> {
       const resumable = this.attempted > 0
       if (resumable) state.resume = this.resume
       const a = this.step(state, resumable)
-      if (a !== Fail && state.pos === state.end) return Effect.succeed(a as A)
+      if (a !== Fail && state.pos === state.end) return Effect.succeed(a)
     }
     // The error comes from an ordinary parse of the whole input, so it is the
     // same as if the input had been parsed in one go
@@ -331,7 +350,7 @@ export const parseAll: {
     Effect.flatMap(Effect.context<R>(), (context) =>
       Effect.suspend(() => {
         const empty = options?.empty === undefined ? undefined : fromSource<I>(options.empty)
-        const incremental = new Incremental(parser, context as Context.Context<never>, empty)
+        const incremental = new Incremental(parser, context, empty)
         return Effect.flatMap(
           Stream.runForEach(self, (chunk) => Effect.sync(() => incremental.push(fromSource<I>(chunk)))),
           () => Effect.suspend(() => incremental.finish())

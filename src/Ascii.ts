@@ -183,8 +183,13 @@ const alnumSet = [/*#__PURE__*/ range("a", "z"), /*#__PURE__*/ range("A", "Z"), 
 const spaceSet = " \t"
 const multispaceSet = " \t\r\n"
 
-const cls = (set: unknown, min: 0 | 1, description: string, kind: ErrorKind, hint = true): Parser<string> =>
-  takeWhileImpl<string>(set, { min }, false, `${kind.toLowerCase()}${min}`, description, kind, hint)
+const cls = (
+  set: Token.StringTokenSet,
+  min: 0 | 1,
+  description: string,
+  kind: ErrorKind,
+  hint = true
+): Parser<string> => takeWhileImpl<string>(set, { min }, false, `${kind.toLowerCase()}${min}`, description, kind, hint)
 
 // -----------------------------------------------------------------------------
 // Character classes
@@ -359,6 +364,7 @@ export const tillLineEnding: Parser<string> = /*#__PURE__*/ P.described<string>(
     const isString = state.inputKind === 0
     let i = start
     while (i < state.end) {
+      // SAFETY: `Ascii` parsers run on strings or `Uint8Array`s, and `isString` is `inputKind === 0`, set only for a string
       const c = isString ? (input as string).charCodeAt(i) : (input as Uint8Array)[i]
       if (c === 10) break
       if (c === 13) {
@@ -368,6 +374,7 @@ export const tillLineEnding: Parser<string> = /*#__PURE__*/ P.described<string>(
           if (state.partial) return state.incomplete(1, expectedLineEnding)
           return state.backtrack("LineEnding", expectedLineEnding, i)
         }
+        // SAFETY: `Ascii` parsers run on strings or `Uint8Array`s, and `isString` is `inputKind === 0`, set only for a string
         const d = isString ? (input as string).charCodeAt(i + 1) : (input as Uint8Array)[i + 1]
         if (d === 10) break
         return state.backtrack("LineEnding", expectedLineEnding, i)
@@ -376,6 +383,7 @@ export const tillLineEnding: Parser<string> = /*#__PURE__*/ P.described<string>(
     }
     if (i >= state.end && state.partial) return state.incomplete(1, expectedLineEnding)
     state.pos = i
+    // SAFETY: on string input, the input type of a `Parser<string>`, the slice is a string (`bytes` retypes it for bytes)
     return state.slice(start, i) as string
   },
   "tillLineEnding",
@@ -471,7 +479,7 @@ const unsignedFloat = /*#__PURE__*/ P.alt(
 const floatText = /*#__PURE__*/ numbers.floatText(
   /*#__PURE__*/ P.taken(
     /*#__PURE__*/ P.alt(/*#__PURE__*/ literalImpl("nan", true), /*#__PURE__*/ P.seq(sign, unsignedFloat))
-  ).pipe(/*#__PURE__*/ P.expected("number")) as Parser<string>
+  ).pipe(/*#__PURE__*/ P.expected("number"))
 )
 
 /** @internal */
@@ -502,16 +510,24 @@ export const float: Parser<number> = /*#__PURE__*/ floatText.pipe(
 // -----------------------------------------------------------------------------
 
 /**
+ * The overloads of {@link caseless}.
+ *
+ * @since 0.5.0
+ * @category literals
+ */
+export interface CaselessFn {
+  (literal: string): Parser<string>
+  (literal: Uint8Array): Parser<Uint8Array, never, never, Uint8Array>
+}
+
+/**
  * Matches a literal ignoring ASCII case (winnow's `Caseless`, nom's
  * `tag_no_case`). Returns the input as written.
  *
  * @since 0.1.0
  * @category literals
  */
-export const caseless: {
-  (literal: string): Parser<string>
-  (literal: Uint8Array): Parser<Uint8Array, never, never, Uint8Array>
-} = (lit: string | Uint8Array): any => literalImpl(lit, true)
+export const caseless: CaselessFn = (lit: string | Uint8Array): any => literalImpl(lit, true)
 
 // -----------------------------------------------------------------------------
 // Escapes
@@ -522,6 +538,7 @@ const controlCode = (c: string | number): number => (Predicate.isNumber(c) ? c :
 const atControl = (state: State<Input>, control: number): boolean => {
   if (state.pos >= state.end) return false
   const input = state.input
+  // SAFETY: escapes are read from strings or `Uint8Array`s, and `inputKind` 0 is set only for a string
   const c = state.inputKind === 0 ? (input as string).charCodeAt(state.pos) : (input as Uint8Array)[state.pos]
   return c === control
 }
@@ -559,6 +576,7 @@ export const takeEscaped = <A, E, R, I extends Input, B, E2, R2, I2 extends Inpu
       return true
     },
     escapable,
+    // SAFETY: the parser runs on input of type `I & I2`, and `State.slice` returns that input's own slice type
     (state, start) => state.slice(start, state.pos) as Slice<I & I2>,
     ctrl,
     undefined
@@ -593,9 +611,11 @@ export const takeEscapedImpl = <A, E, R, I extends Input, B, E2, R2, I2 extends 
       const start = state.pos
       let resumed = false
       if (state.resume !== undefined) {
+        // SAFETY: under its own `key`, this parser saves only a resume offset (`suspendAt`) or a `Done`
         const checkpoint = Resume.take(state, key, start) as number | Resume.Done | undefined
         if (checkpoint instanceof Resume.Done) {
           state.pos = checkpoint.pos
+          // SAFETY: a `Done` saved under this parser's `key` holds the `S` it returned
           return checkpoint.value as S
         }
         if (checkpoint !== undefined) {
@@ -701,9 +721,11 @@ export const escapedImpl = <E, R, I extends Input, E2, R2, I2 extends Input>(
       let out = ""
       let resumed = false
       if (state.resume !== undefined) {
+        // SAFETY: under its own `key`, this parser saves only an `EscapedCheckpoint` (`suspendAt`) or a `Done`
         const checkpoint = Resume.take(state, key, start) as EscapedCheckpoint | Resume.Done | undefined
         if (checkpoint instanceof Resume.Done) {
           state.pos = checkpoint.pos
+          // SAFETY: a `Done` saved under this parser's `key` holds the string it returned
           return checkpoint.value as string
         }
         if (checkpoint !== undefined) {
@@ -755,6 +777,14 @@ type Bytes<P> =
     : never
 
 /**
+ * Gives a value the type of another view of the same parsers (see
+ * {@link bytes}).
+ */
+const retype = <T>(value: unknown): T =>
+  // SAFETY: callers pass the byte views' parsers, which are the string parsers themselves (below)
+  value as T
+
+/**
  * The parsers of this module, typed for `Uint8Array` input. Slices are
  * returned as `Uint8Array`s.
  *
@@ -803,7 +833,7 @@ export const bytes: {
   const lit = (s: string) => Token.literal(new TextEncoder().encode(s))
   const crlfB = lit("\r\n")
   const newlineB = lit("\n")
-  return {
+  const views = {
     alpha0,
     alpha1,
     digit0,
@@ -829,5 +859,8 @@ export const bytes: {
     decBigInt,
     hexUint,
     float
-  } as any
+  }
+  // SAFETY: the string parsers run on byte input unchanged (their slices of a `Uint8Array` are `Uint8Array`s),
+  // so only their declared input and slice types differ from the byte views'
+  return retype<typeof bytes>(views)
 })()

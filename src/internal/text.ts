@@ -38,7 +38,18 @@ export const isEmptyUnits = (units: string | Uint8Array | ReadonlyArray<unknown>
 
 /** @internal */
 export const fastLimit = (enc: Encoding<any>): number =>
-  (enc as any)[FastLimit] ?? (enc.asciiCompatible && enc.unit === 1 ? 0x80 : 0)
+  // SAFETY: the built-in encodings carry the internal `FastLimit` key; on any other encoding it reads `undefined`
+  (enc as Encoding<any> & { readonly [FastLimit]?: number })[FastLimit] ??
+  (enc.asciiCompatible && enc.unit === 1 ? 0x80 : 0)
+
+/**
+ * `String.fromCharCode`, seen as taking its argument list through `apply` as
+ * any array-like (which `Function.prototype.apply` accepts), such as a view of
+ * bytes.
+ */
+export interface FromCharCodes {
+  readonly apply: (thisArg: null, codes: ArrayLike<number>) => string
+}
 
 const asciiChars: ReadonlyArray<string> = /*#__PURE__*/ Array.from({ length: 128 }, (_, i) => String.fromCharCode(i))
 
@@ -68,6 +79,7 @@ const decodeString = (s: string, i: number, end: number): number => {
  * JavaScript strings: UTF-16 code units. Offsets are code-unit indices and
  * slices are `String.prototype.slice`s, so no decoding is needed.
  */
+// SAFETY: an `Encoding` with the internal `FastLimit` key, which its type doesn't declare
 export const string: Encoding<string> = {
   name: "UTF-16",
   unit: 1,
@@ -112,9 +124,38 @@ const decodeUtf8 = (b: Uint8Array, i: number, end: number): number => {
   return Invalid
 }
 
-// Building short strings by hand is several times faster than a
-// `TextDecoder` call, which has a high fixed cost.
-const SHORT = 24
+const fromCharCode = String.fromCharCode
+
+/** How many of the (up to eight) bytes from `i` are ASCII; at least one, as `b[i]` is. */
+const asciiPrefix = (b: Uint8Array, i: number, end: number): number => {
+  const n = end - i < 8 ? end - i : 8
+  let k = 1
+  while (k < n && b[i + k] < 0x80) k++
+  return k
+}
+
+/** The `n` (1 to 8) ASCII bytes from `i`, as a string. */
+const asciiText = (b: Uint8Array, i: number, n: number): string => {
+  if (n === 8) return fromCharCode(b[i], b[i + 1], b[i + 2], b[i + 3], b[i + 4], b[i + 5], b[i + 6], b[i + 7])
+  if (n === 1) return asciiChars[b[i]]
+  if (n === 2) return fromCharCode(b[i], b[i + 1])
+  if (n === 3) return fromCharCode(b[i], b[i + 1], b[i + 2])
+  if (n === 4) return fromCharCode(b[i], b[i + 1], b[i + 2], b[i + 3])
+  if (n === 5) return fromCharCode(b[i], b[i + 1], b[i + 2], b[i + 3], b[i + 4])
+  if (n === 6) return fromCharCode(b[i], b[i + 1], b[i + 2], b[i + 3], b[i + 4], b[i + 5])
+  return fromCharCode(b[i], b[i + 1], b[i + 2], b[i + 3], b[i + 4], b[i + 5], b[i + 6])
+}
+
+/** The longest UTF-16 range, in bytes, built by hand rather than by a `TextDecoder` call. */
+const ShortUtf16 = 48
+
+/**
+ * The longest UTF-8 range built by hand: built eight ASCII bytes at a
+ * time, shorter ones are faster than a `TextDecoder` call, which costs
+ * about 120 ns whatever the length. Raising it past about 50 would also
+ * keep typical strings from {@link utf8Text}'s ASCII runs.
+ */
+export const ShortText = 40
 
 const utf8Decoder = /*#__PURE__*/ new TextDecoder("utf-8", { ignoreBOM: true })
 
@@ -128,6 +169,46 @@ const decodeRange = (decoder: TextDecoder, b: Uint8Array, start: number, end: nu
 }
 const utf8Encoder = /*#__PURE__*/ new TextEncoder()
 
+/** A run of ASCII bytes, `[start, end)` of a state's input, and its text. */
+export interface AsciiRun {
+  readonly start: number
+  readonly end: number
+  readonly text: string
+}
+
+/** How far past a string {@link utf8Text} looks for the end of its ASCII run. */
+const RunWindow = 16384
+
+/**
+ * Decodes `[start, end)` of a state's UTF-8 input, as `utf8.text` does.
+ * Each `TextDecoder` call has a fixed cost of about 120 ns, more than
+ * slicing a string, so a long string inside a run of ASCII bytes (where a
+ * byte offset is a character offset) is sliced from the text of the whole
+ * run, decoded once and kept on the state; short strings, and those the run
+ * doesn't cover, are decoded as `utf8.text` decodes them.
+ */
+export const utf8Text = (s: State<any>, start: number, end: number): string => {
+  // SAFETY: called only by `Text.utf8` parsers, whose input is bytes
+  const b = s.input as Uint8Array
+  // `textIn` and the JIT check this themselves before calling
+  if (end - start <= ShortText) return utf8.text(b, start, end)
+  const run = s.asciiRun
+  if (run !== undefined && start >= run.start && end <= run.end)
+    return run.text.slice(start - run.start, end - run.start)
+  let e = start
+  const limit = Math.min(s.end, end + RunWindow)
+  while (e < limit && b[e] < 0x80) e++
+  // Only worth it when the run holds more than this string
+  if (e < end || e - start < 4 * (end - start)) return decodeRange(utf8Decoder, b, start, end)
+  const text = decodeRange(utf8Decoder, b, start, e)
+  s.asciiRun = { start, end: e, text }
+  return text.slice(0, end - start)
+}
+
+/** Decodes `[start, end)` of a state's input in `enc`, through {@link utf8Text} for UTF-8. */
+export const textIn = (enc: Encoding<any>, s: State<any>, start: number, end: number): string =>
+  enc === utf8 && end - start > ShortText ? utf8Text(s, start, end) : enc.text(s.input, start, end)
+
 /** UTF-8 bytes. */
 // SAFETY: an `Encoding` with the internal `FastLimit` key, which its type doesn't declare
 export const utf8: Encoding<Uint8Array> = {
@@ -138,13 +219,16 @@ export const utf8: Encoding<Uint8Array> = {
   width: (cp) => (cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4),
   encode: (text) => utf8Encoder.encode(text),
   text: (b, start, end) => {
-    if (end - start > SHORT) return decodeRange(utf8Decoder, b, start, end)
+    if (end - start > ShortText) return decodeRange(utf8Decoder, b, start, end)
     let out = ""
     for (let i = start; i < end;) {
       const c = b[i]
       if (c < 0x80) {
-        out += asciiChars[c]
-        i++
+        // Up to eight ASCII bytes in one call: a string a character at a
+        // time costs about 8 ns a character, eight in one call about 20 ns
+        const n = asciiPrefix(b, i, end)
+        out += asciiText(b, i, n)
+        i += n
       } else {
         const cp = decodeUtf8(b, i, end)
         out += cp < 0x10000 ? String.fromCharCode(cp) : String.fromCodePoint(cp)
@@ -187,7 +271,7 @@ const makeUtf16 = (littleEndian: boolean): Encoding<Uint8Array> => {
       return out
     },
     text: (b, start, end) => {
-      if (end - start <= SHORT * 2) {
+      if (end - start <= ShortUtf16) {
         // The range is well formed, so surrogate pairs can be copied unit by unit
         let out = ""
         for (let i = start; i < end; i += 2) out += String.fromCharCode(b[i + lo] | (b[i + hi] << 8))
@@ -207,6 +291,7 @@ export const utf16le: Encoding<Uint8Array> = /*#__PURE__*/ makeUtf16(true)
 export const utf16be: Encoding<Uint8Array> = /*#__PURE__*/ makeUtf16(false)
 
 /** ISO-8859-1: every byte is the code point of the same value. */
+// SAFETY: an `Encoding` with the internal `FastLimit` key, which its type doesn't declare
 export const latin1: Encoding<Uint8Array> = {
   name: "ISO-8859-1",
   unit: 1,
@@ -225,7 +310,8 @@ export const latin1: Encoding<Uint8Array> = {
   text: (b, start, end) => {
     let out = ""
     for (let i = start; i < end; i += 8192) {
-      out += String.fromCharCode.apply(null, b.subarray(i, Math.min(end, i + 8192)) as unknown as Array<number>)
+      // SAFETY: `apply` takes any array-like argument list, so each byte of the view is passed as a char code
+      out += (String.fromCharCode as FromCharCodes).apply(null, b.subarray(i, Math.min(end, i + 8192)))
     }
     return out
   },
@@ -302,6 +388,7 @@ export const scan = (
   let count = 0
   let stop = 0
   if (state.inputKind === 0) {
+    // SAFETY: `inputKind` 0 is set only for a string input
     const s = state.input as string
     while (count < max) {
       if (i >= end) {
@@ -324,6 +411,7 @@ export const scan = (
       count++
     }
   } else {
+    // SAFETY: an encoding's input is a string or a `Uint8Array`, and `inputKind` is not 0, so a `Uint8Array`
     const b = state.input as Uint8Array
     while (count < max) {
       if (i >= end) {

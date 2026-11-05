@@ -1,10 +1,12 @@
+import * as Record from "effect/Record"
 import * as Predicate from "effect/Predicate"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
 import { describe, expect, it } from "vite-plus/test"
-import { Encoding, Parser, ParserStream, Text, Token } from "../src/index.js"
+import { Compiler, Encoding, Parser, ParserStream, Text, Token } from "../src/index.js"
+import { jsonGrammar } from "../examples/json-text.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
 
 const encoders = {
@@ -65,7 +67,7 @@ describe.each(sets)("Text.%s", (_, T, enc) => {
   const fails = (p: Parser.Parser<any, any, never, any>, input: string) => expectFailure(p, enc(input))
   const rest = <A>(p: Parser.Parser<A, any, never, any>, input: string) => {
     const r = peek(p, enc(input))
-    return Result.map(r, ([remaining, a]) => [T.encoding.text(remaining as any, 0, remaining.length), a])
+    return Result.map(r, ([remaining, a]) => [T.encoding.text(remaining, 0, remaining.length), a])
   }
 
   it("any", () => {
@@ -297,5 +299,66 @@ describe("Text over bytes", () => {
     const word = Parser.terminated(Text.utf8.alpha1, Text.utf8.multispace0)
     const program = Stream.fromIterable(chunks).pipe(ParserStream.parseMany(word), Stream.runCollect)
     expect(Effect.runSync(program)).toEqual(["αβγ", "δεζ", "ηθ"])
+  })
+})
+
+describe("UTF-8 strings sliced from a decoded ASCII run", () => {
+  const p = jsonGrammar(Text.utf8)
+  const variants = [p, Compiler.closure(Parser.named(p, "closure")), Compiler.jit(Parser.named(p, "jit"))]
+  type Doc = string | number | ReadonlyArray<Doc> | { readonly [key: string]: Doc }
+  // The documents' JSON text, written here: their strings are printable ASCII and their numbers integers
+  const quote = (t: string): string => `"${t.replace(/["\\]/g, (c) => `\\${c}`)}"`
+  const isList = (d: Doc): d is ReadonlyArray<Doc> => Array.isArray(d)
+  const text = (d: Doc): string => {
+    if (Predicate.isString(d)) return quote(d)
+    if (Predicate.isNumber(d)) return `${d}`
+    if (isList(d)) return `[${d.map(text).join(",")}]`
+    return `{${Record.toEntries(d)
+      .map(([k, v]) => `${quote(k)}:${text(v)}`)
+      .join(",")}}`
+  }
+  const ascii = (n: number, i: number) =>
+    Array.from({ length: n }, (_, j) => String.fromCharCode(32 + ((i * 7 + j * 13) % 95))).join("")
+  const docs: ReadonlyArray<Doc> = [
+    // Long ASCII strings, one run, some with escapes splitting them
+    Array.from({ length: 300 }, (_, i) => ascii(25 + ((i * 37) % 180), i)),
+    // Runs ending inside a string, at its quote, or just after it
+    Array.from({ length: 60 }, (_, i) => [`${ascii(30 + i, i)}é${ascii(40, i + 1)}`, ascii(26, i), "ü", ascii(90, i)]),
+    // A string longer than the run is looked for past it, then the strings after it
+    [ascii(40_000, 1), ascii(30, 2), ascii(100, 3), `${ascii(50, 4)}😀`, ascii(60, 5)],
+    // Keys, numbers and nesting between the strings
+    Array.from({ length: 100 }, (_, i) => ({ [ascii(30, i)]: [i, ascii(28 + i, i + 1), { k: ascii(64, i + 2) }] }))
+  ]
+
+  it.each(docs.map((d, i) => [i, d] as const))("document %i, every backend", (_, doc) => {
+    const bytes = Encoding.utf8.encode(text(doc))
+    variants.forEach((v) => expectSuccess(v, bytes, doc))
+  })
+
+  it("a backtrack decodes a string before the run", () => {
+    const T = Text.utf8
+    const str = Parser.delimited(T.literal('"'), T.takeTill('"'), T.literal('"'))
+    const first = ascii(60, 1).replaceAll('"', "'")
+    const second = ascii(50, 2).replaceAll('"', "'")
+    const tail = ascii(400, 3)
+    const g = Parser.alt(
+      // Decodes the second string first, caching the run from it, then fails
+      Parser.seq(Token.take<Uint8Array>(first.length + 3), str, T.literal("!")),
+      Parser.seq(str, T.literal(","), str, T.rest)
+    )
+    const input = Encoding.utf8.encode(`"${first}","${second}"${tail}`)
+    const expected: [string, ",", string, string] = [first, ",", second, tail]
+    ;[g, Compiler.closure(Parser.named(g, "closure")), Compiler.jit(Parser.named(g, "jit"))].forEach((v) =>
+      expectSuccess(v, input, expected)
+    )
+  })
+
+  it.each(docs.map((d, i) => [i, d] as const))("document %i, streamed", (_, doc) => {
+    const bytes = Encoding.utf8.encode(text(doc))
+    const chunks = Array.from({ length: Math.ceil(bytes.length / 97) }, (_, i) => bytes.subarray(i * 97, (i + 1) * 97))
+    variants.forEach((v) => {
+      const out = Effect.runSync(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(v)))
+      expect(out).toEqual(doc)
+    })
   })
 })

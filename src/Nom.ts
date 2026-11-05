@@ -132,7 +132,9 @@ export const take = Token.take
  */
 export const takeWhile = <I extends Input = string>(
   predicate: (token: TokenOf<I>) => boolean
-): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> => Token.takeWhile<I>(predicate as any)
+): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> =>
+  // SAFETY: a predicate over the input's tokens is a member of `TokenSet<I>` for each input kind
+  Token.takeWhile<I>(predicate as Token.TokenSet<I>)
 
 /**
  * @since 0.1.0
@@ -140,7 +142,9 @@ export const takeWhile = <I extends Input = string>(
  */
 export const takeWhile1 = <I extends Input = string>(
   predicate: (token: TokenOf<I>) => boolean
-): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> => Token.takeWhile<I>(predicate as any, { min: 1 })
+): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> =>
+  // SAFETY: a predicate over the input's tokens is a member of `TokenSet<I>` for each input kind
+  Token.takeWhile<I>(predicate as Token.TokenSet<I>, { min: 1 })
 
 /**
  * @since 0.1.0
@@ -150,7 +154,9 @@ export const takeWhileMN = <I extends Input = string>(
   m: number,
   n: number,
   predicate: (token: TokenOf<I>) => boolean
-): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> => Token.takeWhile<I>(predicate as any, { min: m, max: n })
+): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> =>
+  // SAFETY: a predicate over the input's tokens is a member of `TokenSet<I>` for each input kind
+  Token.takeWhile<I>(predicate as Token.TokenSet<I>, { min: m, max: n })
 
 /**
  * @since 0.1.0
@@ -158,7 +164,9 @@ export const takeWhileMN = <I extends Input = string>(
  */
 export const takeTill = <I extends Input = string>(
   predicate: (token: TokenOf<I>) => boolean
-): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> => Token.takeTill<I>(predicate as any)
+): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> =>
+  // SAFETY: a predicate over the input's tokens is a member of `TokenSet<I>` for each input kind
+  Token.takeTill<I>(predicate as Token.TokenSet<I>)
 
 /**
  * @since 0.1.0
@@ -166,7 +174,9 @@ export const takeTill = <I extends Input = string>(
  */
 export const takeTill1 = <I extends Input = string>(
   predicate: (token: TokenOf<I>) => boolean
-): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> => Token.takeTill<I>(predicate as any, { min: 1 })
+): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> =>
+  // SAFETY: a predicate over the input's tokens is a member of `TokenSet<I>` for each input kind
+  Token.takeTill<I>(predicate as Token.TokenSet<I>, { min: 1 })
 
 /**
  * @since 0.1.0

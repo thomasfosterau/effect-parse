@@ -39,7 +39,7 @@
 import * as Predicate from "effect/Predicate"
 import type { Encoding } from "./Encoding.js"
 import * as Encodings from "./Encoding.js"
-import type { Input, State } from "./Input.js"
+import type { State } from "./Input.js"
 import { Fail } from "./Input.js"
 import { escapedImpl, overflow, takeEscapedImpl, toFloat } from "./Ascii.js"
 import { codePointPredicate, compile, indexOf, matchLiteral } from "./internal/tokens.js"
@@ -392,7 +392,7 @@ const expectedIdentifier = ["identifier"]
  * @category constructors
  */
 export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): TextParsers<I> => {
-  const enc = encoding as Encoding<any>
+  const enc = encoding
   const fast = internal.fastLimit(enc)
 
   // Each parser records its encoding on byte input (`state.encoding`), so
@@ -410,7 +410,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
   ): string | Fail => {
     const count = internal.validate(enc, state, start, end)
     if (count < 0) return backtrack(state, kind, expected, -1 - count)
-    return enc.text(state.input, start, end)
+    return internal.textIn(enc, state, start, end)
   }
 
   const takeWhileText = (
@@ -438,7 +438,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
         // More matching characters would have been accepted where we stopped
         if (hint && count < max) state.setHint(offset, expected)
         state.pos = offset
-        return enc.text(state.input, start, offset)
+        return internal.textIn(enc, state, start, offset)
       },
       name,
       { _tag: "TakeWhile", set, negate, min, max, encoding: enc }
@@ -471,6 +471,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
           if (state.inputKind === 1) state.encoding = enc
           if (pos >= state.end) return state.eoi("Literal", expected, 1)
           const input = state.input
+          // SAFETY: a `Text` parser runs on strings or `Uint8Array`s, and `inputKind` 0 is set only for a string
           if ((state.inputKind === 0 ? (input as string).charCodeAt(pos) : (input as Uint8Array)[pos]) !== unit) {
             return backtrack(state, "Literal", expected)
           }
@@ -518,7 +519,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
           pos += internal.width
         }
         state.pos = pos
-        return enc.text(state.input, start, pos)
+        return internal.textIn(enc, state, start, pos)
       },
       expected[0],
       { _tag: "Literal", literal: lit, caseless: true, encoding: enc }
@@ -559,7 +560,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
           pos += internal.width
         }
         state.pos = pos
-        return enc.text(state.input, start, pos)
+        return internal.textIn(enc, state, start, pos)
       },
       "take",
       { _tag: "Take", count, encoding: enc }
@@ -575,9 +576,9 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
       (state: State<any>) => {
         if (state.inputKind === 1) state.encoding = enc
         const start = state.pos
-        let idx = indexOf(state, needle as Input, start)
+        let idx = indexOf(state, needle, start)
         // Multi-unit encodings: only accept matches on a character boundary
-        while (unit > 1 && idx >= 0 && (idx - start) % unit !== 0) idx = indexOf(state, needle as Input, idx + 1)
+        while (unit > 1 && idx >= 0 && (idx - start) % unit !== 0) idx = indexOf(state, needle, idx + 1)
         if (idx < 0) {
           if (state.partial) return state.incomplete(0, expected)
           return backtrack(state, "TakeUntil", expected, state.end)
@@ -590,7 +591,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
         if (count < min) return backtrack(state, "TakeUntil", expected, idx)
         if (count > max) return backtrack(state, "TakeUntil", expected)
         state.pos = idx
-        return enc.text(state.input, start, idx)
+        return internal.textIn(enc, state, start, idx)
       },
       "takeUntil",
       { _tag: "TakeUntil", literal: lit, min, max, encoding: enc }
@@ -607,7 +608,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
       if (internal.scanStop === internal.Truncated) return state.incomplete(1, expectedAny)
       if (internal.scanStop === internal.Invalid) return backtrack(state, "Token", expectedAny, offset)
       state.pos = offset
-      return enc.text(state.input, start, offset)
+      return internal.textIn(enc, state, start, offset)
     },
     "rest",
     { _tag: "Rest", encoding: enc }
@@ -628,7 +629,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
   }
 
   const cls = (test: CharPredicate, min: 0 | 1, description: string, kind: ErrorKind, hint = true) =>
-    takeWhileText(test as any, { min }, false, `${kind.toLowerCase()}${min}`, [description], kind, hint)
+    takeWhileText(test, { min }, false, `${kind.toLowerCase()}${min}`, [description], kind, hint)
 
   const identifierStart = (cp: number) => cp === 95 || isIdStart(cp)
   const identifier: Parser<string, never, never, I> = P.described<string, never, never, I>(
@@ -638,13 +639,13 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
       const cp = internal.next(enc, state)
       if (cp < 0) return internal.failAt(state, cp, "TakeWhile", expectedIdentifier)
       if (!identifierStart(cp)) return state.backtrack("TakeWhile", expectedIdentifier)
-      internal.scan(enc, state, isIdContinue as any, false, Infinity, start + internal.width, fast)
+      internal.scan(enc, state, isIdContinue, false, Infinity, start + internal.width, fast)
       const stop = internal.scanStop
       if (state.partial && (stop === internal.End || stop === internal.Truncated)) {
         return state.incomplete(1, expectedIdentifier)
       }
       state.pos = internal.scanOffset
-      return enc.text(state.input, start, state.pos)
+      return internal.textIn(enc, state, start, state.pos)
     },
     "identifier",
     { _tag: "Identifier", encoding: enc }
@@ -691,7 +692,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
         if (after !== 10) return backtrack(state, "LineEnding", expectedLineEnding, offset)
       }
       state.pos = offset
-      return enc.text(state.input, start, offset)
+      return internal.textIn(enc, state, start, offset)
     },
     "tillLineEnding",
     { _tag: "TillLineEnding", encoding: enc }
@@ -783,7 +784,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
         normal,
         matchControl(control),
         escapable,
-        (state, start) => enc.text(state.input, start, state.pos),
+        (state, start) => internal.textIn(enc, state, start, state.pos),
         internal.firstCodePoint(control),
         enc
       ),

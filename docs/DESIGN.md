@@ -86,7 +86,7 @@ nom and winnow parse `&str` and `&[u8]`, and their character parsers are ASCII. 
 | 37k slices with `TextDecoder.decode(subarray)` | 5.0 ms  |
 | 37k slices built with `String.fromCharCode`    | 2.9 ms  |
 
-Scanning bytes is faster, but text parsers mostly _produce strings_, and building a string from bytes costs 4–7 times more than slicing a string. It would also turn string offsets into byte offsets, which would break spans, error columns and `Parser.location`. So strings are parsed natively, as UTF-16 code units, and only byte inputs are decoded. Short slices of bytes are built by hand (that beats `TextDecoder`'s fixed cost below about 24 bytes), and longer ones use `TextDecoder`. With the JSON grammar (best of interleaved runs), `Text.string` was 5–15% slower than the hand-written `Token`/`Ascii` parser, and `Text.utf8` on bytes was within about 10% of `TextDecoder` followed by `Text.string`. The generic scan loop, which calls through the encoding and predicate, accounts for most of the difference.
+Scanning bytes is faster, but text parsers mostly _produce strings_, and building a string from bytes costs 4–7 times more than slicing a string. It would also turn string offsets into byte offsets, which would break spans, error columns and `Parser.location`. So strings are parsed natively, as UTF-16 code units, and only byte inputs are decoded. Short slices of bytes are built by hand, eight ASCII bytes per `String.fromCharCode` call (that beats `TextDecoder`'s fixed cost up to about 40 bytes; a character at a time, the limit was 24), and longer ones use `TextDecoder`. With the JSON grammar (best of interleaved runs), `Text.string` was 5–15% slower than the hand-written `Token`/`Ascii` parser, and `Text.utf8` on bytes was within about 10% of `TextDecoder` followed by `Text.string`. The generic scan loop, which calls through the encoding and predicate, accounts for most of the difference.
 
 **Fast paths.** The scan loop skips `decode` for units that are known to be single-unit code points: below 0xD800 for strings, below 0x80 for UTF-8 and 0x100 for Latin-1. Unicode predicates (`Text.isLetter`, built on regular expression property escapes) cache their answers for the BMP in a lazily allocated table. They are marked as _code-point predicates_, so `Token` and `Text` call them with numbers instead of allocating a string per character. This also applies to the `Ascii` predicates, and to predicates declared with `Token.codePoints`. Other predicates receive strings, made with `String.fromCharCode` below U+10000 (several times cheaper than `String.fromCodePoint`, which only astral characters need).
 
@@ -177,21 +177,24 @@ Every parser carries an internal description node next to its `step` (`src/inter
 
 | Node | Built by |
 | --- | --- |
-| `Succeed`, `Sync`, `Fail(mode)`, `Eof`, `Location` | `succeed`, `empty`, `Do`, `sync`, `fail`, `reject`, `failMessage`, `todo`, `eof`, `location` |
+| `Succeed`, `Sync`, `Fail(mode)`, `Eof`, `Location` | `succeed`, `empty`, `Do`, `sync`, `fail`, `failAt`, `reject`, `failMessage`, `todo`, `eof`, `location` |
 | `Any`, `Literal(caseless)`, `OneOf(set, negate)`, `Take`, `TakeWhile(set, negate, range)`, `TakeUntil(literal, range)`, `Rest`, `RestLen` | `Token`, `Ascii` classes, `Ascii.caseless`, and the same `Text` parsers |
 | `Escaped(normal, control, escape, raw)` | `Ascii.escaped`/`takeEscaped`, `Text` `escaped`/`takeEscaped` |
 | `TillLineEnding`, `Identifier`, `Bom` | `Ascii.tillLineEnding`, the `Text` parsers of the same names |
-| `Map`, `As`, `Tap`, `TryMap`, `FilterMap`, `Filter`, `FlatMap` | mapping and filtering combinators (`filterOrFail` is a `Filter`) |
-| `Taken`, `WithTaken`, `Span`, `WithSpan` | consumed input |
+| `Map`, `As`, `Tap`, `TryMap`, `FilterMap`, `MapOrFail`, `Filter`, `FlatMap` | mapping and filtering combinators (`filterOrFail` is a `Filter`) |
+| `Taken`, `WithTaken`, `Span`, `WithSpan`, `MapSpan` | consumed input (`mapSpan`) |
 | `Mode(from, to)` | `cut`, `backtrack`, `complete` |
-| `Context`, `Expected`, `MapError`, `OrFail` | error management (they only touch diagnostics) |
+| `Context`, `Expected`, `Quiet`, `MapError`, `OrFail` | error management (they only touch diagnostics) |
 | `Opt`, `OrElseSucceed`, `Peek`, `Not` | control |
-| `Seq(parsers, output)`, `Struct`, `ZipWith` | `seq`, `preceded`, `terminated`, `delimited`, `separatedPair` (`output` picks the kept elements), `struct`, `zipWith` |
+| `Seq(parsers, output)`, `Struct`, `ZipWith`, `SeqWith` | `seq`, `preceded`, `terminated`, `delimited`, `separatedPair` (`output` picks the kept elements), `struct`, `zipWith`, `seqWith` |
 | `Alt`, `Dispatch(selector, cases \| choose, otherwise)` | choice |
 | `Repeat(range)`, `Fold(range)`, `RepeatTill`, `Separated`, `SeparatedFold(left \| right)` | repetition |
 | `Suspend` | `suspend` (and `orElse`) |
 | `Service`, `Provide`, `ResumeAfter`, `RetryAfter`, `Trace` | services, recovery, debugging |
-| `Opaque(step)` | `Parser.make`, `gen`, `mapParser`, `permutation`, `Binary`, `Bits`, `Expression`, anything else |
+| `FastPath(self, fast)` | `withFastPath`: compiled code calls `fast` and runs `self` when it returns `Defer`; the interpreter, the reference that builds every error, runs `self` alone |
+| `Fixed(size, read)` | `Binary`'s fixed-size numbers: the JIT reads them inline on bytes |
+| `Combinator(parsers, build)` | `Expression.make`, `permutation`, `Binary.lengthTake`: an algorithm the compilers don't know, whose step `build` makes from the steps of `parsers`, so compiled code passes it their compiled steps |
+| `Opaque(step)` | `Parser.make`, `gen`, `mapParser` (its inner parser reads another input), `Bits` (bit offsets), the rest of `Binary`, anything else |
 
 Token nodes have an `encoding` field: `undefined` for `Token`/`Ascii` (code points of a string with lenient surrogates, bytes, or array elements), or the `Encoding` of a `Text` parser. Token sets are stored as the user wrote them; the built-in `Ascii` predicates are annotated with their code point ranges so they compile to comparisons, as are `Token.codePoints` predicates given ranges.
 
@@ -227,6 +230,8 @@ Compiled code follows the step protocol without diagnostics: it returns a value,
 
 On success (and, for `parse`, with the whole input consumed) the value is returned directly. On any failure the runner throws the attempt away and re-runs the interpreter on a fresh `State`. The `ParseError` (offset, expected, context, cause, message) is therefore the interpreter's, byte for byte. The interpreter is also the safety net: if compiled code wrongly failed, the re-run returns the right result. The real risk is compiled code succeeding where the interpreter fails, or with a different value; the differential test suite checks for it.
 
+`Incomplete` is the exception. The compiled code reports it only where the interpreter does, and the failure it leaves is the interpreter's own: near the end of a partial input a token runs its interpreted step, and the few places where generated code reports `Incomplete` itself (`eof`, an `escaped` text that runs out) record the failure the interpreter would (`needed` 1 and 0). So `parsePartial` returns a compiled run's `Incomplete`, with its `needed`, without re-running anything. Before, a document that was complete but parsed as partial (ending in whitespace, which may continue) ran a second time interpreted: `parsePartial` on a 2.4 MB JSON document took 250 ms, and now takes 50 ms. The differential suite checks that every compiled `Incomplete` matches the interpreter's, `needed` included.
+
 Documented consequence: user callbacks should be pure. On failing inputs they may run twice, callbacks whose result is unused (a `map` inside `taken` or `preceded`, a `fold` whose output is discarded) may be skipped, and token-set predicates may be cached per character.
 
 ### Pipeline
@@ -236,14 +241,14 @@ Documented consequence: user callbacks should be pure. On failing inputs they ma
 3. **Token sets** compile to comparisons for a few ranges and to a 256-entry table plus a fallback test otherwise. Predicates without known ranges are called, with a per-character cache for ASCII (string predicates receive a cached one-character string). The comparisons test the accepted runs or the rejected ones, whichever takes fewer comparisons (runs at either end of the table take one): the JSON string body is `c>31&&c!==34&&c!==92`, not three two-sided ranges. `Text` sets whose ranges stay below the table (or below the encoding's single-unit limit) don't call their test for the code points above it.
 4. **Specialization** per input kind and encoding: strings use `charCodeAt`, bytes index the `Uint8Array`, `Text` parsers inline their encoding's single-unit fast path (below 0xD800 for strings, 0x80 for UTF-8, 0x100 for Latin-1) and call `decode` only for longer sequences. On array inputs the JIT calls a token set's predicate (or membership test) on `I[p]` inline for `any`, `oneOf`, `noneOf`, `takeWhile` and `takeTill`, with no failure record when it doesn't match; literals run their steps.
 5. **Numbers.** `Ascii.float` and `Text.float` are recognized (the parsers they map with `toFloat` are registered in `internal/numbers.ts`). When the text starts like a decimal number, one pass matches it and computes its value from the input, without a slice: up to 15 significant digits and a decimal exponent up to 22, with Clinger's fast path (exact digits times or divided by an exact power of ten); up to 19 digits, in double-double arithmetic, keeping the result only when both ends of its error bound (2^-96, relative) round to it; anything else with `Number` on the text. The value is always `Number`'s. `nan`, `inf` and failures before a digit run the compiled parser.
-6. **Objects.** `map(p, Object.fromEntries)` (which `Parser.fromEntries` is) builds its object directly when `p` is a `repeat` or `separated` of a pair (`separatedPair`, a two-element `seq`), possibly inside `cut`, diagnostics and the kept element of `preceded`, `terminated` or `delimited`: each entry is assigned as it is parsed, with no pairs and no array. `o[key] = value` creates the same property as `Object.fromEntries` when the key is a string that `Object.prototype` has no property for (no `__proto__` setter, no read-only property under a frozen prototype); other keys are defined with `Object.defineProperty`, and from the first object key on (whose conversion may run code) entries are deferred to the end, in order, as `Object.fromEntries` converts them after the whole list is parsed (`internal/entries.ts`). Streaming (resumable) builds keep the array, which their checkpoints hold.
-7. **Unused outputs** are skipped: `Taken`, `Peek`, `Not`, the dropped elements of `preceded`/`terminated`/`delimited`/`separatedPair`, `as`, `asVoid` and `opt` in void position compile without building their values. `Seq` and `Struct` build their results directly.
+6. **Objects.** `map(p, Object.fromEntries)` (which `Parser.fromEntries` is) builds its object directly when `p` is a `repeat` or `separated` of a pair (`separatedPair`, a two-element `seq`), possibly inside `cut`, diagnostics and the kept element of `preceded`, `terminated` or `delimited`: each entry is assigned as it is parsed, with no pairs and no array. `o[key] = value` creates the same property as `Object.fromEntries` when the key is a string that `Object.prototype` has no property for (no `__proto__` setter, no read-only property under a frozen prototype); other keys are defined with `Object.defineProperty`, and from the first object key on (whose conversion may run code) entries are deferred to the end, in order, as `Object.fromEntries` converts them after the whole list is parsed (`internal/entries.ts`). Streaming (resumable) builds do it too: where their checkpoints would hold the array, they hold the half-built object with its deferred entries, which is as sound, since a checkpoint that isn't `Done` is taken only once. That made a resumable parse of the JSON example built with `fromEntries` (`examples/json-fast.ts`, 2 MB of UTF-8) about 1.5× faster with the JIT (47 ms to 31 ms, against 27 ms for the ordinary build) and about 1.2× with the closure compiler (95 ms to 76–86 ms).
+7. **Unused outputs** are skipped: `Taken`, `Peek`, `Not`, the dropped elements of `preceded`/`terminated`/`delimited`/`separatedPair`, `as`, `asVoid` and `opt` in void position compile without building their values. `Seq` and `Struct` build their results directly. A repetition of a character set whose values are unused scans its run in one loop (#79): `repeat(oneOf(S), range)` compiles as `takeWhile(S, range)`, which matches, stops and fails the same way, and `repeat(alt(oneOf(S), ...rest))` with `min` at most 1 and no `max` as `repeat(alt(takeWhile(S, { min: 1 }), ...rest))`, so that a name written as a repetition of a shared `alt(nameChar, escape)` no longer calls that alternative once per character (4.66 ms to 3.72 ms on the drivers benchmark's names, against 3.03 ms for the hand-written `takeWhile` form). The closure compiler makes the first rewrite too, where it saves a closure call per character: 2.2× on runs of 30–70 characters.
 
 ### Backends
 
 **(a) Closure compiler** (`internal/compiler/closure.ts`). Builds one specialized closure per node, with the step signature, so `Opaque` nodes are simply their own steps and the cursor is `state.pos` throughout. It never generates code, so it works under a CSP. Closures made from one function literal share V8's type feedback, so a call inside a closure that sees different functions across the closures of its literal is not inlined; a test with six closures of one literal calling six different functions ran eight times slower than with one. The compiler therefore writes the hottest loop, `Text` `takeWhile`, once per kind of unit read (string, single bytes, UTF-16 bytes) rather than as one loop calling a reader: in a program that parses more than one input kind or encoding, the shared loop stopped inlining its reader, and the JSON benchmark (whose grammars share a process) ran about 17% slower. Per-grammar feedback is what the JIT adds: in the same mixed process its timings don't change, while the interpreter's and the closure compiler's rise with the number of grammars that share their literals.
 
-**(b) JIT** (`internal/compiler/jit.ts`). Emits one JavaScript function per rule (the root, every `Suspend` target, and shared nodes) and inlines everything else as straight-line code with labelled blocks for failure. The cursor is a local `p`; a rule returns its value and leaves the new position in a register. The input and end are hoisted into locals. Callbacks, sets and steps are passed in a constants array. `Opaque` nodes store `p` in `state.pos`, call the step and reload it. Generation is guarded: `new Function` is probed once, and if it or the generated code fails to build, the parser uses the closure compiler. The entry point saves and restores its registers, so a callback that runs another compiled parse is safe.
+**(b) JIT** (`internal/compiler/jit.ts`). Emits one JavaScript function per rule (the root, every `Suspend` target, and shared nodes) and inlines everything else as straight-line code with labelled blocks for failure. The cursor is a local `p`; a rule returns its value and leaves the new position in a register. The input and end are hoisted into locals. Callbacks, sets and steps are passed in a constants array. `Opaque` nodes store `p` in `state.pos`, call the step and reload it. The generated entry also sends a state whose end is not its input's length to the closure compiler, and catches a call-stack overflow and reports it as the `TooDeep` failure the runners' guard (`internal/stack.ts`) would, so the runners call it directly, without the guard; `Compiler.runner` also looks the compiled form up once rather than on every run. Generation is guarded: `new Function` is probed once, and if it or the generated code fails to build, the parser uses the closure compiler. The entry point saves and restores its registers, so a callback that runs another compiled parse is safe.
 
 Byte encodings whose code units are wider than a byte (UTF-16LE/BE) get a _unit reader_: generated code reads `I[p] | I[p+1] << 8` inline and only calls `decode` for surrogates. Small parsers used in several places (`comma`, `sign`) are inlined rather than called.
 
@@ -276,15 +281,15 @@ Against `JSON.parse` on documents of different shapes (`vp run bench:native`; by
 
 | Document | `json.ts`, string | `Text.string` | `Text.utf8`, bytes | `json-fast.ts`, string | `json-fast.ts`, bytes |
 | --- | --- | --- | --- | --- | --- |
-| records, 1 KB | 4.0× | 3.7× | 2.9× | 2.4× | 1.9× |
-| records, 600 KB, pretty-printed | 4.1× | 4.0× | 2.2× | 2.7× | 1.5× |
-| records, 4 MB | 3.9× | 3.9× | 3.3× | 2.7× | 1.8× |
+| records, 1 KB | 3.9× | 3.7× | 2.6× | 2.3× | 1.6× |
+| records, 600 KB, pretty-printed | 4.1× | 3.8× | 2.1× | 2.5× | 1.3× |
+| records, 4 MB | 3.6× | 3.4× | 2.9× | 2.2× | 1.9× |
 | numbers, 1 MB | 1.2× | 1.2× | 1.0× | 1.2× | 1.0× |
-| ASCII strings, 1 MB | 2.9× | 3.1× | 3.1× | 3.0× | 3.1× |
-| escaped strings, 1 MB | 4.8× | 5.7× | 4.1× | 4.2× | 4.1× |
-| deep nesting, 100 KB | 2.1× | 2.2× | 1.8× | 1.4× | 1.2× |
+| ASCII strings, 1 MB | 2.8× | 2.9× | 2.4× | 2.9× | 2.4× |
+| escaped strings, 1 MB | 6.3× | 6.2× | 3.0× | 4.6× | 2.6× |
+| deep nesting, 100 KB | 2.4× | 2.3× | 2.0× | 1.3× | 1.3× |
 
-Numbers come within 1.2× of `JSON.parse` because floats are converted without slicing (above); for numbers with more than 15 significant digits, `Number` is about as costly as the whole of `JSON.parse`'s work, so the double-double path matters there. Strings are scanned one character at a time, about 1.5 ns per character, where V8's scanner and `indexOf` run several times faster: replacing the string loop of the generated code by an `indexOf` for the closing quote (an upper bound, not a correct parser) runs the ASCII strings document at 1.1×. A correct version also has to find backslashes, control characters and, for predicates, non-Latin-1 characters; with cached searches it ran that document 1.8× faster, but documents of short strings 5–7% slower, so the compilers don't do it. On bytes, every string longer than 24 bytes costs a `TextDecoder` call, which has a fixed cost of about 100 ns. Records and nesting are dominated by the grammar's `Object.fromEntries` (below).
+Numbers come within 1.2× of `JSON.parse` because floats are converted without slicing (above); for numbers with more than 15 significant digits, `Number` is about as costly as the whole of `JSON.parse`'s work, so the double-double path matters there. Strings are scanned one character at a time, about 1.5 ns per character, where V8's scanner and `indexOf` run several times faster: replacing the string loop of the generated code by an `indexOf` for the closing quote (an upper bound, not a correct parser) runs the ASCII strings document at 1.1×. A correct version also has to find backslashes, control characters and, for predicates, non-Latin-1 characters; with cached searches it ran that document 1.8× faster, but documents of short strings 5–7% slower, so the compilers don't do it. On bytes, a `TextDecoder` call has a fixed cost of about 120 ns whatever the length (building strings by hand, eight bytes at a time, beats it up to about 40 bytes), which on that document was most of the difference from strings (5.0 ms against 3.1 ms). So `Text.utf8` decodes a long string that lies in a run of ASCII bytes by decoding the whole run once (up to 16 KiB past the string, and only when the run is at least four times the string), keeping its text on the `State`, and slicing the strings that follow from it: a byte offset in an ASCII run is a character offset. That made the document 26–28% faster (3.7 ms), and left documents whose long strings aren't ASCII unchanged within noise; a run that turns out not to be ASCII costs only the scan up to its first non-ASCII byte. The run lives on the state, not in a module-level cache, so it never outlives the parse or sees a buffer changed between parses; its strings are slices of the run's text, which they keep alive as slices of a string input keep the input. Records and nesting are dominated by the grammar's `Object.fromEntries` (below).
 
 The JIT's remaining gap to the hand-fused parser was mostly the grammar itself: `object` collects `[key, value]` tuples and calls `Object.fromEntries` in a lambda, about 90 ns per entry (three times a loop of assignments) and a third of the profile on records. `json-fast.ts` builds objects with `Parser.fromEntries`, which compiles to assignments (pipeline step 6), and parses records at the speed of the hand-fused parser.
 
@@ -324,6 +329,88 @@ A first version replayed a generic event tape with an interpreter loop, and was 
 `json-fast.ts` on a string parses faster than the hand-fused parser (3.20 ms on the same run). On the documents of `vp run bench:native`, the JIT takes 1.15–1.7 times as long on records and 1.45–1.65 times as long on numbers (where the WebAssembly compiler is faster than `JSON.parse`); on long ASCII or escaped strings, where both spend their time building strings, 1.0–1.26 times; on deep nesting, where they spend it on the call stack, 0.93–1.22 times. Over its 35 cases the JIT takes 1.28 times as long (geometric mean).
 
 **Compiling** costs more than the JIT: about 0.5 ms for a small grammar against 0.04 ms (code generation, encoding, and the engine's module and memory), once per parser and kind of input.
+
+#### Against other JavaScript parser libraries
+
+The same JSON documents (pretty-printed records, all non-ASCII text included), parsed by each library's JSON grammar written in its own idiom (its documented example where it has one), Node 22; each figure is the median over three processes of the best of 15–25 interleaved runs (within a process, libraries alternate order every round). Every output was checked against `JSON.parse`'s:
+
+| Parser                                   | 1 KB            | 60 KB          | 600 KB         |
+| ---------------------------------------- | --------------- | -------------- | -------------- |
+| `JSON.parse`                             | 3.5 µs          | 0.17 ms        | 1.70 ms        |
+| effect-parse `json-fast.ts`, JIT         | 8.6 µs (2.5×)   | 0.43 ms (2.5×) | 4.38 ms (2.6×) |
+| effect-parse `json.ts`, JIT              | 13.3 µs (3.8×)  | 0.70 ms (4.1×) | 7.17 ms (4.2×) |
+| Chevrotain 11 (lexer + embedded actions) | 30.6 µs (8.7×)  | 1.71 ms (10×)  | 22.2 ms (13×)  |
+| effect-parse `json.ts`, interpreted      | 55.4 µs (16×)   | 2.93 ms (17×)  | 31.2 ms (18×)  |
+| Peggy 4 (generated PEG parser)           | 66.5 µs (19×)   | 3.40 ms (20×)  | 37.3 ms (22×)  |
+| Parsimmon 1.18                           | 163 µs (46×)    | 8.54 ms (50×)  | 88.6 ms (52×)  |
+| Parjs 1.3                                | 182 µs (52×)    | 8.78 ms (51×)  | 109 ms (64×)   |
+| Ohm 17                                   | 1.84 ms (526×)  | 138 ms (801×)  | 1.59 s (938×)  |
+| Arcsecond 5                              | 7.12 ms (2034×) | —              | —              |
+
+Compiled grammars run 3–5× faster than Chevrotain, the fastest of the others, and the interpreter is slightly faster than Peggy's generated code. Arcsecond is quadratic in the input: its `regex` parser slices the rest of the input on every call, and its character combinators did no better (15 s on the 60 KB document), so it is timed on the small document only.
+
+#### Searching for a `takeTill`'s stop characters
+
+`Token.takeTill` of one to three characters that are whole code points (`'"'`, `",\r\n"`), unbounded, on string input, accepts every other unit, so its run ends at the first stop character, and both compilers find it with `indexOf` (`internal/compiler/search.ts`, #75). Short runs are faster scanned: the first 8 units (16 for several stop characters) are tested one at a time, and a run that ends right after them is not searched. One stop character is searched for inline. Several are searched for through a cache on the `State`, by search site, of where each one next occurs: successive runs over one input then compare instead of searching, and a stop character that never occurs (`\r` in a file with `\n` line endings) is searched for once rather than to the end of the input on every run, which would be quadratic. The cache lives as long as the state, whose input never changes, and `reset` clears it. A `WeakRef` to the state, tried first, cost 20–30% on 8–16-character runs in `deref` alone. `Text` sets are not searched: a lone surrogate must stop a `Text` loop, and a search would skip it.
+
+Fields of CSV-shaped input, 400 K characters (`bench/drivers.bench.ts`), JIT, best of three processes:
+
+| run length | `takeTill('"')`, before |   after | `takeTill(",\r\n")`, before |   after |
+| ---------: | ----------------------: | ------: | --------------------------: | ------: |
+|          4 |                 2.51 ms | 2.36 ms |                     2.69 ms | 2.24 ms |
+|         16 |                 1.10 ms | 1.03 ms |                     1.38 ms | 1.13 ms |
+|         64 |                 0.88 ms | 0.27 ms |                     1.34 ms | 0.47 ms |
+|        256 |                 0.72 ms | 0.08 ms |                     1.11 ms | 0.13 ms |
+
+The closure compiler gains the same, from 2.06 to 0.50 ms on 64-character quoted fields and from 1.76 to 0.13 ms on 256-character ones.
+
+#### Against CSV parsers
+
+An RFC 4180 grammar as a user writes it (a quoted field of `takeTill('"')` runs and `""` escapes, an unquoted field `takeTill(",\n")`), JIT-compiled, against dedicated CSV parsers, each checked against d3-dsv's rows; about 2 MB each; the median over three processes of the best of 40 interleaved runs:
+
+| Parser | short unquoted fields | all quoted, with commas and quotes | long text fields |
+| --- | --- | --- | --- |
+| uDSV 0.7 | 12.1 ms | 15.0 ms | 0.78 ms |
+| effect-parse, quoted body as a `fold` | 18.1 ms | 18.8 ms | 1.59 ms |
+| effect-parse, quoted body as `repeat` + `join` | 16.6 ms | 29.8 ms | 1.86 ms |
+| d3-dsv 3 | 19.9 ms | 26.5 ms | 10.0 ms |
+| Papa Parse 5 | 28.6 ms | 33.6 ms | 2.81 ms |
+| csv-parse 5 (sync) | 108 ms | 74.2 ms | 50.1 ms |
+
+The general-purpose grammar comes between uDSV, which is written for CSV alone, and the rest: ahead of d3-dsv on all three (narrowly on short fields), and ahead of Papa Parse and csv-parse throughout. Long fields gained the most from the stop-character search above: the same grammar took 9.5 ms before it. Building a quoted field's text with `fold` and string concatenation, rather than collecting its parts in an array and joining them, saves an array per field: 37% on the all-quoted document. On short unquoted fields the generated code runs as fast as a hand-written loop doing the same work (scan, slice, push, an array per row: 11–14 ms against 11–14 ms, best of 30 in one process), with uDSV at 9–10 ms in the same comparison: the remaining gap there is not in the scanning code the compilers generate.
+
+#### Binary numbers
+
+`Binary`'s fixed-size numbers read through a `DataView` of the input. Each read used to build a new view, which was most of a number's cost. Integers of up to 32 bits are now read from the bytes with shifts, which needs no view; floats and 64- and 128-bit integers read through a view kept on the `State` (`state.view`, created on first use; a state's input never changes). Reading from the bytes also matters where states are short-lived: `lengthAndThen` parses each record in a state of its own, and a view per record cost about a fifth of it. The numbers are also described to the compilers (a `Fixed` node: its size and its read function), so the JIT reads them inline on byte input, `if(E-p>=size){v=read(view,p);p+=size}`, and calls the step only at the end of the input, which reports the failure or `Incomplete` as the interpreter does; a fixed-size read never looks past its bytes, so streaming builds need no margin. The closure compiler uses the step, which is already what a closure would be. The WebAssembly scan checks the size and records the offset, and its builder reads the number with the same function; as an island (a call out of WebAssembly per number) it had been 3–12 times slower than the JIT, and now matches it (`repeat(beU32)`: 27.0 to 7.8 ms, a `fold` of `beU16`: 45.2 to 3.1 ms). On 500 K numbers (2 MB):
+
+| Grammar                             | before, interpreted | before, JIT | after, interpreted | after, JIT |
+| ----------------------------------- | ------------------: | ----------: | -----------------: | ---------: |
+| `repeat(beU32)`                     |             47.1 ms |     38.8 ms |            15.0 ms |     8.3 ms |
+| `repeat(leF64)`                     |             21.9 ms |     18.4 ms |             6.9 ms |     3.3 ms |
+| `repeat(seq(u8, beU16, leU32, u8))` |              108 ms |     75.2 ms |            34.5 ms |     8.2 ms |
+| `fold` of `beU16`, summed           |             80.5 ms |     61.1 ms |            17.5 ms |     3.6 ms |
+
+A loop of `DataView.getUint32` calls pushing to an array takes 6.5–7.5 ms for the first, so the JIT now runs at about the speed of hand-written code there.
+
+Length-prefixed data (`lengthTake`, `lengthRepeat`) built a parser for each length it read (`Token.take(n)`, `repeat(parser, n)`). They now keep the parsers of the first 256 lengths they see, which is the same parser for the same length, checkpoints included: on 2 MB of records of up to 23 bytes, `repeat(lengthTake(u8))` went from 30 to 18–22 ms and `lengthRepeat` from 64 to 53–55 ms.
+
+`Bits` reads as many bits as the current byte holds at once (a shift and a mask), rather than one at a time: summing 16-bit fields over 1 MB went from 15.9 to 6.6 ms, 3-bit fields from 39 to 34 ms. A `repeat` of `bits(...)` that returns a tuple per byte is dominated by those tuples (more than half its time is garbage collection), not by reading.
+
+#### Combinators the compilers don't know
+
+`Expression.make` (the Pratt loop), `permutation` and `Binary.lengthTake` were opaque, so in a compiled grammar they ran interpreted and so did every parser inside them: the operand and operator parsers of an expression grammar, the whole of a permutation. They are now `Combinator` nodes: the parsers they run, and a `build` function that makes the step from those parsers' steps. The interpreter builds it from their own steps; the closure compiler (and the JIT, which delegates the node to it) from their compiled ones, so the algorithm is the same code in both and the parsers inside compile. `build` runs once per compilation, so state it shares between calls (the Pratt loop's last match and tied failures) is per build. `mapParser` and `Bits.bits` can't be built this way: their inner parsers run on another input (an output of the outer parser, or the bytes in bit units), which the code compiled for the outer input kind can't read. The same node is public as `Parser.combinator` (#83), with each step typed by its parser (`Parser.Steps<Ps>`), so a user's combinator can do what the library's do. On a 0.5 M-character arithmetic expression, compiling now halves the time (52 ms interpreted, 26–29 ms compiled, where compiling gained nothing before).
+
+#### Merging expectations
+
+Interpreted parses record, for errors, what could have been accepted where the parse stopped: a parser that stops without failing (`opt`, `repeat`, a whitespace skipper) sets a hint, and a failure at the hint's offset merges the hint's expectations into its own. On JSON that is one merge per value or so, almost all between the same few constant arrays (the skipper's hint, then the separator's), and each allocated a new array; a single-entry cache of the last merge never hit, because a hint merged at one offset is itself a new array each time. `mergeExpected` keeps its last four merges by the identity of their inputs instead: expectation arrays are never mutated, a merge seen before returns the same array, and the next merge then sees that array too, so on the JSON records document 4 of 40,000 merges were computed. Interpreted parses got 2–13% faster across the JSON benchmarks (34.2 to 31.1 ms with `Token`/`Ascii`); compiled code records no diagnostics and is unaffected.
+
+#### Measured and not adopted
+
+- **Skipping ahead in long strings with a regular expression.** For a `takeWhile` over a string whose set accepts everything from 256 up to the surrogates (the JSON string body), testing 16 units one at a time and then jumping with a global regular expression to the next unit that may stop the loop made the `Text.string` JSON grammars 10–25% slower on records and no faster on 50-character strings: a regular expression call costs about as much as the loop over such a string, and the head loop slows every short string. What did pay is the narrower case of #75, below.
+- **Assigning object keys without the `Object.prototype` check.** `isPlainKey` (`internal/entries.ts`) costs about 16 ns per key on fresh key strings, 13% of `json-fast.ts` on records; dropping it would make compiled objects differ from `Object.fromEntries`'s once `Object.prototype` gains a setter or is frozen, and JavaScript has no cheap signal that it changed, so it stays.
+- **Slicing `Text.string` runs inline.** The JIT calls `Text.string`'s `text(input, start, end)`, which is `input.slice(start, end)`, through its constants. Emitting `I.slice` instead left the `Text.string` grammars within noise (about −1%) and made the `Text.utf8` grammar sharing the benchmark's process 7–14% slower in three rounds out of three, so it was reverted.
+- **Joining an escaped string's pieces.** Escaped strings spend a quarter of their time in garbage collection, collecting the rope that `+=` builds per segment and escape. Collecting the pieces after the first in an array and joining them once made the escaped-strings document 18–37% slower: building the rope costs less than `join`, and flattening it later is the consumer's (a flat string only pays off if it is used).
+- **`Match` instead of `switch` in step functions.** On `state.inputKind`, once per input position: 100.6 ms per million positions against 4.84 ms (the lint override for `prefer-match-over-switch` cites this).
 
 ## 7. Streaming a document as it arrives
 
@@ -381,7 +468,7 @@ An earlier version used a fixed margin instead: the grammar's longest literal, f
 
 **Equal to a fresh parse.** A reparse returns the tree, values and errors that `Syntax.parse` of the new input returns. Values are shared, not recomputed. For errors to match too, each node stores what its parse left for error reporting (its furthest failure and its last hint, see "Error model"), and a reused node replays it. Otherwise a fatal error after a reused node could be reported at a different offset, or with fewer expected alternatives. The differential tests check that equality on random edits of random JSON documents, of expression grammars (including `Expression.make`), and of a grammar built on lookahead (keyword boundaries, comments, literals sharing a prefix); a targeted test covers each parser that reports a read, and fails if its report is removed.
 
-**Cost.** A reparse runs the parsers on the path from the root to the edit, and every repetition on that path steps over each reused child (a lookup and a stack push, about 1 µs). On a 0.58 M-character JSON document whose top-level array has 2000 records, building the tree takes about twice as long as an interpreted parse of the value (80 ms against 40 ms), and a one-character edit reparses in about 2 ms. Tree-sitter goes further by storing repetitions as balanced trees, so it can reuse runs of siblings in one step. The same could be done here by having `repeat` and `separated` look up a run of consecutive old children, which is left for later.
+**Cost.** A reparse runs the parsers on the path from the root to the edit, and every repetition on that path steps over each reused child (a lookup and a stack push, about 1 µs). On a 0.58 M-character JSON document whose top-level array has 2000 records, building the tree takes about twice as long as an interpreted parse of the value (80 ms against 40 ms), and a one-character edit reparses in about 2 ms. About a third of that (0.6 ms) is not the reparse: `Syntax.replace` builds the new text by concatenation, and V8 flattens that 0.58 M-character string the first time it is read, which any consumer of the new text pays; the rest is about 0.35 µs per reused node (4016 of them here). Tree-sitter goes further by storing repetitions as balanced trees, so it can reuse runs of siblings in one step. The same could be done here by having `repeat` and `separated` look up a run of consecutive old children, which is left for later.
 
 ## 9. Parsers from schemas
 

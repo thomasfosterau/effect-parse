@@ -167,6 +167,9 @@ export const fromFailure = <E = never>(
     mode,
     expected: failure.expected,
     context: failure.context,
+    // SAFETY: `E` is the user error type of the parser whose run recorded
+    // `failure`; a failure with `hasCause` carries a cause raised by that
+    // parser's `fail` / `mapError`
     cause: failure.hasCause ? (failure.cause as E) : undefined,
     description: failure.message,
     encoding: input instanceof Uint8Array ? encoding : undefined

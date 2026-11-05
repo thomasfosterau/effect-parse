@@ -15,9 +15,9 @@ export const eagerPermutation = (...ps: ReadonlyArray<Any>): Any =>
   Parser.make((state) => {
     const out: Array<unknown> = ps.map(() => undefined)
     const done = ps.map(() => false)
-    const round = (remaining: number): unknown => {
+    const round = (remaining: number): Array<unknown> | Input.Fail => {
       if (remaining === 0) return out
-      const attempt = (i: number, failure: Input.Failure | undefined): unknown => {
+      const attempt = (i: number, failure: Input.Failure | undefined): Array<unknown> | Input.Fail => {
         if (i === ps.length) return state.failWith("Backtrack", failure ?? state.failure)
         if (done[i]) return attempt(i + 1, failure)
         const start = state.pos
@@ -37,17 +37,18 @@ export const eagerPermutation = (...ps: ReadonlyArray<Any>): Any =>
     return round(ps.length)
   })
 
-type Op = Expression.Operator<unknown, unknown>
-type Prefix = Expression.Prefix<unknown, unknown>
-type Postfix = Expression.Postfix<unknown, unknown>
-type Infix = Expression.Infix<unknown, unknown>
-
 /** `Expression.make` as it was before #44, its loops written as recursion. */
-export const eagerExpression = (options: { readonly operand: Any; readonly operators: ReadonlyArray<Op> }): Any => {
+export const eagerExpression = <A>(options: {
+  readonly operand: Parser.Parser<A, unknown>
+  readonly operators: ReadonlyArray<Expression.Operator<A, unknown>>
+}): Parser.Parser<A, unknown> => {
+  type Op = Expression.Operator<A, unknown>
   const operand = options.operand.step
-  const prefixes = options.operators.filter((o): o is Prefix => Predicate.isTagged(o, "Prefix"))
-  const postfixes = options.operators.filter((o): o is Postfix => Predicate.isTagged(o, "Postfix"))
-  const infixes = options.operators.filter((o): o is Infix => Predicate.isTagged(o, "Infix"))
+  const prefixes = options.operators.filter((o): o is Expression.Prefix<A, unknown> => Predicate.isTagged(o, "Prefix"))
+  const postfixes = options.operators.filter((o): o is Expression.Postfix<A, unknown> =>
+    Predicate.isTagged(o, "Postfix")
+  )
+  const infixes = options.operators.filter((o): o is Expression.Infix<A, unknown> => Predicate.isTagged(o, "Infix"))
 
   // Shared by every nested call, as in the original
   let matched: unknown
@@ -73,11 +74,11 @@ export const eagerExpression = (options: { readonly operand: Any; readonly opera
     return go(0)
   }
 
-  const expr = (state: Input.State<string>, minPower: number): unknown => {
+  const expr = (state: Input.State<string>, minPower: number): A | Input.Fail => {
     failure = undefined
     const p = tryOps(state, prefixes, true)
     if (p === -2) return Input.Fail
-    let first: unknown
+    let first: A
     if (p >= 0) {
       const op = prefixes[p]
       const opOut = matched
@@ -86,16 +87,18 @@ export const eagerExpression = (options: { readonly operand: Any; readonly opera
       first = op.fold(opOut, operandValue)
     } else {
       const prefixFailure = failure
-      first = operand(state)
-      if (first === Input.Fail) {
+      const value = operand(state)
+      if (value === Input.Fail) {
         if (prefixFailure !== undefined && state.mode === "Backtrack") {
           state.failWith("Backtrack", Input.mergeFailures(prefixFailure, state.failure))
         }
         return Input.Fail
       }
+      first = value
     }
+
     // Stops before an operator that binds looser than `minPower`
-    const stop = (lhs: unknown, start: number): unknown => {
+    const stop = (lhs: A, start: number): A => {
       state.rewind(start)
       return lhs
     }
@@ -108,7 +111,7 @@ export const eagerExpression = (options: { readonly operand: Any; readonly opera
             : Input.mergeFailures(postfixFailure, failure)
       if (f !== undefined && f.offset === state.pos) state.setHint(f.offset, f.expected)
     }
-    const infix = (lhs: unknown, start: number): unknown => {
+    const infix = (lhs: A, start: number): A | Input.Fail => {
       const postfixFailure = failure
       const i = tryOps(state, infixes, false)
       if (i === -2) return Input.Fail
@@ -124,7 +127,7 @@ export const eagerExpression = (options: { readonly operand: Any; readonly opera
       if (rhs === Input.Fail) return Input.Fail
       return loop(op.fold(lhs, opOut, rhs))
     }
-    const loop = (lhs: unknown): unknown => {
+    const loop = (lhs: A): A | Input.Fail => {
       const start = state.pos
       failure = undefined
       const q = tryOps(state, postfixes, true)

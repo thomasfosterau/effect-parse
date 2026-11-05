@@ -14,6 +14,12 @@ export interface Compiled {
   /** The compiler actually used: `interpreted` when compilation failed. */
   readonly backend: "wasm" | "jit" | "closure" | "interpreted"
   readonly step: Step | undefined
+  /**
+   * Whether `step` reports a call-stack overflow as a `TooDeep` failure
+   * itself, as `Stack.run` would (the JIT's generated entry does), so that
+   * it runs without that guard.
+   */
+  readonly guarded: boolean
   /** Parts of the grammar that run interpreted, and why. */
   readonly fallbacks: ReadonlyArray<Fallback>
   /** Why compilation failed, if it did (the parser then runs interpreted). */

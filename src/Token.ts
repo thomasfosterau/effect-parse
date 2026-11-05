@@ -116,12 +116,13 @@ export const codePoints = (
   predicate: (codePoint: number) => boolean,
   ranges?: ReadonlyArray<readonly [number, number]>
 ): CodePoints =>
-  // Wrapped, so the caller's function is left unmarked
+  // Wrapped, so the caller's function is left unmarked.
+  // SAFETY: `CodePointsBrand` is a declared, phantom key, so the marked function is all a `CodePoints` is at runtime
   codePointPredicate(
     name,
     (c: number): boolean => predicate(c),
     ranges?.map(([from, to]) => [from, to] as const)
-  ) as unknown as CodePoints
+  ) as CodePoints
 
 /**
  * A set of string tokens: the characters of a string, a range, a predicate,
@@ -177,6 +178,7 @@ const anyStep = (state: State<Input>): unknown => {
   if (pos >= state.end) return state.eoi("Token", expectedAny, 1)
   switch (state.inputKind) {
     case 0: {
+      // SAFETY: `inputKind` 0 is set only for a string input
       const s = state.input as string
       if (splitSurrogate(state, pos)) return state.incomplete(1, expectedAny)
       const c = s.charCodeAt(pos)
@@ -189,12 +191,20 @@ const anyStep = (state: State<Input>): unknown => {
     }
     case 1:
       state.pos = pos + 1
+      // SAFETY: `inputKind` 1 is set only for a `Uint8Array` input
       return (state.input as Uint8Array)[pos]
     default:
       state.pos = pos + 1
+      // SAFETY: `inputKind` 2 is set for every input that is neither a string nor a `Uint8Array`, an array
       return (state.input as ReadonlyArray<unknown>)[pos]
   }
 }
+
+/** The parser behind `any` and `anyToken`, on every input kind. */
+const anyInput: Parser<unknown, never, never, Input> = /*#__PURE__*/ described(anyStep, "any", {
+  _tag: "Any",
+  encoding: undefined
+})
 
 /**
  * Matches any single token: a character of a string (winnow's `any`, nom's
@@ -203,7 +213,9 @@ const anyStep = (state: State<Input>): unknown => {
  * @since 0.1.0
  * @category tokens
  */
-export const any: Parser<string> = /*#__PURE__*/ described(anyStep as any, "any", { _tag: "Any", encoding: undefined })
+export const any: Parser<string> =
+  // SAFETY: on string input, `anyStep` returns the character (one or two code units) at the position, a string
+  anyInput as Parser<string>
 
 /**
  * Matches any single token of an input of type `I`.
@@ -219,7 +231,21 @@ export const any: Parser<string> = /*#__PURE__*/ described(anyStep as any, "any"
  * @since 0.1.0
  * @category tokens
  */
-export const anyToken = <I extends Input = string>(): Parser<Token<NoInfer<I>>, never, never, NoInfer<I>> => any as any
+export const anyToken = <I extends Input = string>(): Parser<Token<NoInfer<I>>, never, never, NoInfer<I>> =>
+  // SAFETY: `anyStep` handles every input kind, returning the token at the position (a character, byte or element)
+  anyInput as Parser<Token<NoInfer<I>>, never, never, NoInfer<I>>
+
+/**
+ * The overloads of {@link literal}.
+ *
+ * @since 0.5.0
+ * @category tokens
+ */
+export interface LiteralFn {
+  <const L extends string>(literal: L): Parser<L, never, never, string>
+  (literal: Uint8Array): Parser<Uint8Array, never, never, Uint8Array>
+  <const T>(literal: ReadonlyArray<T>): Parser<ReadonlyArray<T>, never, never, ReadonlyArray<T>>
+}
 
 /**
  * Matches a literal sequence of tokens (winnow's `literal`, nom's `tag`).
@@ -237,11 +263,7 @@ export const anyToken = <I extends Input = string>(): Parser<Token<NoInfer<I>>, 
  * @since 0.1.0
  * @category tokens
  */
-export const literal: {
-  <const L extends string>(literal: L): Parser<L, never, never, string>
-  (literal: Uint8Array): Parser<Uint8Array, never, never, Uint8Array>
-  <const T>(literal: ReadonlyArray<T>): Parser<ReadonlyArray<T>, never, never, ReadonlyArray<T>>
-} = (lit: Input): Parser<any, never, never, any> => literalImpl(lit, false)
+export const literal: LiteralFn = (lit: Input): Parser<any, never, never, any> => literalImpl(lit, false)
 
 /** @internal */
 export const literalImpl = (lit: Input, caseless: boolean): Parser<any, never, never, any> => {
@@ -253,6 +275,7 @@ export const literalImpl = (lit: Input, caseless: boolean): Parser<any, never, n
   return described(
     (state: State<Input>) => {
       const pos = state.pos
+      // SAFETY: `literalKind` 0 is set only for a string literal
       const l = literalKind === 0 && state.inputKind === 1 ? (asBytes ??= new TextEncoder().encode(lit as string)) : lit
       const len = l.length
       const r = matchLiteral(state, l, caseless)
@@ -295,6 +318,7 @@ export const oneOf = <I extends Input = string>(
       const t = nextIf(state, m, false)
       if (t === End) return state.eoi("OneOf", expected, 1)
       if (t === NoMatch) return state.backtrack("OneOf", expected)
+      // SAFETY: past `End` and `NoMatch`, `nextIf` returns the token it consumed from the parser's input `I`
       return t as Token<I>
     },
     m.description,
@@ -319,6 +343,7 @@ export const noneOf = <I extends Input = string>(
       const t = nextIf(state, m, true)
       if (t === End) return state.eoi("NoneOf", expected, 1)
       if (t === NoMatch) return state.backtrack("NoneOf", expected)
+      // SAFETY: past `End` and `NoMatch`, `nextIf` returns the token it consumed from the parser's input `I`
       return t as Token<I>
     },
     expected[0],
@@ -419,6 +444,18 @@ export const takeTill = <I extends Input = string>(
 ): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> => takeWhileImpl(set, range, true, "takeTill")
 
 /**
+ * The overloads of {@link takeUntil}.
+ *
+ * @since 0.5.0
+ * @category slices
+ */
+export interface TakeUntilFn {
+  (literal: string, range?: Range): Parser<string, never, never, string>
+  (literal: Uint8Array, range?: Range): Parser<Uint8Array, never, never, Uint8Array>
+  <T>(literal: ReadonlyArray<T>, range?: Range): Parser<ReadonlyArray<T>, never, never, ReadonlyArray<T>>
+}
+
+/**
  * Takes tokens up to (not including) the first occurrence of a literal
  * (winnow's `take_until`, nom's `take_until`). The literal is not
  * consumed. `range` constrains the number of tokens taken.
@@ -426,11 +463,7 @@ export const takeTill = <I extends Input = string>(
  * @since 0.1.0
  * @category slices
  */
-export const takeUntil: {
-  (literal: string, range?: Range): Parser<string, never, never, string>
-  (literal: Uint8Array, range?: Range): Parser<Uint8Array, never, never, Uint8Array>
-  <T>(literal: ReadonlyArray<T>, range?: Range): Parser<ReadonlyArray<T>, never, never, ReadonlyArray<T>>
-} = (lit: Input, r?: Range): Parser<any, never, never, any> => {
+export const takeUntil: TakeUntilFn = (lit: Input, r?: Range): Parser<any, never, never, any> => {
   const [min, max] = normalize(r)
   const description = describeLiteral(lit)
   const expected = [description]
@@ -458,21 +491,26 @@ export const takeUntil: {
   )
 }
 
+/** The parser behind `rest` and `restOf`, on every input kind. */
+const restInput: Parser<unknown, never, never, Input> = /*#__PURE__*/ described(
+  (state) => {
+    const start = state.pos
+    state.pos = state.end
+    return state.slice(start, state.end)
+  },
+  "rest",
+  { _tag: "Rest", encoding: undefined }
+)
+
 /**
  * Takes the rest of the input (winnow's and nom's `rest`).
  *
  * @since 0.1.0
  * @category slices
  */
-export const rest: Parser<string> = /*#__PURE__*/ described(
-  (state: State<any>) => {
-    const start = state.pos
-    state.pos = state.end
-    return state.slice(start, state.end) as string
-  },
-  "rest",
-  { _tag: "Rest", encoding: undefined }
-)
+export const rest: Parser<string> =
+  // SAFETY: on string input, `State.slice` returns a string
+  restInput as Parser<string>
 
 /**
  * Takes the rest of an input of type `I`.
@@ -480,7 +518,9 @@ export const rest: Parser<string> = /*#__PURE__*/ described(
  * @since 0.1.0
  * @category slices
  */
-export const restOf = <I extends Input = string>(): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> => rest as any
+export const restOf = <I extends Input = string>(): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> =>
+  // SAFETY: `State.slice` returns the input's own slice type for every input kind, so `restInput` returns `Slice<I>`
+  restInput as Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>>
 
 /**
  * Returns the length of the remaining input without consuming it (winnow's
@@ -506,4 +546,6 @@ export const restLen: Parser<number, never, never, Input> = /*#__PURE__*/ descri
  */
 export const satisfy = <I extends Input = string>(
   predicate: (token: Token<I>) => boolean
-): Parser<Token<NoInfer<I>>, never, never, NoInfer<I>> => oneOf<I>(predicate as any)
+): Parser<Token<NoInfer<I>>, never, never, NoInfer<I>> =>
+  // SAFETY: a predicate over the input's tokens is a member of `TokenSet<I>` for each input kind
+  oneOf<I>(predicate as TokenSet<I>)

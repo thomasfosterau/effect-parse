@@ -9,7 +9,7 @@ const partial = <A, E>(p: Parser.Parser<A, E, never, any>, input: any) => {
   return Result.isSuccess(r) ? r.success : { _tag: "Error", offset: r.failure.offset }
 }
 const incomplete = (n?: number) => ({ _tag: "Incomplete", needed: n === undefined ? Option.none() : Option.some(n) })
-const done = (value: unknown, offset: number) => ({ _tag: "Done", value, offset })
+const done = <A>(value: A, offset: number) => ({ _tag: "Done", value, offset })
 const bytes = (...xs: Array<number>) => new Uint8Array(xs)
 
 describe("Token", () => {
@@ -58,7 +58,10 @@ describe("Token", () => {
     })
 
     it("string literals match byte input as UTF-8", () => {
-      const p = Token.literal("é") as unknown as Parser.Parser<Uint8Array, never, never, Uint8Array>
+      // SAFETY: a string literal also matches byte input, as its UTF-8 bytes
+      // (`Token.literalImpl`), which is what this test checks; the overloads
+      // type it for string input only.
+      const p = Token.literal("é") as Parser.Parser<any, never, never, any>
       expectSuccess(p, new TextEncoder().encode("é"), new TextEncoder().encode("é"))
     })
   })
@@ -194,7 +197,9 @@ describe("Token", () => {
 
     it("leaves the given function unmarked", () => {
       const f = (c: string) => c === "a"
-      Token.codePoints("a", f as unknown as (c: number) => boolean)
+      // SAFETY: a deliberate type lie: `codePoints` must leave the function it
+      // is given unmarked whatever its parameter type, and never calls it here.
+      Token.codePoints("a", f as never)
       expectSuccess(Token.oneOf(f), "a", "a")
     })
   })
@@ -290,9 +295,11 @@ describe("Token", () => {
       expectSuccess(Token.oneOf<Uint8Array>("ab"), bytes(0x61), 0x61)
       expectSuccess(Token.literal("é"), "é", "é")
       expectSuccess(
-        Parser.preceded(Token.literal("é"), Token.rest),
-        new TextEncoder().encode("éx") as any,
-        bytes(0x78) as any
+        // SAFETY: a string literal also matches byte input, as its UTF-8 bytes
+        // (`Token.literalImpl`); the overloads type it for string input only.
+        Parser.preceded(Token.literal("é") as Parser.Parser<string, never, never, any>, Token.restOf<Uint8Array>()),
+        new TextEncoder().encode("éx"),
+        bytes(0x78)
       )
     })
 

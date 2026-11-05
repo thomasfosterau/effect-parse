@@ -9,7 +9,8 @@ const partial = <A, E>(p: Parser.Parser<A, E, never, any>, input: any) => {
   return Result.isSuccess(r) ? r.success : { _tag: "Error", offset: r.failure.offset }
 }
 const incomplete = (n?: number) => ({ _tag: "Incomplete", needed: n === undefined ? Option.none() : Option.some(n) })
-const done = (value: unknown, offset: number) => ({ _tag: "Done", value, offset })
+const done = <A>(value: A, offset: number) => ({ _tag: "Done", value, offset })
+
 const encode = (s: string) => new TextEncoder().encode(s)
 
 describe("Ascii", () => {

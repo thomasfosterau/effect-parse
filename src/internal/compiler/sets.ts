@@ -7,6 +7,7 @@ import * as Order from "effect/Order"
 import * as Predicate from "effect/Predicate"
 import type { Encoding } from "../../Encoding.js"
 import { firstCodePoint } from "../text.js"
+import type { TokenRangeLike } from "../tokens.js"
 import { compile, compileAny, PredicateRanges } from "../tokens.js"
 
 /** Size of the membership table: every byte, and the Latin-1 code points. */
@@ -28,8 +29,7 @@ export const acceptTable = (set: CharSet, negate: boolean): Uint8Array => {
   return t
 }
 
-const isRange = (u: unknown): u is { readonly from: string | number; readonly to: string | number } =>
-  Predicate.isObjectOrArray(u) && (u as any)._tag === "TokenRange"
+const isRange = (u: unknown): u is TokenRangeLike => Predicate.isObjectOrArray(u) && Predicate.isTagged(u, "TokenRange")
 
 const toCode = (u: string | number): number => (Predicate.isNumber(u) ? u : firstCodePoint(u))
 
@@ -57,7 +57,11 @@ const rangesOf = (set: unknown): Array<[number, number]> | undefined => {
       return true
     }
     if (Predicate.isFunction(u)) {
-      const r = (u as any)[PredicateRanges] as ReadonlyArray<readonly [number, number]> | undefined
+      // SAFETY: `codePointPredicate` is the only writer of `PredicateRanges`, and it stores the
+      // predicate's sorted inclusive code point ranges there (or nothing)
+      const r = (u as { readonly [PredicateRanges]?: ReadonlyArray<readonly [number, number]> | undefined })[
+        PredicateRanges
+      ]
       if (r === undefined) return false
       for (const [a, b] of r) out.push([a, b])
       return true

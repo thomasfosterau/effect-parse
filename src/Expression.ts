@@ -38,7 +38,10 @@ import * as Predicate from "effect/Predicate"
 import type { Input, State } from "./Input.js"
 import { Fail } from "./Input.js"
 import type { Parser } from "./Parser.js"
-import { make as makeParser } from "./Parser.js"
+import { combinator } from "./Parser.js"
+
+/** A parser's step, interpreted or compiled. */
+type Step = (state: State<any>) => unknown
 import { TiedFailures } from "./internal/ties.js"
 
 /**
@@ -154,101 +157,111 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
   readonly operand: Parser<A, E, R, I>
   readonly operators: Ops
 }): Parser<A, E | OpError<Ops[number]>, R | OpServices<Ops[number]>, I & OpInput<Ops[number]>> => {
-  const operand = options.operand.step
   const prefixes = options.operators.filter((o): o is Prefix<A, any, any, any> => Predicate.isTagged(o, "Prefix"))
   const postfixes = options.operators.filter((o): o is Postfix<A, any, any, any> => Predicate.isTagged(o, "Postfix"))
   const infixes = options.operators.filter((o): o is Infix<A, any, any, any> => Predicate.isTagged(o, "Infix"))
+  const operators = [...prefixes, ...postfixes, ...infixes]
+  const parsers = [options.operand, ...operators.map((o) => o.parser)]
+  // Builds the step from the operand's and the operators' steps, in that
+  // order: their own steps when interpreted, compiled ones when compiled
+  const build = (steps: ReadonlyArray<Step>) => {
+    const operand = steps[0]
+    const prefixSteps = steps.slice(1, 1 + prefixes.length)
+    const postfixSteps = steps.slice(1 + prefixes.length, 1 + prefixes.length + postfixes.length)
+    const infixSteps = steps.slice(1 + prefixes.length + postfixes.length)
 
-  // Attempts each operator in turn. Returns the index of the first match
-  // (with its output in `matched`), -1 if none matched, or -2 on a fatal
-  // failure. Failed attempts are folded into `failures`, merged only when
-  // read (#44): a round in which an operator matches discards them unmerged.
-  // Like `matched`, it is shared by nested expressions, which clear it.
-  let matched: unknown
-  const failures = new TiedFailures()
-  const tryOps = (state: State<any>, ops: ReadonlyArray<OperatorBase<any, any, any>>, mustConsume: boolean): number => {
-    const start = state.pos
-    for (let i = 0; i < ops.length; i++) {
-      const out = ops[i].parser.step(state)
-      if (out !== Fail) {
-        // A prefix or postfix operator matching nothing would apply forever
-        if (mustConsume && state.pos === start) {
-          state.failMessage("Cut", "Assert", "prefix and postfix operators must always consume")
-          return -2
-        }
-        matched = out
-        return i
-      }
-      if (state.mode !== "Backtrack") return -2
-      state.rewind(start)
-      failures.add(state)
-    }
-    return -1
-  }
-
-  const expr = (state: State<any>, minPower: number): A | Fail => {
-    let lhs: A | Fail
-    failures.clear()
-    const p = tryOps(state, prefixes, true)
-    if (p === -2) return Fail
-    if (p >= 0) {
-      const op = prefixes[p]
-      const opOut = matched
-      const operandValue = expr(state, op.precedence * 2)
-      if (operandValue === Fail) return Fail
-      lhs = op.fold(opOut, operandValue)
-    } else {
-      const prefixFailure = failures.failure
-      const prefixTie1 = failures.tie1
-      const prefixTie2 = failures.tie2
-      lhs = operand(state)
-      if (lhs === Fail) {
-        if (prefixFailure !== undefined && state.mode === "Backtrack") {
-          // The operand may have parsed nested expressions, which reuse `failures`
-          failures.failure = prefixFailure
-          failures.tie1 = prefixTie1
-          failures.tie2 = prefixTie2
-          failures.add(state)
-          failures.fail(state)
-        }
-        return Fail
-      }
-    }
-
-    while (true) {
+    // Attempts each operator in turn. Returns the index of the first match
+    // (with its output in `matched`), -1 if none matched, or -2 on a fatal
+    // failure. Failed attempts are folded into `failures`, merged only when
+    // read (#44): a round in which an operator matches discards them unmerged.
+    // Like `matched`, it is shared by nested expressions, which clear it.
+    let matched: unknown
+    const failures = new TiedFailures()
+    const tryOps = (state: State<any>, ops: ReadonlyArray<Step>, mustConsume: boolean): number => {
       const start = state.pos
+      for (let i = 0; i < ops.length; i++) {
+        const out = ops[i](state)
+        if (out !== Fail) {
+          // A prefix or postfix operator matching nothing would apply forever
+          if (mustConsume && state.pos === start) {
+            state.failMessage("Cut", "Assert", "prefix and postfix operators must always consume")
+            return -2
+          }
+          matched = out
+          return i
+        }
+        if (state.mode !== "Backtrack") return -2
+        state.rewind(start)
+        failures.add(state)
+      }
+      return -1
+    }
+
+    const expr = (state: State<any>, minPower: number): A | Fail => {
+      let lhs: A | Fail
       failures.clear()
-      const q = tryOps(state, postfixes, true)
-      if (q === -2) return Fail
-      if (q >= 0) {
-        const op = postfixes[q]
-        if (op.precedence * 2 < minPower) {
+      const p = tryOps(state, prefixSteps, true)
+      if (p === -2) return Fail
+      if (p >= 0) {
+        const op = prefixes[p]
+        const opOut = matched
+        const operandValue = expr(state, op.precedence * 2)
+        if (operandValue === Fail) return Fail
+        lhs = op.fold(opOut, operandValue)
+      } else {
+        const prefixFailure = failures.failure
+        const prefixTie1 = failures.tie1
+        const prefixTie2 = failures.tie2
+        // SAFETY: the operand's step, interpreted or compiled, returns its output (an `A`) or `Fail`
+        lhs = operand(state) as A | Fail
+        if (lhs === Fail) {
+          if (prefixFailure !== undefined && state.mode === "Backtrack") {
+            // The operand may have parsed nested expressions, which reuse `failures`
+            failures.failure = prefixFailure
+            failures.tie1 = prefixTie1
+            failures.tie2 = prefixTie2
+            failures.add(state)
+            failures.fail(state)
+          }
+          return Fail
+        }
+      }
+
+      while (true) {
+        const start = state.pos
+        failures.clear()
+        const q = tryOps(state, postfixSteps, true)
+        if (q === -2) return Fail
+        if (q >= 0) {
+          const op = postfixes[q]
+          if (op.precedence * 2 < minPower) {
+            state.rewind(start)
+            break
+          }
+          lhs = op.fold(lhs, matched)
+          continue
+        }
+        // The infix attempts are folded on top of the postfix ones
+        const i = tryOps(state, infixSteps, false)
+        if (i === -2) return Fail
+        if (i < 0) {
+          failures.hint(state)
+          break
+        }
+        const op = infixes[i]
+        const leftPower = op.precedence * 2
+        if (leftPower < minPower) {
           state.rewind(start)
           break
         }
-        lhs = op.fold(lhs, matched)
-        continue
+        const opOut = matched
+        const rhs = expr(state, op.associativity === "left" ? leftPower + 1 : leftPower)
+        if (rhs === Fail) return Fail
+        lhs = op.fold(lhs, opOut, rhs)
       }
-      // The infix attempts are folded on top of the postfix ones
-      const i = tryOps(state, infixes, false)
-      if (i === -2) return Fail
-      if (i < 0) {
-        failures.hint(state)
-        break
-      }
-      const op = infixes[i]
-      const leftPower = op.precedence * 2
-      if (leftPower < minPower) {
-        state.rewind(start)
-        break
-      }
-      const opOut = matched
-      const rhs = expr(state, op.associativity === "left" ? leftPower + 1 : leftPower)
-      if (rhs === Fail) return Fail
-      lhs = op.fold(lhs, opOut, rhs)
+      return lhs
     }
-    return lhs
+    return (state: State<any>) => expr(state, 0)
   }
-
-  return makeParser((state: State<any>) => expr(state, 0), "expression")
+  return combinator(parsers, build, "expression")
 }

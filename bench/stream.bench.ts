@@ -17,6 +17,7 @@
  */
 import * as Effect from "effect/Effect"
 import { Compiler, Parser, ParserStream, Text } from "@thomasfosterau/effect-parse"
+import type { Json } from "../examples/json.ts"
 import { jsonGrammar } from "../examples/json-text.ts"
 
 const doc = JSON.stringify(
@@ -67,7 +68,7 @@ const body = (mbPerSecond: number) => {
   return { stream, start, lastByte: () => last }
 }
 
-const cases: ReadonlyArray<readonly [string, (response: Response) => Promise<unknown>]> = [
+const cases: ReadonlyArray<readonly [string, (response: Response) => Promise<Json>]> = [
   ["Response.json()", (r) => r.json()],
   ["arrayBuffer() + compiled Text.utf8", async (r) => Parser.parseSync(compiledJson, await r.arrayBuffer())],
   ["parseResponse, compiled", (r) => Effect.runPromise(ParserStream.parseResponse(r, compiledJson))],

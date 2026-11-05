@@ -202,7 +202,7 @@ describe("examples/http", () => {
   ].join("")
   const encode = (s: string) => new TextEncoder().encode(s)
 
-  const expected = [
+  const expected: Parser.Parser.Success<typeof Http.request> = [
     { method: "GET", uri: "/pub/WWW/TheProject.html", version: "1.1" },
     [
       { name: "Host", value: ["www.w3.org"] },
@@ -211,7 +211,7 @@ describe("examples/http", () => {
   ]
 
   it("parses a request", () => {
-    expectSuccess(Http.request, encode(raw), expected as any)
+    expectSuccess(Http.request, encode(raw), expected)
   })
 
   it("reports incomplete input in partial mode", () => {

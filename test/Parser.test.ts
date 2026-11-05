@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import { describe, expect, it } from "vite-plus/test"
-import { Input, Parser, Token } from "../src/index.js"
+import { Ascii, Compiler, Input, Parser, Token } from "../src/index.js"
 import { eagerPermutation } from "./eager.js"
 import { allStrings } from "./generators.js"
 import { expectFailure, expectSuccess, peek } from "./utils.js"
@@ -25,8 +25,54 @@ describe("Parser", () => {
       expect(err.kind).toBe("Fail")
     })
 
+    describe("failAt", () => {
+      const tag = (open: string) =>
+        Parser.delimited(Token.literal(open), Token.takeWhile("abc", { min: 1 }), Token.literal(">"))
+      const element = Parser.seq(tag("<"), Parser.location, tag("</")).pipe(
+        Parser.flatMap(([start, at, end]) =>
+          start === end ? Parser.succeed(start) : Parser.failAt(at, { start, end })
+        )
+      )
+
+      it("reports a check's failure where it chooses (#73)", () => {
+        expectSuccess(element, "<a></a>", "a")
+        const err = expectFailure(element, "<ab></a>")
+        expect(err.offset).toBe(4)
+        expect(err.cause).toEqual({ start: "ab", end: "a" })
+        expect(err.position).toEqual({ line: 1, column: 5 })
+      })
+
+      it("wins over alternatives that fail earlier", () => {
+        const err = expectFailure(Parser.alt(element, Token.literal("<a>!")), "<a></b>")
+        expect(err.offset).toBe(3)
+      })
+
+      it("backtracks, and is clamped to the input", () => {
+        expectSuccess(Parser.alt(Parser.failAt(1, "e"), a), "a", "a")
+        expect(expectFailure(Parser.failAt(99, "e"), "ab").offset).toBe(2)
+        expect(expectFailure(Parser.failAt(-1, "e"), "ab").offset).toBe(0)
+      })
+    })
+
     it("reject backtracks", () => {
       expect(peek(Parser.alt(Parser.reject, a), "a")).toEqual(Result.succeed(["", "a"]))
+    })
+
+    it("seqWith passes one argument per parser (#64)", () => {
+      const p = Parser.seqWith(
+        [a, Parser.opt(b), Token.literal("c")],
+        (x, y, z) => `${x}${Option.getOrElse(y, () => "-")}${z}`
+      )
+      expectSuccess(p, "abc", "abc")
+      expectSuccess(p, "ac", "a-c")
+      expectFailure(p, "ab")
+      expectSuccess(
+        Parser.seqWith([], () => 0),
+        "",
+        0
+      )
+      const four = Parser.seqWith([a, a, a, a], (...xs) => xs.length)
+      expectSuccess(four, "aaaa", 4)
     })
 
     it("suspend allows recursion", () => {
@@ -76,6 +122,31 @@ describe("Parser", () => {
       expect(err.message).toContain("bad: no")
     })
 
+    it("mapOrFail rejects with the Fail sentinel (#66)", () => {
+      const pair = Token.take(2)
+      const p = pair.pipe(
+        Parser.mapOrFail(
+          (s) => (s === "ok" ? 1 : Input.Fail),
+          (s) => `bad: ${s}`
+        )
+      )
+      expectSuccess(p, "ok", 1)
+      // `Fail` is not part of the output type
+      const typed: Parser.Parser<number, string> = p
+      const err = expectFailure(typed, "no")
+      expect(err.cause).toBe("bad: no")
+      expect(err.offset).toBe(0)
+      expect(err.kind).toBe("Verify")
+      // Without an error, like filterMap
+      const q = Parser.mapOrFail(pair, (s) => (s === "ok" ? s.length : Input.Fail))
+      expectSuccess(q, "ok", 2)
+      const plain = expectFailure(q, "no")
+      expect(plain.cause).toBeUndefined()
+      expect(plain.kind).toBe("Verify")
+      // It backtracks
+      expectSuccess(Parser.alt(q, Parser.as(pair, 0)), "no", 0)
+    })
+
     it("filter / filterMap / filterOrFail", () => {
       const digit = Token.oneOf("0123456789")
       const even = digit.pipe(Parser.filter((d) => Number(d) % 2 === 0))
@@ -108,6 +179,23 @@ describe("Parser", () => {
       expectSuccess(Parser.withTaken(p), "ab", [["a", "b"], "ab"])
       expectSuccess(Parser.preceded(a, Parser.span(b)), "ab", { start: 1, end: 2 })
       expectSuccess(Parser.withSpan(ab), "ab", ["ab", { start: 0, end: 2 }])
+    })
+
+    it("mapSpan passes the output and its offsets (#64)", () => {
+      const p = Parser.preceded(
+        a,
+        Parser.mapSpan(Parser.repeat(b), (bs, start, end) => `${bs.length}@${start}-${end}`)
+      )
+      expectSuccess(p, "abb", "2@1-3")
+      expectSuccess(
+        Parser.mapSpan(Parser.empty, (_, start, end) => [start, end]),
+        "",
+        [0, 0]
+      )
+      expectFailure(
+        Parser.mapSpan(a, () => 1),
+        "b"
+      )
     })
   })
 
@@ -231,10 +319,10 @@ describe("Parser", () => {
       // the algorithm it replaced, merging every failure as it happens: both
       // must report the same failure, furthest failure and hint.
       type Alt = (...parsers: Array<Parser.Parser<unknown, unknown>>) => Parser.Parser<unknown, unknown>
-      const eagerAlt: Alt = (...ps) =>
+      const eagerAlt = <A>(...ps: Array<Parser.Parser<A, unknown>>): Parser.Parser<A, unknown> =>
         Parser.make((state) => {
           const start = state.pos
-          const attempt = (i: number, failure: Input.Failure | undefined): unknown => {
+          const attempt = (i: number, failure: Input.Failure | undefined): A | Input.Fail => {
             if (i === ps.length) return state.failWith("Backtrack", failure ?? state.failure)
             const r = ps[i].step(state)
             if (r !== Input.Fail) {
@@ -406,7 +494,8 @@ describe("Parser", () => {
     it("fold with while", () => {
       const digit = Token.oneOf("0123456789")
       const kept = Parser.fold(Parser.alt(digit, Token.literal("-")), {
-        init: () => [] as Array<string>,
+        init: (): Array<string> => [],
+
         f: (acc, x) => {
           if (x !== "-") acc.push(x)
           return acc
@@ -491,6 +580,50 @@ describe("Parser", () => {
       expect(err.expected).toEqual(["digit", '")"'])
       const trailing = expectFailure(Parser.repeat(digit), "12x")
       expect(trailing.expected).toEqual(["digit", "end of input"])
+    })
+
+    describe("quiet", () => {
+      const digit = Token.oneOf("0123456789").pipe(Parser.expected("digit"))
+      const comment = Parser.preceded(
+        Token.literal("(:"),
+        Parser.cut(Parser.terminated(Token.takeTill(":"), Token.literal(":)")))
+      )
+      const skip = Parser.repeat(Parser.alt(Token.takeWhile(" ", { min: 1 }), comment))
+
+      it("a skipper's hints do not reach later errors", () => {
+        const q = Parser.preceded(Parser.quiet(skip), digit)
+        expect(expectFailure(q, " (: c :) x").expected).toEqual(["digit"])
+        expect(expectFailure(Parser.preceded(skip, digit), " (: c :) x").expected).toEqual(['" "', '"(:"', "digit"])
+      })
+
+      it("hints recorded before it are kept", () => {
+        const p = Parser.seq(Parser.repeat(digit), Parser.quiet(Parser.opt(Token.literal("!"))), Token.literal(";"))
+        expect(expectFailure(p, "1x").expected).toEqual(["digit", '";"'])
+      })
+
+      it("a failure without consuming expects nothing", () => {
+        const p = Parser.alt(Parser.quiet(Token.literal("a")), digit)
+        expect(expectFailure(p, "x").expected).toEqual(["digit"])
+        expect(expectFailure(Parser.quiet(Token.literal("a")), "x").expected).toEqual([])
+      })
+
+      it("a failure after consuming input is kept", () => {
+        const err = expectFailure(Parser.preceded(Parser.quiet(skip), digit), " (: unterminated")
+        expect(err.expected).toEqual(['":)"'])
+      })
+
+      it("forgets the furthest failure of a run that succeeded", () => {
+        // `opt(seq(a, b))` fails after `a`: without `quiet` that failure is reported as the furthest
+        const ab = Parser.opt(Parser.seq(Token.literal("a"), Token.literal("b")))
+        const p = Parser.alt(Parser.seq(Token.literal("x"), ab, Token.literal("!")), Token.literal("xa?"))
+        expect(expectFailure(p, "xa;").offset).toBe(2)
+        const q = Parser.alt(Parser.seq(Token.literal("x"), Parser.quiet(ab), Token.literal("!")), Token.literal("xa?"))
+        expect(expectFailure(q, "xa;").offset).toBe(1)
+      })
+
+      it("keeps values and positions", () => {
+        expectSuccess(Parser.seq(Parser.quiet(Token.literal("a")), digit), "a1", ["a", "1"])
+      })
     })
 
     it("mapError / orFail", () => {
@@ -592,6 +725,33 @@ describe("Parser", () => {
       const result = Parser.parseRecoverable(p, "12abc")
       expect(result.value).toEqual(Option.some("abc"))
       expect(result.errors).toHaveLength(1)
+    })
+  })
+})
+
+describe("combinator", () => {
+  // The doc comment's example, with its loop written as recursion
+  const count = <A, B>(item: Parser.Parser<A>, sep: Parser.Parser<B>) =>
+    Parser.combinator([item, sep], ([itemStep, sepStep]) => {
+      const more = (state: Input.State<string>, n: number): number | Input.Fail => {
+        const start = state.pos
+        if (sepStep(state) === Input.Fail || itemStep(state) === Input.Fail) {
+          if (state.mode !== "Backtrack") return Input.Fail
+          state.rewind(start)
+          return n
+        }
+        return more(state, n + 1)
+      }
+      return (state) => (itemStep(state) === Input.Fail ? Input.Fail : more(state, 1))
+    })
+
+  it("runs interpreted and compiled", () => {
+    const p = Parser.terminated(count(Ascii.digit1, Token.literal(",")), Parser.eof)
+    ;[p, Compiler.closure(Parser.named(p, "closure")), Compiler.jit(Parser.named(p, "jit"))].forEach((v) => {
+      expectSuccess(v, "1,22,333", 3)
+      expectSuccess(v, "7", 1)
+      expect(expectFailure(v, "").offset).toBe(0)
+      expect(expectFailure(v, "1,22,").offset).toBe(5)
     })
   })
 })

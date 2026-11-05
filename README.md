@@ -169,6 +169,20 @@ const upper = Parser.make<string>((state) => {
 })
 ```
 
+A combinator that runs other parsers should be written with `Parser.combinator` instead, which hands it their steps. A `make` parser is opaque to the [compilers](#compiled-parsers), so in a compiled grammar it runs interpreted, and so does every parser it calls; a `combinator` receives their compiled steps there, so the parsers inside compile with the grammar:
+
+```ts
+const twice = <A>(p: Parser.Parser<A>) =>
+  Parser.combinator([p], ([step]) => (state) => {
+    const a = step(state)
+    if (a === Input.Fail) return Input.Fail
+    const b = step(state)
+    return b === Input.Fail ? Input.Fail : ([a, b] as const)
+  })
+
+Parser.parseSync(twice(Token.oneOf("ab")), "ba") // ["b", "a"]
+```
+
 A driver that makes many small runs over one buffer, such as a tokenizer reading one token at a time, can run a parser's `step` on an `Input.State` itself and reuse that state between runs. `state.reset(offset, { partial, context })` resets every per-run field, so afterwards the state behaves exactly like `new Input.State(state.input, { offset, partial, context })`, even after a run that failed or returned `Incomplete`:
 
 ```ts
@@ -187,14 +201,14 @@ const token = (offset: number) => {
 
 | Category | Combinators |
 | --- | --- |
-| Constructors | `succeed`, `sync`, `empty`, `fail`, `failMessage`, `reject`, `todo`, `suspend`, `make`, `location`, `eof` |
-| Mapping | `map`, `as`, `asVoid`, `asSome`, `tap`, `tryMap`, `tryMapUnknown`, `filterMap`, `filter`, `filterOrFail`, `mapParser`, `fromEntries` |
-| Sequencing | `seq`, `struct`, `zip`, `zipWith`, `zipLeft`, `zipRight`, `preceded`, `terminated`, `delimited`, `separatedPair`, `flatMap`, `gen`, `Do`/`bind`/`bindTo`/`let` |
+| Constructors | `succeed`, `sync`, `empty`, `fail`, `failAt`, `failMessage`, `reject`, `todo`, `suspend`, `make`, `location`, `eof` |
+| Mapping | `map`, `as`, `asVoid`, `asSome`, `tap`, `tryMap`, `tryMapUnknown`, `mapOrFail`, `filterMap`, `filter`, `filterOrFail`, `mapParser`, `fromEntries` |
+| Sequencing | `seq`, `seqWith`, `struct`, `zip`, `zipWith`, `zipLeft`, `zipRight`, `preceded`, `terminated`, `delimited`, `separatedPair`, `flatMap`, `gen`, `Do`/`bind`/`bindTo`/`let` |
 | Choice | `alt`, `orElse`, `orElseSucceed`, `dispatch`, `permutation` |
 | Repetition | `repeat`, `repeatTill`, `separated`, `separatedFoldl1`, `separatedFoldr1`, `fold` |
-| Control | `opt`, `optional`, `cond`, `peek`, `not`, `allConsuming` |
-| Consumed input | `taken`, `withTaken`, `span`, `withSpan` |
-| Errors | `cut`, `backtrack`, `complete`, `context`, `expected`, `mapError`, `orFail` |
+| Control | `opt`, `optional`, `cond`, `peek`, `not`, `allConsuming`, `withFastPath` |
+| Consumed input | `taken`, `withTaken`, `span`, `withSpan`, `mapSpan` |
+| Errors | `cut`, `backtrack`, `complete`, `context`, `expected`, `quiet`, `mapError`, `orFail` |
 | Services | `service`, `provideService`, `provide` |
 | Recovery | `resumeAfter`, `retryAfter` |
 | Debugging | `trace`, `named` |
@@ -250,7 +264,7 @@ export const json = Compiler.jit(Parser.preceded(ws, value))
 Parser.parse(json, text) // same Result as before, about 5 times faster
 ```
 
-On the JSON example, compiled parsing runs at 5–6 times the speed of the interpreter, for strings, UTF-8 and UTF-16 alike, and at 1–4 times the time of `JSON.parse` depending on the document (see [the design notes](docs/DESIGN.md#results)).
+On the JSON example, compiled parsing runs at 5–6 times the speed of the interpreter, for strings, UTF-8 and UTF-16 alike, and at 1–4 times the time of `JSON.parse` depending on the document (see [the design notes](docs/DESIGN.md#results)). That is 3–5 times as fast as the same JSON grammar in Chevrotain, the fastest of the other JavaScript parser libraries measured, and about 8 and 20 times as fast as in Peggy and Parsimmon ([the comparison](docs/DESIGN.md#against-other-javascript-parser-libraries)).
 
 There are three compilers, one function each:
 
@@ -262,7 +276,7 @@ A bundle contains only the compilers it calls. A program that compiles nothing b
 
 Each returns the same parser. The code is built on the first run, for each kind of input, and cached. `parse`, `parseSync`, `parsePeek`, `parsePartial`, `parseEffect`, `ParserStream.parseMany` and `ParserStream.parseAll` use it, from any `offset`; `parseRecoverable` and tracing stay interpreted. A driver that keeps its own `Input.State` (a lexer reading one token at a time, say) runs the compiled code with `Parser.run(p, state)`; calling `p.step(state)` directly always runs interpreted.
 
-Compiled code records no diagnostics. When it fails, the parser runs again interpreted, so errors are exactly the same, byte for byte. Callbacks should therefore be pure: on failing input they may run twice, and those whose results are unused may be skipped. Parsers built with `Parser.make` or `Parser.gen` run interpreted inside compiled code. See the [design notes](docs/DESIGN.md#6-compiled-parsers) for details.
+Compiled code records no diagnostics. When it fails, the parser runs again interpreted, so errors are exactly the same, byte for byte. Callbacks should therefore be pure: on failing input they may run twice, and those whose results are unused may be skipped. Parsers built with `Parser.make` or `Parser.gen` run interpreted inside compiled code; the parsers given to a `Parser.combinator` compile. See the [design notes](docs/DESIGN.md#6-compiled-parsers) for details.
 
 Some ways of writing a grammar compile to faster code than others:
 
@@ -281,8 +295,11 @@ Some ways of writing a grammar compile to faster code than others:
 - Give `Parser.dispatch` a record of cases, not a function. With a record, compiled code switches on the key and runs the chosen case compiled, and on `Token.any` or `Parser.peek(Token.any)` it switches on the next unit without building the key. The parser a function returns runs interpreted, and if the function builds it (`(c) => Parser.cut(p)`), it is built again on every run.
 - Build parsers once, outside callbacks and `Parser.gen` bodies. A parser built while parsing costs an allocation per combinator, every time, and is never compiled.
 - On token arrays (the output of a lexer), match tokens with `Token.oneOf`, `Token.noneOf`, `Token.takeWhile` and `Token.anyToken`, with a predicate or a list of tokens: the JIT calls the predicate inline. A `Parser.make` that reads `state.input[state.pos]` runs interpreted, and records a failure, with its expected list, every time it doesn't match.
-- Drive a lexer with `Parser.run` on one `Input.State` that you `reset` before each token: no run allocates a state, a `Result` or a slice, and the token parser runs compiled. When a failure only means "try something else", pass `{ diagnostics: false }`, so a failed compiled run isn't repeated interpreted to build an error you won't read.
+- Drive a lexer with `Parser.run` on one `Input.State` that you `reset` before each token: no run allocates a state, a `Result` or a slice, and the token parser runs compiled. When a failure only means "try something else", pass `{ diagnostics: false }`, so a failed compiled run isn't repeated interpreted to build an error you won't read. `Compiler.runner(p)` prepares the parser once and returns a function of the state that does what `Parser.run` does, without looking the compiled code up on every run: about 20% faster per token.
 - `Ascii.float` and `Text.float` convert numbers as they match them.
+- Where a scanner written by hand beats compiled code on the tokens that dominate an input, put it in front of the grammar with `Parser.withFastPath(grammar, fast)`: compiled code runs `fast` first, and it returns `Parser.Defer` for anything it doesn't handle. The grammar stays the specification: interpreted runs, and so every error, use it alone, and `Parser.verifyFastPath(grammar, fast, inputs)` lists where the two disagree, for a test to assert that there are none.
+- Build a string from parts with `Parser.fold(part, { init: () => "", f: (acc, x) => acc + x })` rather than `Parser.map(Parser.repeat(part), (parts) => parts.join(""))`: no array per string. A CSV grammar's all-quoted fields parse 40% faster that way.
+- Write the end of a run as `Token.takeTill` of one to three characters (`Token.takeTill('"')`, `Token.takeTill(",\r\n")`), not as a predicate: on string input, compiled code finds the end with `indexOf`, up to 9 times as fast on long runs.
 
 [`json-fast.ts`](examples/json-fast.ts) is the JSON example written this way; it runs records-heavy documents about 1.5 times as fast as [`json-text.ts`](examples/json-text.ts).
 
@@ -310,6 +327,7 @@ effect-parse tries hard to produce good messages without annotations:
 - Optional and repeated parsers leave _hints_, so after `repeat(digit)` a failure reads `expected digit or ")"`.
 - The furthest failure wins (the PEG heuristic), so a value that fails after a separator is reported where it failed.
 - `Parser.expected("value")` names a rule; `Parser.context("array")` adds "while parsing array".
+- `Parser.quiet(skip)` keeps a whitespace or comment skipper out of later errors: without it, every error after the skipper also expects whitespace.
 
 User errors are typed. `Parser.fail(e)`, `Parser.tryMap(f)` and `Parser.filterOrFail(pred, f)` add their error type to `E`, and the error arrives as `ParseError.cause`:
 
@@ -326,6 +344,8 @@ const port = Ascii.decUint.pipe(
 )
 // Parser<number, string | OutOfRange>
 ```
+
+These checks fail where the checked parser started. A check that can only run once a whole construct has parsed, but should point at the part at fault, returns `Parser.failAt(offset, error)` from a `flatMap`, with an offset from `Parser.location` or `Parser.withSpan`: a mismatched end tag is reported at the end tag, not at the start of the element.
 
 ## Streaming and partial input
 

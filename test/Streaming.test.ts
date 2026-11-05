@@ -5,6 +5,7 @@
  */
 import * as Predicate from "effect/Predicate"
 import * as Effect from "effect/Effect"
+import * as Formatter from "effect/Formatter"
 import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
 import { assert, describe, expect, it } from "vite-plus/test"
@@ -16,9 +17,10 @@ import * as JsonFast from "../examples/json-fast.js"
 import { jsonGrammar } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
 import type { Input } from "../src/index.js"
-import { Ascii, Compiler, Encoding, Expression, Parser, ParserStream, Text, Token } from "../src/index.js"
+import { Ascii, Binary, Compiler, Encoding, Expression, Parser, ParserStream, Text, Token } from "../src/index.js"
 import * as Registry from "../src/internal/compiler/registry.js"
 import { mutations, randomJson, rng } from "./generators.js"
+import { runOfAs } from "./utils.js"
 
 const errorFields = (e: any) => ({
   offset: e.offset,
@@ -39,6 +41,8 @@ const split = <I extends string | Uint8Array>(input: I, random: () => number, ma
   const take = (i: number): Array<I> => {
     if (i >= input.length) return out
     const n = 1 + Math.floor(random() * max)
+    // SAFETY: a slice of a string is a string and of a `Uint8Array` a
+    // `Uint8Array`, so it has the input's type.
     out.push(input.slice(i, i + n) as I)
     return take(i + n)
   }
@@ -49,11 +53,11 @@ const streamed = (
   p: Parser.Parser<any, any, never, any>,
   chunks: ReadonlyArray<string | Uint8Array>,
   empty?: Input.Input
-) => Effect.runSync(Effect.result(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(p, { empty: empty as any }))))
+) => Effect.runSync(Effect.result(Stream.fromIterable(chunks).pipe(ParserStream.parseAll(p, { empty }))))
 
 let checked = 0
 
-const twins = new Map<Parser.Parser.Any, ReadonlyArray<Parser.Parser.Any>>()
+const twins = new WeakMap<Parser.Parser.Any, ReadonlyArray<Parser.Parser.Any>>()
 
 /** The parser itself (interpreted) and compiled twins of it, one per backend. */
 const variants = <P extends Parser.Parser.Any>(p: P): ReadonlyArray<P> => {
@@ -62,12 +66,14 @@ const variants = <P extends Parser.Parser.Any>(p: P): ReadonlyArray<P> => {
     v = [p, ...(["closure", "jit", "wasm"] as const).map((backend) => Compiler[backend](Parser.named(p, "twin")))]
     twins.set(p, v)
   }
+  // SAFETY: each variant is `p` or `Compiler[backend](Parser.named(p, …))`,
+  // which has `p`'s type; only the cache erases it to `Parser.Any`.
   return v as ReadonlyArray<P>
 }
 
 /** Checks that streaming `input` in chunks gives the result of parsing it whole, interpreted and compiled. */
 const same = <I extends string | Uint8Array>(p: Parser.Parser<any, any, never, I>, input: I, seed: number): void => {
-  const expected = outcome(Parser.parse(p, input as never))
+  const expected = outcome(Parser.parse(p, input))
   const random = rng(seed)
   const empty = Predicate.isString(input) ? "" : new Uint8Array(0)
   ;[1, 3, 17, 4096].forEach((max) => {
@@ -91,21 +97,22 @@ describe("streaming parses", () => {
     jsonDocs.forEach((doc, i) => same(Json.json, doc, i))
   })
 
-  it.each([
+  it.each<[name: string, T: Text.TextParsers<any>]>([
     ["Text.string", Text.string],
     ["Text.utf8", Text.utf8],
     ["Text.utf16le", Text.utf16le]
-  ] as const)("json-text with %s", (_, T) => {
-    const p = jsonGrammar(T as Text.TextParsers<any>)
-    jsonDocs.forEach((doc, i) => same(p, (T.encoding as Encoding.Encoding<any>).encode(doc), i))
+  ])("json-text with %s", (_, T) => {
+    const p = jsonGrammar(T)
+    jsonDocs.forEach((doc, i) => same(p, T.encoding.encode(doc), i))
   })
 
-  it.each([
+  it.each<[name: string, T: Text.TextParsers<any>]>([
     ["Text.string", Text.string],
     ["Text.utf8", Text.utf8]
-  ] as const)("json-fast with %s (objects built with fromEntries)", (_, T) => {
-    const p = JsonFast.jsonGrammar(T as Text.TextParsers<any>)
-    jsonDocs.forEach((doc, i) => same(p, (T.encoding as Encoding.Encoding<any>).encode(doc), i))
+  ])("json-fast with %s (objects built with fromEntries)", (_, T) => {
+    const p = JsonFast.jsonGrammar(T)
+    const keys = ['{"__proto__": 1, "a": [2], "1": 3, "a": 4}', '{"b": {"__proto__": {"0": null}}, "2": 0, "c": 1}']
+    ;[...jsonDocs, ...keys].forEach((doc, i) => same(p, T.encoding.encode(doc), i))
   })
 
   it("json-text on malformed bytes", () => {
@@ -145,7 +152,38 @@ describe("streaming parses", () => {
       Parser.terminated(Ascii.escaped(Token.takeTill('\\"'), "\\", Token.oneOf('\\"n')), Token.literal('"')),
       Parser.terminated(Ascii.takeEscaped(Ascii.alpha1, "\\", Token.oneOf("an")), Token.literal(";")),
       Parser.repeat(Parser.separated(a, b), { min: 1, max: 3 }),
+      // Repetitions of a character set whose values are unused scan as runs (#79)
+      Parser.taken(
+        Parser.repeat(Parser.alt(Token.oneOf("ab"), Parser.seq(Token.literal("\\"), Token.any)), { min: 1 })
+      ),
+      Parser.terminated(Parser.taken(Parser.repeat(Token.oneOf("ab"), { min: 1, max: 4 })), Token.literal(";")),
+      Parser.repeat(
+        Parser.seqWith([a, Parser.mapSpan(Parser.repeat(b), (bs, s, e) => e - s - bs.length)], (x, n) => x + n)
+      ),
+      Parser.repeat(Parser.preceded(Parser.quiet(Parser.repeat(Parser.alt(b, Token.literal("c")))), a)),
       Parser.alt(Parser.seq(Parser.repeat(a), b), Parser.seq(Parser.repeat(a), Token.literal("c"))),
+      // Objects built directly: a checkpoint holds the object so far and its deferred keys
+      Parser.fromEntries(
+        Parser.separated(
+          Parser.separatedPair(Token.oneOf("ab1"), Token.literal("+"), Parser.opt(Token.literal("n"))),
+          Token.literal(";")
+        )
+      ),
+      Parser.fromEntries(
+        Parser.repeat(
+          Parser.seq(Parser.alt(a.pipe(Parser.as("__proto__")), Token.oneOf("b1")), Parser.opt(Token.literal("n"))),
+          { min: 1, max: 3 }
+        )
+      ),
+      // Object keys defer their entries to the end, so a checkpoint holds the deferred ones too
+      Parser.fromEntries(
+        // SAFETY: a deliberate type lie: the keys are tuples, not property
+        // keys; `fromEntries` converts them as `Object.fromEntries` does.
+        Parser.separated(
+          Parser.seq(Parser.seq(Token.oneOf("ab1")), Parser.opt(Token.literal("n"))),
+          Token.literal(";")
+        ) as Parser.Parser<Array<[any, unknown]>>
+      ),
       Parser.repeat(
         Parser.alt(Parser.alt(Token.literal("ab"), b, Token.literal("c")), Token.literal("+"), Ascii.digit1)
       ),
@@ -170,6 +208,72 @@ describe("streaming parses", () => {
         ).join("")
         same(p, input, i)
       })
+    })
+  })
+
+  it("Binary numbers across chunk boundaries", () => {
+    const grammars: ReadonlyArray<Parser.Parser<any, any, never, Uint8Array>> = [
+      Parser.repeat(Binary.beU32),
+      Parser.repeat(Parser.seq(Binary.u8, Binary.leU16, Binary.beF64)),
+      Parser.terminated(Parser.repeat(Binary.leI24), Parser.eof)
+    ]
+    const random = rng(13)
+    grammars.forEach((p) => {
+      Array.from({ length: 60 }).forEach((_, i) => {
+        const input = Uint8Array.from({ length: Math.floor(random() * 40) }, () => Math.floor(random() * 256))
+        same(p, input, i)
+      })
+    })
+  })
+
+  it("objects built directly resume with their entries", () => {
+    const entry = Parser.seq(Token.oneOf("ab1"), Parser.opt(Token.literal("n")))
+    const plain = Parser.fromEntries(Parser.separated(entry, Token.literal(";")))
+    const proto = Parser.fromEntries(
+      Parser.repeat(
+        Parser.seq(
+          Parser.alt(Token.literal("p").pipe(Parser.as("__proto__")), Token.oneOf("ab1")),
+          Parser.opt(Token.literal("n"))
+        )
+      )
+    )
+    const objects = Parser.fromEntries(
+      // SAFETY: a deliberate type lie: the keys are tuples, not property
+      // keys; `fromEntries` converts them, as `Object.fromEntries` does,
+      // once every entry is parsed, so a checkpoint holds the deferred ones.
+      Parser.separated(
+        Parser.seq(Parser.seq(Token.oneOf("ab1")), Parser.opt(Token.literal("n"))),
+        Token.literal(";")
+      ) as Parser.Parser<Array<[any, unknown]>>
+    )
+    const lists = ["a;bn;1", "an;b;1n;a;b", "1;an;b;bn;1;a;a"]
+    const runs = ["abn1", "pnap1bpn", "anbnpp1an"]
+    lists.forEach((input, i) => {
+      same(plain, input, i)
+      same(objects, input, i)
+    })
+    runs.forEach((input, i) => same(proto, input, i))
+  })
+
+  it("withFastPath defers at the end of a partial input (#78)", () => {
+    const grammar = Parser.terminated(Token.takeWhile("a", { min: 1 }), Token.literal("b"))
+    const p = Parser.repeat(Parser.withFastPath(grammar, runOfAs))
+    ;["ab", "aabab", "aaaab" + "ab".repeat(20), "aba", "b"].forEach((input, i) => same(p, input, i))
+  })
+
+  it("takeTill searches across chunk boundaries (#75)", () => {
+    const quoted = Parser.repeat(
+      Parser.terminated(
+        Parser.delimited(Token.literal('"'), Token.takeTill('"'), Token.literal('"')),
+        Token.takeWhile(",\n", { min: 1 })
+      )
+    )
+    const plain = Parser.repeat(Parser.terminated(Token.takeTill(",\r\n", { min: 1 }), Token.literal(",")))
+    const x = (n: number) => "ab😀".repeat(n).slice(0, n)
+    ;[0, 1, 7, 8, 9, 16, 17, 200].forEach((n, i) => {
+      same(quoted, `"${x(n)}","${x(n)}"\n"${x(n)}",`, i)
+      same(quoted, `"${x(n)}","${x(n)}`, i)
+      same(plain, `${x(n)},${x(n)},${x(n)}`, i)
     })
   })
 
@@ -280,7 +384,8 @@ describe("parseReadable and parseResponse", () => {
   const doc = { a: [1, 2.5, "é😀"], b: { c: null, d: true } }
 
   it("parses a fetch Response body", async () => {
-    const response = new Response(JSON.stringify(doc))
+    const response = new Response(Formatter.formatJson(doc))
+
     expect(await Effect.runPromise(ParserStream.parseResponse(response, json))).toEqual(doc)
     expect(await Effect.runPromise(ParserStream.parseResponse(json)(new Response("[1]")))).toEqual([1])
   })

@@ -88,54 +88,18 @@ export default defineConfig({
             "The `Buffer` global is typed `any` wherever @cloudflare/workers-types is loaded. Use Uint8Array / TextEncoder / DataView."
         }
       ],
-      // `casting-awareness` is an awareness prompt, not a defect rule — it
-      // fires on every `as`. Stays visible as a warning.
-      "effect/casting-awareness": "warn",
-
-      // ---- Effect preset: allowances still being paid down ------------------
-      // The parser predates the Effect oxlint preset. These rules sit at
-      // `warn` with the count they had when the preset was adopted, so the
-      // code stays committable while every site stays reported; a new site is
-      // a defect, not headroom. The remaining sites are listed in
-      // effect-parse#35. Flip a rule back to the
-      // preset's `error` and delete its line when its count reaches zero.
-      "effect/require-safety-comment-for-type-assertion": "warn", // 300
-      "effect/avoid-any": "warn", // 60
-      "effect/avoid-direct-tag-checks": "warn", // 10, all `switch (x._tag)`: the compilers, `children` and examples/sexpr
-      "effect/avoid-direct-json": "warn", // 35 outside bench/
-      "effect/avoid-native-object-helpers": "warn", // 40 outside bench/
-      // 17: eleven are overloaded exports written as `const f: { …signatures } = impl`
-      // (`Parser.parse` and its runners, `dispatch`, `Input.fromSource`, …) and one
-      // is `SyntaxNode.toJSON(): unknown`; each needs a change to the published
-      // `.d.ts` (a named exported interface, or `function` overloads). Five are
-      // `bench/json-fused.ts`'s `let v: unknown`.
-      "effect/no-known-value-widening": "warn",
-      "effect/prefer-match-over-switch": "warn", // 21
-      "effect/no-chained-type-assertions": "warn", // 13
-      // `avoid-try-catch`: 6. Four are `try`/`finally` (`provideService` /
-      // `provide` restoring `state.context`, and two tests), which `Result.try`
-      // cannot express. Two are on the parse path, where `Result.try`'s closure
-      // measured ~12x slower than an inline `try` (effect-parse#53):
-      // `tryMapUnknown` (per call of `f`) and `Stack.run` (per parse).
-      "effect/avoid-try-catch": "warn",
-      "effect/no-unsafe-dictionary-type": "warn", // 3 outside bench/
-      "effect/use-console-service": "warn", // 2 outside bench/ (`Parser.debug`'s console tracer)
-      // ---- Effect preset: rules this library's conventions cut across ------
-      // `prefer-option-over-null` fires on every `| undefined`: the absent
-      // value of the public API (`Parser.opt`, the options members spelled
-      // `?: T | undefined` under `exactOptionalPropertyTypes`, `Input.State`
-      // fields) and the step protocol's per-step results. Changing the public
-      // spelling breaks every consumer; boxing a step result in `Option`
-      // allocates on every parse step. 227 sites.
-      "effect/prefer-option-over-null": "warn",
-      // `unknown` is the honest type at the interpreter's erased boundary: a
-      // step returns the value of whatever parser it runs, and the compilers
-      // walk parser nodes whose values they never inspect. 43 + 45 sites.
-      // Identity keys are the nominal `internal/key.ts` `Key`; the 3 `object`
-      // sites left are the targets of `internal/entries.ts`.
-      "effect/no-unknown-parameters": "warn",
-      "effect/no-unknown-returns": "warn",
-      "effect/no-object-parameters": "warn",
+      // Every `effect/*` rule is at the preset's `error`. The overrides below
+      // turn a rule off only where it cannot apply, each with its reason
+      // (effect-parse#68); a new site anywhere else is an error.
+      //
+      // `casting-awareness` flags every `as`, as a prompt to justify it. Each
+      // assertion here is justified by the `// SAFETY:` comment that
+      // `require-safety-comment-for-type-assertion` requires (at `error`), so
+      // the prompt has been answered at every site and can't be satisfied
+      // further: the assertions that remain are those the type system can't
+      // express (the interpreter's erased step boundary, input kinds known at
+      // run time, deliberate type lies in tests).
+      "effect/casting-awareness": "off",
       // Hard-codes abbreviations (`Arr`, `P`, `R`, …) with no options, so it is
       // unsatisfiable under the full-name convention (`import * as Option from
       // "effect/Option"`) this library shares with its consumers.
@@ -157,6 +121,142 @@ export default defineConfig({
       "vitest/valid-expect": ["error", { maxArgs: 2 }]
     },
     overrides: [
+      // ---- Effect rules that cannot apply here (effect-parse#68) ----------
+      // `unknown` is the honest type at the interpreter's erased boundary: a
+      // step returns the value of whatever parser it runs, a node stores the
+      // user callbacks of every parser kind, and the compilers walk nodes
+      // whose values they never inspect. The rules ask for a named domain
+      // type that does not exist there.
+      {
+        files: ["src/**"],
+        rules: {
+          "effect/no-unknown-parameters": "off",
+          "effect/no-unknown-returns": "off"
+        }
+      },
+      // The hand-fused benchmark parser returns any JSON value, and the JSON
+      // benchmark's cases are timed for their work: their values are dropped.
+      {
+        files: ["bench/json-fused.ts", "bench/json.bench.ts"],
+        rules: {
+          "effect/no-unknown-returns": "off"
+        }
+      },
+      // `| undefined` is the absent value of the published API (`Parser.opt`,
+      // the options members spelled `?: T | undefined` under
+      // `exactOptionalPropertyTypes`, `Input.State` fields) and of the step
+      // protocol: changing the public spelling breaks every consumer, and
+      // boxing a step result in `Option` allocates on every parse step. The
+      // test harnesses mirror that protocol (`eager.ts`, the differential
+      // runners, `defined`), the JSON example's `null` is JSON's null, and the
+      // hand-fused benchmark parser returns the same sentinel.
+      {
+        files: [
+          "src/**",
+          "test/eager.ts",
+          "test/utils.ts",
+          "test/Parser.test.ts",
+          "test/Compiler.test.ts",
+          "examples/json.ts",
+          "bench/json-fused.ts"
+        ],
+        rules: {
+          "effect/prefer-option-over-null": "off"
+        }
+      },
+      // The step functions switch on `state.inputKind` once per input
+      // position: `Match.value` there took 100.6 ms per million positions
+      // against 4.84 ms for the `switch` (21x; Node 22). The compilers and
+      // `children` dispatch exhaustively over the ~55-member `Node` union,
+      // which tsc checks for exhaustiveness; the hand-fused benchmark parser
+      // is the plain-JavaScript reference the compilers are measured against.
+      {
+        files: [
+          "src/internal/compiler/**",
+          "src/internal/node.ts",
+          "src/internal/tokens.ts",
+          "src/Input.ts",
+          "src/Token.ts",
+          "bench/json-fused.ts"
+        ],
+        rules: {
+          "effect/prefer-match-over-switch": "off",
+          "effect/avoid-direct-tag-checks": "off"
+        }
+      },
+      // `Result.try` measured ~12x slower than an inline `try` on the parse
+      // path (effect-parse#53): `tryMapUnknown` (per call of `f`) and
+      // `Stack.run` (per run). `provideService` / `provide` and two tests use
+      // `try`/`finally` to restore state, which `Result.try` cannot express.
+      {
+        files: ["src/Parser.ts", "src/internal/stack.ts", "test/Parser.test.ts", "test/Compiler.test.ts"],
+        rules: {
+          "effect/avoid-try-catch": "off"
+        }
+      },
+      // `JSON.stringify` writes a string as a quoted literal: in the JIT's
+      // generated JavaScript, and in error messages (`expected "true"`, found
+      // tokens, previews), whose text is published and compared byte for byte.
+      // These are not JSON data at a boundary, which the rule's Schema codecs
+      // are for. The examples' tests compare the JSON parsers with
+      // `JSON.parse`, the subject of the comparison.
+      {
+        files: [
+          "src/internal/compiler/jit.ts",
+          "src/internal/tokens.ts",
+          "src/internal/text.ts",
+          "src/Text.ts",
+          "src/ParseError.ts",
+          "src/Parser.ts",
+          "test/examples.test.ts"
+        ],
+        rules: {
+          "effect/avoid-direct-json": "off"
+        }
+      },
+      // The runtime's mutable tables are keyed by object identity (parsers,
+      // checkpoint keys) or by a code unit, are written while parsing or
+      // compiling, and are never shared: memo tables, per-character caches,
+      // the streaming checkpoints. `Object.fromEntries` must be the built-in,
+      // which the compilers recognise by identity. The INI example returns
+      // `Map`s by design, and the tests build the values they compare with.
+      {
+        files: ["src/**", "examples/ini.ts", "test/Input.test.ts", "test/Compiler.test.ts", "test/examples.test.ts"],
+        rules: {
+          "effect/avoid-native-object-helpers": "off"
+        }
+      },
+      // `internal/entries.ts` fills a fresh plain object with parsed entries:
+      // `object` is its honest type, there is no narrower owner type, and the
+      // struct outputs the closure compiler builds hold `unknown` values.
+      {
+        files: ["src/internal/entries.ts"],
+        rules: {
+          "effect/no-object-parameters": "off"
+        }
+      },
+      {
+        files: ["src/internal/compiler/closure.ts"],
+        rules: {
+          "effect/no-unsafe-dictionary-type": "off"
+        }
+      },
+      // `Parser.consoleTracer` is a synchronous tracer called from step
+      // functions, where no Effect runtime (and so no `Console` service) runs.
+      {
+        files: ["src/Parser.ts"],
+        rules: {
+          "effect/use-console-service": "off"
+        }
+      },
+      // The hand-fused benchmark parser's `let v: unknown` holds any JSON
+      // value. (The overloaded exports have named contracts since #77.)
+      {
+        files: ["bench/json-fused.ts"],
+        rules: {
+          "effect/no-known-value-widening": "off"
+        }
+      },
       // The parser runtime: every step function scans input a unit at a time
       // and the compilers build code in loops. The shape this rule asks for
       // (`Arr.range` + `Arr.findFirstIndex` over the positions) scans a 1 MB

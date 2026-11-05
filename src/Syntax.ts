@@ -66,11 +66,15 @@ import { described, isParser } from "./Parser.js"
 // Grammar annotations
 // -----------------------------------------------------------------------------
 
-const syntaxNode = (self: Parser.Any, kind: string, named: boolean): Parser.Any => {
+const syntaxNode = <A, E, R, I extends Input>(
+  self: Parser<A, E, R, I>,
+  kind: string,
+  named: boolean
+): Parser<A, E, R, I> => {
   const step = self.step
   // Identifies the nodes this parser builds, so a reparse can reuse them
   const key = new Key()
-  return described<unknown, unknown, unknown, Input>(
+  return described<A, E, R, I>(
     (state) => {
       const builder = state.syntax
       return builder === undefined ? step(state) : builder.node(state, step, key, kind, named)
@@ -101,10 +105,8 @@ const syntaxNode = (self: Parser.Any, kind: string, named: boolean): Parser.Any 
 export const node: {
   (kind: string): <A, E, R, I extends Input>(self: Parser<A, E, R, I>) => Parser<A, E, R, I>
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, kind: string): Parser<A, E, R, I>
-} = /*#__PURE__*/ dual(
-  2,
-  <A, E, R, I extends Input>(self: Parser<A, E, R, I>, kind: string): Parser<A, E, R, I> =>
-    syntaxNode(self, kind, true) as Parser<A, E, R, I>
+} = /*#__PURE__*/ dual(2, <A, E, R, I extends Input>(self: Parser<A, E, R, I>, kind: string): Parser<A, E, R, I> =>
+  syntaxNode(self, kind, true)
 )
 
 /**
@@ -130,7 +132,7 @@ export const token: {
 } = /*#__PURE__*/ dual(
   (args) => isParser(args[0]),
   <A, E, R, I extends Input>(self: Parser<A, E, R, I>, kind?: string): Parser<A, E, R, I> =>
-    syntaxNode(self, kind ?? defaultTokenKind(self), false) as Parser<A, E, R, I>
+    syntaxNode(self, kind ?? defaultTokenKind(self), false)
 )
 
 const defaultTokenKind = (self: Parser.Any): string => {
@@ -168,7 +170,7 @@ export const field: {
   return described<A, E, R, I>(
     (state) => {
       const builder = state.syntax
-      return (builder === undefined ? step(state) : builder.field(state, step, name)) as A | typeof Fail
+      return builder === undefined ? step(state) : builder.field(state, step, name)
     },
     self.name,
     { _tag: "Syntax", self, kind: undefined, named: false }
@@ -347,6 +349,18 @@ export class Tree<out A, out E = never, I extends Input = string> {
 }
 
 /**
+ * What `JSON.stringify` writes for a {@link SyntaxNode}: its kind and span.
+ *
+ * @since 0.5.0
+ * @category models
+ */
+export interface SyntaxNodeJson {
+  readonly kind: string
+  readonly start: number
+  readonly end: number
+}
+
+/**
  * A node of a syntax tree: its kind, span and value, and its place in the
  * tree. Nodes are views built on demand; two views of the same node are
  * different objects but have the same `start`, `end` and `kind`.
@@ -403,10 +417,11 @@ export class SyntaxNode<I extends Input = string> {
 
   /** The input the node spans. */
   get text(): Slice<I> {
-    const input = this.tree.input as any
-    return input instanceof Uint8Array
-      ? (input.subarray(this.start, this.end) as any)
-      : input.slice(this.start, this.end)
+    const input: Input = this.tree.input
+    // SAFETY: a `subarray` of a `Uint8Array`, or a `slice` of a string or array, has the input's own kind, `Slice<I>`
+    return (
+      input instanceof Uint8Array ? input.subarray(this.start, this.end) : input.slice(this.start, this.end)
+    ) as Slice<I>
   }
 
   /** Whether this is an `ERROR` node. */
@@ -592,7 +607,7 @@ export class SyntaxNode<I extends Input = string> {
     return out
   }
 
-  toJSON(): unknown {
+  toJSON(): SyntaxNodeJson {
     return { kind: this.kind, start: this.start, end: this.end }
   }
 
@@ -723,10 +738,31 @@ const run = <A, E, I extends Input>(config: Config, input: I, previous: Previous
     state.backtrack("Eof", expectedEof)
     fatal = { failure: state.reportedFailure(), mode: "Backtrack" }
   } else {
+    // SAFETY: `config.inner` is the `Parser<A, ...>` given to `parse` or the parser its root `node` wraps, which returns
+    // the same `A` (a `reparse` reuses the tree's config)
     value = Option.some(a as A)
   }
   const green = builder.finish(config.kind, Option.getOrUndefined(value), fatal, state.pos)
   return new Tree<A, E, I>(input, value, builder.reused, green, config, state.encoding)
+}
+
+/**
+ * The overloads of {@link parse}.
+ *
+ * @since 0.5.0
+ * @category parsing
+ */
+export interface ParseFn {
+  <A, E, I extends Input>(
+    grammar: Parser<A, E, never, I>,
+    input: NoInfer<Source<I>>,
+    options?: ParseOptions
+  ): Tree<A, E, I>
+  <A, E, R, I extends Input>(
+    grammar: Parser<A, E, R, I>,
+    input: NoInfer<Source<I>>,
+    options: ParseOptionsWithContext<R>
+  ): Tree<A, E, I>
 }
 
 /**
@@ -742,18 +778,7 @@ const run = <A, E, I extends Input>(config: Config, input: I, previous: Previous
  * @since 0.2.0
  * @category parsing
  */
-export const parse: {
-  <A, E, I extends Input>(
-    grammar: Parser<A, E, never, I>,
-    input: NoInfer<Source<I>>,
-    options?: ParseOptions
-  ): Tree<A, E, I>
-  <A, E, R, I extends Input>(
-    grammar: Parser<A, E, R, I>,
-    input: NoInfer<Source<I>>,
-    options: ParseOptionsWithContext<R>
-  ): Tree<A, E, I>
-} = <A, E, R, I extends Input>(
+export const parse: ParseFn = <A, E, R, I extends Input>(
   grammar: Parser<A, E, R, I>,
   input: I | Source<I>,
   options?: ParseOptions & { readonly context?: Context.Context<R> }
@@ -762,11 +787,12 @@ export const parse: {
   const isRoot = Predicate.isTagged(n, "Syntax") && n.kind !== undefined && n.named
   const config: Config = {
     kind: isRoot ? n.kind : (options?.kind ?? "document"),
+    // SAFETY: a `Syntax` node's `self` is the parser that `node` wrapped, a parser built by this library
     inner: isRoot ? (n.self as Parser.Any) : grammar,
     lookahead: options?.lookahead ?? 0,
-    context: options?.context as Context.Context<never> | undefined
+    context: options?.context
   }
-  return run(config, fromSource(input as Input) as I, undefined)
+  return run(config, fromSource<I>(input), undefined)
 }
 
 /**
@@ -803,13 +829,8 @@ export const reparse = <A, E, I extends Input>(
   input: NoInfer<Source<I>>,
   edits?: Edit | ReadonlyArray<Edit>
 ): Tree<A, E, I> => {
-  const next = fromSource(input as Input) as I
-  const list =
-    edits === undefined
-      ? diffList(tree.input, next)
-      : "start" in edits
-        ? [edits as Edit]
-        : (edits as ReadonlyArray<Edit>)
+  const next = fromSource<I>(input)
+  const list = edits === undefined ? diffList(tree.input, next) : "start" in edits ? [edits] : edits
   const previous: Previous = {
     root: tree.green,
     oldLength: tree.input.length,
@@ -854,9 +875,12 @@ export const replace = <A, E>(
  * @category parsing
  */
 export const diff = <I extends Input>(before: I, after: I): Edit | undefined => {
-  const a = before as any
-  const b = after as any
-  const at = Predicate.isString(a) ? (s: string, i: number) => s.charCodeAt(i) : (s: any, i: number) => s[i]
+  const a: Input = before
+  const b: Input = after
+  // SAFETY: the string reader is chosen only when `a` is a string, and `b` has the same type `I`
+  const at = Predicate.isString(a)
+    ? (s: Input, i: number) => (s as string).charCodeAt(i)
+    : (s: Input, i: number) => s[i]
   const max = Math.min(a.length, b.length)
   let prefix = 0
   while (prefix < max && at(a, prefix) === at(b, prefix)) prefix++
