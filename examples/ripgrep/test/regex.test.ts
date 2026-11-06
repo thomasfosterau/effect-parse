@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test"
 import * as Ast from "../src/regex/ast.ts"
 import * as CharSet from "../src/regex/charset.ts"
 import * as Compile from "../src/regex/compile.ts"
+import { LineDfa } from "../src/regex/dfa.ts"
 import * as Syntax from "../src/regex/syntax.ts"
 import { success } from "./utils.ts"
 
@@ -220,5 +221,69 @@ describe("character sets", () => {
     expect(CharSet.unicodeProperty("whitespace")).toEqual(CharSet.unicodeSpace())
     expect(CharSet.unicodeProperty("nope=x")).toBe(undefined)
     expect(CharSet.unicodeProperty("NoSuchThing")).toBe(undefined)
+  })
+})
+
+describe("line DFA", () => {
+  const lines = [
+    "fn evidence_193(foo_bar: &str) -> Result<Clue, Error> { x(12) }",
+    "Sherlock Holmes and Dr. Watson at 221B Baker Street",
+    "naïve café Ωμέγα λόγος 日本語 🦀 straße STRASSE",
+    "",
+    "    indented TODO: parse_input(42)",
+    "x",
+    "aaab ab abab",
+    "tab\there; end$",
+    "123.45.67.89 10.0.0.1"
+  ]
+  const patterns = [
+    "\\w+_\\w+\\(\\d+\\)",
+    "[a-z]+@[a-z]+\\.com",
+    "\\p{Greek}+",
+    "^\\s+\\w",
+    "\\w+$",
+    "^$",
+    "^x$",
+    "(?i)straße",
+    "a*ab",
+    "(ab)+",
+    "\\d{1,3}\\.\\d{1,3}",
+    "[^\\x00-\\x7F]+",
+    "Sherlock|Watson",
+    "x*",
+    "^",
+    "$",
+    "[[:upper:]]{2,}",
+    "(?:a|b)*c"
+  ]
+  it("leaves word boundaries to the matcher", () => {
+    for (const pattern of ["e\\b", "\\bword", "\\Bor", "\\<a"]) {
+      expect(LineDfa.make(success(Syntax.parse(pattern, flags)).regex, 0x0a), pattern).toBe(undefined)
+    }
+  })
+
+  it("finds a match in exactly the lines the matcher does", () => {
+    for (const pattern of patterns) {
+      const parsed = success(Syntax.parse(`(?:${pattern})`, flags))
+      const dfa = LineDfa.make(parsed.regex, 0x0a)
+      expect(dfa, pattern).toBeDefined()
+      const matcher = Compile.compile(parsed.regex, 1, 0x0a, { captures: false, backend: "none", multiline: true })
+      for (const line of lines) {
+        const bytes = encoder.encode(`${line}\n`)
+        const expected = matcher.find(new Input.State(bytes), 0)
+        const hit = dfa?.find(bytes, 0, bytes.length - 1) ?? -1
+        const inLine = expected !== undefined && expected.start < bytes.length
+        expect(hit >= 0 && hit < bytes.length, `${pattern} on ${JSON.stringify(line)}`).toBe(inLine)
+      }
+    }
+  })
+
+  it("searches several lines, from mid-line, to the end of the text", () => {
+    const parsed = success(Syntax.parse("(?:b+$)", flags))
+    const dfa = LineDfa.make(parsed.regex, 0x0a)
+    const text = encoder.encode("abc\nab\nzz\nxb")
+    expect(dfa?.find(text, 0, text.length)).toBe(6)
+    expect(dfa?.find(text, 7, text.length)).toBe(text.length)
+    expect(dfa?.find(text, 0, 3)).toBe(-1)
   })
 })

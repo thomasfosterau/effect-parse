@@ -1,7 +1,10 @@
 /**
- * Finds the next occurrence of any of a few byte strings, with the native
- * `Buffer#indexOf` (a vectorised substring search) per string, caching each
- * string's next occurrence so the input is scanned once per string.
+ * Finds the next occurrence of any of a few byte strings, caching each
+ * string's next occurrence so the input is scanned once per string. A
+ * string with a rare byte is found by searching for that byte with
+ * `Buffer#indexOf` (a vectorised memchr, many times faster than its
+ * substring search) and checking the rest around it, as ripgrep's
+ * rare-byte prefilter does; others with the substring search.
  *
  * @since 0.0.0
  */
@@ -14,6 +17,8 @@ import { Buffer } from "node:buffer"
  */
 export class LiteralFinder {
   private readonly literals: ReadonlyArray<Uint8Array>
+  /** Each literal's rare byte to search for, by offset, or -1 to search for it whole. */
+  private readonly anchors: ReadonlyArray<number>
   private readonly next: Float64Array
   private readonly from: Float64Array
   private haystack: Uint8Array | undefined = undefined
@@ -21,6 +26,7 @@ export class LiteralFinder {
 
   constructor(literals: ReadonlyArray<Uint8Array>) {
     this.literals = literals
+    this.anchors = literals.map(rareAnchor)
     this.next = new Float64Array(literals.length)
     this.from = new Float64Array(literals.length)
   }
@@ -38,13 +44,31 @@ export class LiteralFinder {
     let best = Infinity
     for (let i = 0; i < this.literals.length; i++) {
       if (!(this.from[i] <= pos && pos <= this.next[i])) {
-        const at = this.view.indexOf(this.literals[i], pos)
+        const at = this.search(i, pos)
         this.next[i] = at < 0 ? Infinity : at
         this.from[i] = pos
       }
       if (this.next[i] < best) best = this.next[i]
     }
     return best === Infinity ? -1 : best
+  }
+
+  /** The first occurrence of literal `i` at or after `pos`, or -1. */
+  private search(i: number, pos: number): number {
+    const lit = this.literals[i] ?? new Uint8Array()
+    const a = this.anchors[i] ?? -1
+    const view = this.view
+    if (a < 0) return view.indexOf(lit, pos)
+    const n = lit.length
+    const byte = lit[a]
+    for (let c = view.indexOf(byte, pos + a); c >= 0; c = view.indexOf(byte, c + 1)) {
+      const start = c - a
+      if (start + n > view.length) return -1
+      let k = 0
+      while (k < n && view[start + k] === lit[k]) k++
+      if (k === n) return start
+    }
+    return -1
   }
 
   /** The first literal, in priority order, that occurs at `pos`, or undefined. */
@@ -102,6 +126,7 @@ export class SequenceFinder {
   }
 
   /** The start of the first occurrence of the sequence at or after `pos`, or -1. */
+  // fallow-ignore-next-line unused-class-member
   find(haystack: Uint8Array, pos: number): number {
     const n = this.sets.length
     for (let p = pos + this.anchor; ; p++) {
@@ -116,4 +141,15 @@ export class SequenceFinder {
     for (let i = 0; i < this.tables.length; i++) if (this.tables[i]?.[haystack[start + i]] !== 1) return false
     return true
   }
+}
+
+/** Bytes at most this common (see {@link frequency}) are worth searching for alone. */
+const RARE = 40
+
+/** The offset of a literal's rarest byte, if it is rare enough to search for, else -1. */
+const rareAnchor = (lit: Uint8Array): number => {
+  if (lit.length < 2) return -1
+  let best = 0
+  for (let k = 1; k < lit.length; k++) if (frequency(lit[k] ?? 0) < frequency(lit[best] ?? 0)) best = k
+  return frequency(lit[best] ?? 0) <= RARE ? best : -1
 }

@@ -45,6 +45,13 @@ export interface SearchOptions {
   readonly binary: BinaryMode
   /** Whether the sink reads line numbers (counting them costs a pass over the lines). */
   readonly lineNumbers: boolean
+  /**
+   * Whether binary detection may wait for a match: when a file has none,
+   * whether it is binary changes nothing printed (it does for `-v`,
+   * `--passthru`, `--files-without-match`, `--stats` and `--json`). Spares a
+   * scan of every file without a match for NUL bytes.
+   */
+  readonly lazyBinary: boolean
 }
 
 /**
@@ -364,9 +371,35 @@ export const search = (input: Uint8Array, options: SearchOptions, sink: Sink): S
   // As a Buffer (a view, no copy): its indexOf, which finds every line end
   // and NUL byte, is a native memchr; a plain Uint8Array's is not.
   const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input.buffer, input.byteOffset, input.byteLength)
+  if (options.lazyBinary && options.binary !== "none" && !anyMatch(buffer, options)) return noMatch(buffer.length)
   const { limit, nul } = binaryLimit(buffer, options)
   const withheld = options.binary === "convert" && nul !== undefined && nul < BUFFER
-  const run = new Search(buffer, options, sink, limit)
+  const { hits, matchedLines, matches } = report(new Search(buffer, options, sink, limit), buffer, options, withheld)
+  const quit = options.binary === "quit" && nul !== undefined
+  return {
+    bytesSearched: limit,
+    matchedLines,
+    matches,
+    binaryOffset: nul,
+    stoppedAtBinary: quit && hits > 0,
+    binaryQuit: quit,
+    binaryMatched: withheld && hits > 0
+  }
+}
+
+/** Whether the buffer holds any match (for {@link SearchOptions.lazyBinary}). */
+const anyMatch = (buffer: Uint8Array, options: SearchOptions): boolean =>
+  options.matcher.find(new Input.State(buffer), 0) !== undefined
+
+/** How many hits, matching lines and matches a search reported. */
+interface Counts {
+  readonly hits: number
+  readonly matchedLines: number
+  readonly matches: number
+}
+
+/** Reports every hit, with its context, up to `--max-count`; returns the counts. */
+const report = (run: Search, buffer: Uint8Array, options: SearchOptions, withheld: boolean): Counts => {
   const next = options.invert ? () => run.nextInverted() : () => run.nextGroup()
   let matchedLines = 0
   let matches = 0
@@ -384,17 +417,19 @@ export const search = (input: Uint8Array, options: SearchOptions, sink: Sink): S
     cursor = hit.end
   }
   run.finish(cursor, hits)
-  const quit = options.binary === "quit" && nul !== undefined
-  return {
-    bytesSearched: limit,
-    matchedLines,
-    matches,
-    binaryOffset: nul,
-    stoppedAtBinary: quit && hits > 0,
-    binaryQuit: quit,
-    binaryMatched: withheld && hits > 0
-  }
+  return { hits, matchedLines, matches }
 }
+
+/** The result for a file without a match, binary or not. */
+const noMatch = (bytes: number): SearchResult => ({
+  bytesSearched: bytes,
+  matchedLines: 0,
+  matches: 0,
+  binaryOffset: undefined,
+  stoppedAtBinary: false,
+  binaryQuit: false,
+  binaryMatched: false
+})
 
 const afterContextEnd = (b: Uint8Array, t: number, from: number, limit: number, n: number): number => {
   let end = from
