@@ -76,6 +76,7 @@ export const summaryPrinter = (o: SummaryOptions, out: Output): Printer => {
     return matched
   }
   return {
+    countsOnly: o.mode !== "countMatches" && !o.stats,
     allMatches: o.mode === "countMatches" || o.stats,
     lineNumbers: false,
     file: (info) => ({

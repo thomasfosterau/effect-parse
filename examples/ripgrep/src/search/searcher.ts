@@ -38,6 +38,8 @@ export interface SearchOptions {
   readonly after: number
   readonly passthru: boolean
   readonly stopOnNonmatch: boolean
+  /** Whether the sink reads nothing but the counts of matching lines (`-c`, `-l`, `-q`): see `Matcher.countLines`. */
+  readonly countsOnly: boolean
   /** Whether the sink needs every match in a line (colors, `-o`, `--json`, ...), not just the first. */
   readonly allMatches: boolean
   /** Whether matches may span lines (`-U`). */
@@ -390,10 +392,19 @@ export const search = (input: Uint8Array, options: SearchOptions, sink: Sink): S
   // As a Buffer (a view, no copy): its indexOf, which finds every line end
   // and NUL byte, is a native memchr; a plain Uint8Array's is not.
   const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input.buffer, input.byteOffset, input.byteLength)
-  if (options.lazyBinary && options.binary !== "none" && !anyMatch(buffer, options)) return noMatch(buffer.length)
+  // One literal is ruled out fastest by V8's native search; otherwise, where the counts are all the sink
+  // reads, they come first, and a file with no matching line needs no binary detection
+  const lazy = options.lazyBinary && options.binary !== "none"
+  const single = options.matcher.cost === "literal"
+  if (lazy && single && !anyMatch(buffer, options)) return noMatch(buffer.length)
+  const whole = countLines(buffer, options, buffer.length)
+  if (lazy && !single && (whole === undefined ? !anyMatch(buffer, options) : whole.hits === 0)) {
+    return noMatch(buffer.length)
+  }
   const { limit, nul } = binaryLimit(buffer, options)
   const withheld = options.binary === "convert" && nul !== undefined && nul < BUFFER
-  const { hits, matchedLines, matches } = report(new Search(buffer, options, sink, limit), options, withheld)
+  const counted = limit === buffer.length ? whole : countLines(buffer, options, limit)
+  const { hits, matchedLines, matches } = counted ?? report(new Search(buffer, options, sink, limit), options, withheld)
   const quit = options.binary === "quit" && nul !== undefined
   return {
     bytesSearched: limit,
@@ -441,6 +452,20 @@ const report = (run: Search, options: SearchOptions, withheld: boolean): Counts 
   }
   run.finish(cursor, hits)
   return { hits, matchedLines, matches }
+}
+
+/**
+ * The counts, without visiting the lines, when the sink needs nothing else
+ * and the matcher can count them (a set of literals): the matching lines
+ * in `[0, limit)`, or the others with `-v`, up to `--max-count`.
+ */
+const countLines = (buffer: Uint8Array, options: SearchOptions, limit: number): Counts | undefined => {
+  const count = options.matcher.countLines
+  if (!options.countsOnly || options.multiline || options.stopOnNonmatch || count === undefined) return undefined
+  const counted = count(limit === buffer.length ? buffer : buffer.subarray(0, limit))
+  if (counted === undefined) return undefined
+  const n = Math.min(options.invert ? counted.lines - counted.matched : counted.matched, options.maxCount ?? Infinity)
+  return { hits: n, matchedLines: n, matches: options.invert ? 0 : n }
 }
 
 /** The result for a file without a match, binary or not. */
