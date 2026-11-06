@@ -173,6 +173,8 @@ class Search {
   private readonly state: Input.State<Uint8Array>
   private readonly counter: LineCounter
   private readonly contextual: boolean
+  /** The matcher's line search, when the sink needs only the lines (see `Matcher.findLine`). */
+  private readonly findLine: ((state: Input.State<Uint8Array>, from: number) => Match | undefined) | undefined
 
   // The match iteration.
   private pending: Match | undefined = undefined
@@ -195,6 +197,7 @@ class Search {
     this.state = new Input.State(buffer)
     this.counter = new LineCounter(buffer, this.t)
     this.contextual = options.before > 0 || options.after > 0
+    this.findLine = options.allMatches || options.multiline ? undefined : options.matcher.findLine
   }
 
   private lines(start: number, end: number): Lines {
@@ -208,7 +211,8 @@ class Search {
   /** The next match starting at or after `from` on a line within the limit. */
   find(from: number): Match | undefined {
     if (from > this.lastLineEnd) return undefined
-    const m = this.options.matcher.find(this.state, from)
+    const m =
+      this.findLine === undefined ? this.options.matcher.find(this.state, from) : this.findLine(this.state, from)
     if (m === undefined) return undefined
     // A match must start on a line: before the limit, or at the end of a
     // last line that has no terminator.
@@ -403,8 +407,10 @@ export const search = (input: Uint8Array, options: SearchOptions, sink: Sink): S
 }
 
 /** Whether the buffer holds any match (for {@link SearchOptions.lazyBinary}). */
-const anyMatch = (buffer: Uint8Array, options: SearchOptions): boolean =>
-  options.matcher.find(new Input.State(buffer), 0) !== undefined
+const anyMatch = (buffer: Uint8Array, options: SearchOptions): boolean => {
+  const line = options.multiline ? undefined : options.matcher.findLine
+  return (line ?? options.matcher.find)(new Input.State(buffer), 0) !== undefined
+}
 
 /** How many hits, matching lines and matches a search reported. */
 interface Counts {

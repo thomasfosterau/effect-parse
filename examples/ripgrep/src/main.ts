@@ -587,8 +587,8 @@ const collect = (setup: Setup, threshold: number, large: () => void): Collected 
 
 /**
  * How many workers to search with: none when the search would be quick on
- * this thread (workers take tens of milliseconds to start), else one per
- * core, or `-j`.
+ * this thread (workers take tens of milliseconds to start), else up to
+ * {@link maxWorkers}.
  */
 const workerCount = (args: Args, files: number, bytes: number, cost: Compile.Cost): number => {
   const estimate = bytes / throughput[cost]
@@ -596,8 +596,14 @@ const workerCount = (args: Args, files: number, bytes: number, cost: Compile.Cos
   return Math.min(maxWorkers(args), files, Math.max(1, Math.ceil(estimate / (PARALLEL_MS / 2))))
 }
 
-/** The most workers a search uses: this thread searches too, so one fewer than there are cores, or than `-j`. */
-const maxWorkers = (args: Args): number => (args.threads > 1 ? args.threads : Os.availableParallelism()) - 1
+/**
+ * The most workers a search uses: with `-j`, one fewer than it (this thread
+ * searches too); otherwise half the cores. Each worker is a V8 isolate with
+ * its own garbage collector and compiler threads, and on a 4-core machine
+ * two workers beat three on every benchmark case (by up to 20%).
+ */
+const maxWorkers = (args: Args): number =>
+  args.threads > 1 ? args.threads - 1 : Math.floor(Os.availableParallelism() / 2)
 
 /**
  * Whether a search may use workers at all, known before the walk: it has a

@@ -335,6 +335,31 @@ describe("line DFA", () => {
     }
   })
 
+  it("finds matches in the same lines with the line search as with the match search", () => {
+    const banned = CharSet.of(0x0a)
+    const bytes = Buffer.from(`${randomLines(lines)}\n`)
+    const lineOf = (o: number) => (o === 0 ? 0 : bytes.lastIndexOf(0x0a, o - 1) + 1)
+    const linesBy = (search: (state: Input.State<Uint8Array>, from: number) => Compile.Match | undefined) => {
+      const found: Array<number> = []
+      const state = new Input.State<Uint8Array>(bytes)
+      for (let m = search(state, 0); m !== undefined;) {
+        found.push(lineOf(m.start))
+        const nl = bytes.indexOf(0x0a, m.start)
+        m = nl < 0 ? undefined : search(state, nl + 1)
+      }
+      return found
+    }
+    for (const pattern of [...patterns, "Sherlock Holmes", "(?i)sherlock holmes", "parse_\\w+"]) {
+      const parsed = success(Syntax.parse(`(?:${pattern})`, flags))
+      const regex = Ast.mapClasses(parsed.regex, (set) => CharSet.difference(set, banned))
+      const options = { captures: false, backend: "none", multiline: false } as const
+      const matcher = Compile.compile(regex, 1, 0x0a, options)
+      const findLine = matcher.findLine
+      if (findLine === undefined) continue
+      expect(linesBy(findLine), pattern).toEqual(linesBy(matcher.find))
+    }
+  })
+
   it("searches several lines, from mid-line, to the end of the text", () => {
     const parsed = success(Syntax.parse("(?:b+$)", flags))
     const dfa = LineDfa.make(parsed.regex, 0x0a)

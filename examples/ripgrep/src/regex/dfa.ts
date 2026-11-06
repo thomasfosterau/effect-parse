@@ -466,11 +466,12 @@ export class LineDfa {
     }
   }
 
-  /** Starts over when the search moves to another input, or back in this one. */
+  /** Starts over when the search moves to another input, or back in this one (the hits are read forwards). */
   private useBatch(input: Uint8Array, from: number): void {
-    if (input === this.batchInput && from >= this.batchFrom) return
-    this.batchInput = input
+    const forward = from >= this.batchFrom
     this.batchFrom = from
+    if (input === this.batchInput && forward) return
+    this.batchInput = input
     this.covered = from
     this.hitCount = 0
     this.hitNext = 0
