@@ -44,7 +44,7 @@ catalog:
   # vite-plus's oxlint.
   "@enfect/oxlint": ^0.9.0
   effect: 4.1.1
-  fallow: 3.37.0
+  fallow: 3.40.0
   # `scripts/check-dist.mjs` parses the built `dist/` with `rolldown/parseAst`.
   rolldown: ^1.2.14
   # TypeScript 6/7 side-by-side: TS7 (the native Go compiler) ships no JS API
