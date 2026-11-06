@@ -623,7 +623,13 @@ const dfaStrategy =
   (state, from) => {
     const input = state.input
     for (let p = from; p <= input.length;) {
-      const hit = dfa.find(input, p, input.length)
+      // Mid-line (after a match), the rest of that line alone; then line by line.
+      const lineStart = p === 0 || input[p - 1] === t
+      const hit = lineStart ? dfa.findLine(input, p) : dfa.find(input, p, lineEndOf(input, t, p))
+      if (hit === -1 && !lineStart) {
+        p = lineEndOf(input, t, p) + 1
+        continue
+      }
       // Out of states: the matcher searches the rest by itself.
       if (hit === -2) return scan(state, p, input.length)
       if (hit < 0) return undefined

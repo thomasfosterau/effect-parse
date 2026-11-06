@@ -1,4 +1,5 @@
 import { Input } from "@thomasfosterau/effect-parse"
+import { Buffer } from "node:buffer"
 import * as Arr from "effect/Array"
 import * as Order from "effect/Order"
 import * as Result from "effect/Result"
@@ -224,6 +225,47 @@ describe("character sets", () => {
   })
 })
 
+/**
+ * Lines of very different lengths, over several batches, so the batched
+ * search's stretches finish unevenly and take over each other's lines.
+ */
+const randomLines = (lines: ReadonlyArray<string>): string => {
+  let seed = 7
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    return seed / 2147483648
+  }
+  return Array.from({ length: 12000 }, () => {
+    const line = lines[Math.floor(random() * lines.length)] ?? ""
+    return random() < 0.02 ? line.repeat(400) : line
+  }).join("\n")
+}
+
+/** The DFA's hits, one line at a time. */
+const lineByLine = (dfa: LineDfa | undefined, bytes: Buffer): Array<number> => {
+  const hits: Array<number> = []
+  for (let p = 0; p <= bytes.length;) {
+    const nl = bytes.indexOf(0x0a, p)
+    const hit = dfa?.find(bytes, p, nl < 0 ? bytes.length : nl) ?? -1
+    // A line that reads to the end of the input reports a match there, as the empty line after it does.
+    if (hit >= 0 && hits.at(-1) !== hit) hits.push(hit)
+    if (nl < 0) break
+    p = nl + 1
+  }
+  return hits
+}
+
+/** The DFA's hits, a batch at a time. */
+const batched = (dfa: LineDfa | undefined, bytes: Buffer): Array<number> => {
+  const hits: Array<number> = []
+  for (let hit = dfa?.findLine(bytes, 0) ?? -1; hit >= 0;) {
+    hits.push(hit)
+    const nl = hit >= bytes.length ? -1 : bytes.indexOf(0x0a, hit)
+    hit = nl < 0 ? -1 : (dfa?.findLine(bytes, nl + 1) ?? -1)
+  }
+  return hits
+}
+
 describe("line DFA", () => {
   const lines = [
     "fn evidence_193(foo_bar: &str) -> Result<Clue, Error> { x(12) }",
@@ -274,6 +316,21 @@ describe("line DFA", () => {
         const hit = dfa?.find(bytes, 0, bytes.length - 1) ?? -1
         const inLine = expected !== undefined && expected.start < bytes.length
         expect(hit >= 0 && hit < bytes.length, `${pattern} on ${JSON.stringify(line)}`).toBe(inLine)
+      }
+    }
+  })
+
+  it("finds the same lines a batch at a time as one line at a time", () => {
+    // As outside multiline mode, where no class matches the line terminator.
+    const banned = CharSet.of(0x0a)
+    const body = randomLines(lines)
+    for (const pattern of patterns) {
+      const parsed = success(Syntax.parse(`(?:${pattern})`, flags))
+      const regex = Ast.mapClasses(parsed.regex, (set) => CharSet.difference(set, banned))
+      for (const text of [`${body}\n`, body]) {
+        const bytes = Buffer.from(text)
+        const expected = lineByLine(LineDfa.make(regex, 0x0a), bytes)
+        expect(batched(LineDfa.make(regex, 0x0a), bytes), pattern).toEqual(expected)
       }
     }
   })
