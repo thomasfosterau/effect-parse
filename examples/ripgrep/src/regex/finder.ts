@@ -9,6 +9,7 @@
  * @since 0.0.0
  */
 import { Buffer } from "node:buffer"
+import * as Simd from "./simd.ts"
 
 /**
  * A multi-literal search over one haystack at a time.
@@ -104,7 +105,7 @@ const frequency = (b: number): number => {
  *
  * @since 0.0.0
  */
-export class SequenceFinder {
+class SequenceFinder {
   private readonly sets: ReadonlyArray<Uint8Array>
   private readonly tables: ReadonlyArray<Uint8Array>
   private readonly anchor: number
@@ -127,7 +128,6 @@ export class SequenceFinder {
   }
 
   /** The start of the first occurrence of the sequence at or after `pos`, or -1. */
-  // fallow-ignore-next-line unused-class-member
   find(haystack: Uint8Array, pos: number): number {
     const n = this.sets.length
     for (let p = pos + this.anchor; ; p++) {
@@ -153,4 +153,163 @@ const rareAnchor = (lit: Uint8Array): number => {
   let best = 0
   for (let k = 1; k < lit.length; k++) if (frequency(lit[k] ?? 0) < frequency(lit[best] ?? 0)) best = k
   return frequency(lit[best] ?? 0) <= RARE ? best : -1
+}
+
+/**
+ * What the strategies search with: the start of the first occurrence at or
+ * after `pos`, or -1.
+ *
+ * @since 0.0.0
+ */
+export interface Finder {
+  find(haystack: Uint8Array, pos: number): number
+}
+
+/**
+ * Finds any of a few literals with the SIMD kernel (Teddy): candidates
+ * where a bucket of literals matches their first bytes, each checked
+ * against that bucket's literals.
+ *
+ * @since 0.0.0
+ */
+class TeddyFinder implements Finder {
+  private readonly kernel: Simd.Kernel
+  private readonly tables: number
+  private readonly m: number
+  private readonly buckets: ReadonlyArray<ReadonlyArray<Uint8Array>>
+  private readonly fallback: LiteralFinder
+
+  constructor(kernel: Simd.Kernel, tables: number, m: number, literals: ReadonlyArray<Uint8Array>) {
+    this.kernel = kernel
+    this.tables = tables
+    this.m = m
+    this.buckets = bucketsOf(literals)
+    this.fallback = new LiteralFinder(literals)
+  }
+
+  find(haystack: Uint8Array, pos: number): number {
+    if (!this.kernel.place(haystack)) return this.fallback.find(haystack, pos)
+    const end = haystack.length - this.m + 1
+    for (let c = this.kernel.find(pos, end, this.tables, this.m, true); c >= 0;) {
+      if (this.matchAt(haystack, c)) return c
+      c = this.kernel.find(c + 1, end, this.tables, this.m, true)
+    }
+    return -1
+  }
+
+  /** Whether any literal starts at `c`. */
+  private matchAt(haystack: Uint8Array, c: number): boolean {
+    for (const bucket of this.buckets) for (const lit of bucket) if (startsAt(haystack, c, lit)) return true
+    return false
+  }
+}
+
+/**
+ * Finds a byte-set sequence with the SIMD kernel: candidates where three
+ * of its positions (the rarest three in a row) match, each checked against
+ * the whole sequence.
+ *
+ * @since 0.0.0
+ */
+class SimdSequenceFinder implements Finder {
+  private readonly kernel: Simd.Kernel
+  private readonly tables: number
+  private readonly window: number
+  private readonly m: number
+  private readonly sets: ReadonlyArray<Uint8Array>
+  private readonly fallback: SequenceFinder
+
+  constructor(kernel: Simd.Kernel, tables: number, window: number, m: number, sets: ReadonlyArray<Uint8Array>) {
+    this.kernel = kernel
+    this.tables = tables
+    this.window = window
+    this.m = m
+    this.sets = sets
+    this.fallback = new SequenceFinder(sets)
+  }
+
+  find(haystack: Uint8Array, pos: number): number {
+    if (!this.kernel.place(haystack)) return this.fallback.find(haystack, pos)
+    const n = this.sets.length
+    const end = haystack.length - n + this.window + 1
+    for (let c = this.kernel.find(pos + this.window, end, this.tables, this.m, false); c >= 0;) {
+      const start = c - this.window
+      if (setsAt(haystack, start, this.sets)) return start
+      c = this.kernel.find(c + 1, end, this.tables, this.m, false)
+    }
+    return -1
+  }
+}
+
+/** Literals spread over at most {@link Simd.MAX_BUCKETS} buckets. */
+const bucketsOf = (literals: ReadonlyArray<Uint8Array>): ReadonlyArray<ReadonlyArray<Uint8Array>> => {
+  const buckets: Array<Array<Uint8Array>> = []
+  literals.forEach((lit, i) => {
+    const k = i % Simd.MAX_BUCKETS
+    const bucket = buckets[k]
+    if (bucket === undefined) buckets[k] = [lit]
+    else bucket.push(lit)
+  })
+  return buckets
+}
+
+const startsAt = (haystack: Uint8Array, c: number, lit: Uint8Array): boolean => {
+  if (c + lit.length > haystack.length) return false
+  for (let k = 0; k < lit.length; k++) if (haystack[c + k] !== lit[k]) return false
+  return true
+}
+
+const setsAt = (haystack: Uint8Array, start: number, sets: ReadonlyArray<Uint8Array>): boolean => {
+  if (start + sets.length > haystack.length) return false
+  for (let i = 0; i < sets.length; i++) if (sets[i]?.includes(haystack[start + i] ?? -1) !== true) return false
+  return true
+}
+
+/** How common a set's bytes are together (see {@link frequency}). */
+const setCost = (set: ArrayLike<number>): number => {
+  let cost = 0
+  for (let i = 0; i < set.length; i++) cost += frequency(set[i] ?? 0)
+  return cost
+}
+
+/**
+ * A finder for literals: the kernel's Teddy search for several (or for one
+ * without a rare byte), otherwise {@link LiteralFinder}'s memchr.
+ *
+ * @since 0.0.0
+ */
+export const literalFinder = (literals: ReadonlyArray<Uint8Array>): Finder => {
+  const shortest = Math.min(...literals.map((lit) => lit.length))
+  const single = literals.length === 1 && rareAnchor(literals[0] ?? new Uint8Array()) >= 0
+  // With no literals, the shortest is infinite and nothing is found either way.
+  const kernel = single || shortest < 1 || !Number.isFinite(shortest) ? undefined : Simd.kernel()
+  if (kernel === undefined) return new LiteralFinder(literals)
+  const m = Math.min(Simd.MAX_POSITIONS, shortest)
+  const buckets = bucketsOf(literals)
+  const positions = Array.from({ length: m }, (_, j) => buckets.map((bucket) => bucket.map((lit) => lit[j] ?? 0)))
+  const tables = kernel.tables(Simd.nibbleTables(positions))
+  return tables < 0 ? new LiteralFinder(literals) : new TeddyFinder(kernel, tables, m, literals)
+}
+
+/**
+ * A finder for a byte-set sequence: the kernel, on the three positions in a
+ * row whose bytes are rarest together, unless one position's bytes are rare
+ * enough for {@link SequenceFinder}'s memchr.
+ *
+ * @since 0.0.0
+ */
+export const sequenceFinder = (sets: ReadonlyArray<Uint8Array>): Finder => {
+  const rarest = Math.min(...sets.map(setCost))
+  const fits = sets.every((set) => set.length <= Simd.MAX_BUCKETS)
+  const kernel = rarest <= RARE || !fits || !Number.isFinite(rarest) ? undefined : Simd.kernel()
+  if (kernel === undefined) return new SequenceFinder(sets)
+  const m = Math.min(Simd.MAX_POSITIONS, sets.length)
+  let window = 0
+  for (let w = 1; w + m <= sets.length; w++) {
+    const cost = (at: number) => sets.slice(at, at + m).reduce((c, set) => c + setCost(set), 0)
+    if (cost(w) < cost(window)) window = w
+  }
+  const positions = sets.slice(window, window + m).map((set) => Array.from(set, (b) => [b]))
+  const tables = kernel.tables(Simd.nibbleTables(positions))
+  return tables < 0 ? new SequenceFinder(sets) : new SimdSequenceFinder(kernel, tables, window, m, sets)
 }
