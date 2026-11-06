@@ -71,7 +71,9 @@ catalog:
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges. `pnpm pack`
 # (scripts/release.sh) replaces `catalog:peers` with these ranges in the
-# published manifest. Raising the `effect` floor is a breaking change.
+# published manifest. The `effect` peer is `^4.0.0` (owner policy): raise it
+# only when a dependency requires a newer `effect`, naming that dependency and
+# its range here. Raising the floor is a breaking change.
 catalogs:
   peers:
     effect: ^4.0.0
