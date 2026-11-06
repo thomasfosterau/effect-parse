@@ -1,17 +1,19 @@
 # Dependabot version updates, shaped like the owner's other Effect libraries.
 #
-# Groups are matched top to bottom and the FIRST match wins, so they run from
-# specific to general:
+# A group exists only for dependencies that MUST move together (one release
+# train, or a hard compatibility table), so updating one alone breaks the
+# install or the build. Everything else (`@enfect/oxlint`, the changesets CLI,
+# fallow, `@types/node`, …) arrives as its own PR:
 #
 # - `toolchain`: vite-plus pins `oxlint`, `oxfmt` and `vitest` exactly, and
 #   `effect-tsgo patch` (the `prepare` script) matches the native `tsc`
 #   (`@typescript/native`) and that `oxlint` by gitHead / version and
 #   hard-errors (UnsupportedTargetPackageVersionError) on any pairing it has
 #   no artifact for. A PR moving one of them alone fails `pnpm install`, so
-#   they move as ONE group, with the TS6 alias (`typescript`, published as
-#   `@typescript/typescript6`) and the Effect lint plugin (`@enfect/oxlint`)
-#   that loads inside oxlint. Check the `components` table in
+#   they move as ONE group. Check the `components` table in
 #   node_modules/@effect/tsgo/dist/effect-tsgo.cjs before merging.
+#   `@enfect/oxlint` is not in it: it takes `@oxlint/plugins` as a range, so
+#   nothing ties it to vite-plus's oxlint.
 #
 #   Dependabot does not update `npm:` alias specifiers, and the catalog has
 #   three: `vite` (vite-plus's core), `typescript` (TS6) and
@@ -27,10 +29,6 @@
 #   `pnpm install` fails at once, naming the version, if it is missing.
 # - `effect`: the Effect 4 release line is a lockstep-versioned singleton set
 #   (`@effect/tsgo` is in `toolchain`, so it is excluded here).
-# - `changesets`, `fallow`: their own cadence.
-# - `minor-and-patch`: everything else, minor and patch only; a major of a
-#   remaining dependency arrives as its own PR.
-#
 # There is no benchmark-library group: the benchmarks compare against the
 # native `JSON.parse` only, and nothing else is benchmarked against.
 #
@@ -76,21 +74,19 @@ updates:
       - dependency-name: "vitest"
       - dependency-name: "@vitest/coverage-istanbul"
     groups:
+      # vite-plus pins vitest / oxlint exactly; @effect/tsgo's patch supports
+      # only the oxlint / tsgolint / tsc versions its components table lists.
       toolchain:
         applies-to: version-updates
         patterns:
           - "vite-plus"
           - "@voidzero-dev/*"
           - "@vitest/*"
-          - "oxlint"
-          - "oxfmt"
-          - "oxlint-tsgolint"
           - "@effect/tsgo"
           - "@typescript/native"
           - "typescript"
-          - "@typescript/typescript6"
-          - "@enfect/oxlint"
         update-types: ["major", "minor", "patch"]
+      # One release train: the Effect 4 packages share one version.
       effect:
         applies-to: version-updates
         patterns:
@@ -99,21 +95,6 @@ updates:
         exclude-patterns:
           - "@effect/tsgo"
         update-types: ["major", "minor", "patch"]
-      changesets:
-        applies-to: version-updates
-        patterns:
-          - "@changesets/*"
-        update-types: ["major", "minor", "patch"]
-      fallow:
-        applies-to: version-updates
-        patterns:
-          - "fallow"
-        update-types: ["major", "minor", "patch"]
-      minor-and-patch:
-        applies-to: version-updates
-        patterns:
-          - "*"
-        update-types: ["minor", "patch"]
   - package-ecosystem: "github-actions"
     directories:
       - "/"
@@ -129,7 +110,3 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "ci"
-    groups:
-      github-actions:
-        patterns:
-          - "*"

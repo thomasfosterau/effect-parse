@@ -39,11 +39,12 @@ catalog:
   # by oxlint as a JS plugin; successor of @mpsuesser/oxlint-plugin-effect.
   # 0.9.0 depends on `effect` 4.1.0 (exact), which the `effect` override below
   # forces onto the singleton. Its `vite.config.ts` load calls Effect APIs, so
-  # an `effect` bump re-runs `vp check` against the plugin too; it moves with
-  # the `toolchain` Dependabot group, since it runs inside vite-plus's oxlint.
+  # an `effect` bump re-runs `vp check` against the plugin too. Ungrouped in
+  # Dependabot: it takes `@oxlint/plugins` as a range, so it is not tied to
+  # vite-plus's oxlint.
   "@enfect/oxlint": ^0.9.0
   effect: 4.1.1
-  fallow: 3.37.0
+  fallow: 3.40.0
   # `scripts/check-dist.mjs` parses the built `dist/` with `rolldown/parseAst`.
   rolldown: ^1.2.14
   # TypeScript 6/7 side-by-side: TS7 (the native Go compiler) ships no JS API
