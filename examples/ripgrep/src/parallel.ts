@@ -5,7 +5,7 @@
  *
  * @since 0.0.0
  */
-import { Worker } from "node:worker_threads"
+import type { Worker } from "node:worker_threads"
 import * as Arr from "effect/Array"
 import type { FileOutcome, FileSearch } from "./main.ts"
 import type * as Printers from "./print/printer.ts"
@@ -161,7 +161,12 @@ export const run = (
 ): Promise<number> =>
   new Promise((resolve, reject) => {
     const assembler = new Assembler(search, options, totals)
-    const workers = Array.from({ length: options.workers }, () => new Worker(options.url, { workerData: options.data }))
+    // Loaded on first use: most searches stay on one thread.
+    const Threads = process.getBuiltinModule("node:worker_threads")
+    const workers = Array.from(
+      { length: options.workers },
+      () => new Threads.Worker(options.url, { workerData: options.data })
+    )
     let taken = 0
     let written = 0
     let finished = false

@@ -80,7 +80,6 @@ const isSpace = (b: number): boolean => b === 0x20 || (b >= 0x09 && b <= 0x0d)
  */
 export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
   let filesPrinted = 0
-  const lt = new Uint8Array([o.lineTerminator])
 
   const colored = (target: Color.ColorTarget, text: string | Uint8Array) => {
     const spec = o.colors?.get(target)
@@ -97,14 +96,16 @@ export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
 
   const file = (info: FileInfo): FilePrinter => {
     let started = false
+    // The path, encoded once per file: it may be printed on every line.
+    const pathBytes = new TextEncoder().encode(info.path)
     const writePath = (line: number, column: number) => {
       if (o.hyperlink !== undefined && o.colors !== undefined && o.hyperlink.format !== "") {
         const url = Color.hyperlink(o.hyperlink.format, o.hyperlink.host, info.absolute, line, column)
         out.text(`\x1b]8;;${url}\x1b\\`)
-        colored("path", info.path)
+        colored("path", pathBytes)
         out.text("\x1b]8;;\x1b\\")
       } else {
-        colored("path", info.path)
+        colored("path", pathBytes)
       }
     }
     let began: FileEnd["began"] = "no"
@@ -126,7 +127,9 @@ export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
         out.text(o.nullPath ? "\0" : sep)
       }
       if (o.lineNumber) {
-        colored("line", String(lineNumber))
+        const spec = o.colors?.get("line")
+        if (spec === undefined) out.decimal(lineNumber)
+        else colored("line", String(lineNumber))
         out.text(sep)
       }
       if (o.column && column !== undefined) {
@@ -151,11 +154,11 @@ export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
       for (const m of matches) {
         if (m.end <= start || m.start >= end) continue
         const s = Math.max(m.start, start)
-        if (s > pos) out.bytes(buffer.subarray(pos, s))
+        if (s > pos) out.range(buffer, pos, s)
         if (m.start >= start) colored("match", Printers.expand(template, buffer, m.groups, m.start, m.end))
         pos = Math.min(m.end, end)
       }
-      if (pos < end) out.bytes(buffer.subarray(pos, end))
+      if (pos < end) out.range(buffer, pos, end)
     }
 
     /** Writes `[start, end)` of a line, colouring the parts inside `matches`. */
@@ -165,16 +168,16 @@ export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
         const s = Math.max(m.start, start)
         const e = Math.min(m.end, end)
         if (e <= s) continue
-        if (s > pos) out.bytes(buffer.subarray(pos, s))
+        if (s > pos) out.range(buffer, pos, s)
         colored("match", buffer.subarray(s, e))
         pos = e
       }
-      if (pos < end) out.bytes(buffer.subarray(pos, end))
+      if (pos < end) out.range(buffer, pos, end)
     }
 
     const content = (buffer: Uint8Array, start: number, end: number, matches: ReadonlyArray<Match>) => {
       if (o.replace !== undefined) replaced(buffer, start, end, matches, o.replace)
-      else if (o.colors === undefined) out.bytes(buffer.subarray(start, end))
+      else if (o.colors === undefined) out.range(buffer, start, end)
       else highlighted(buffer, start, end, matches)
     }
 
@@ -223,7 +226,7 @@ export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
       } else {
         content(buffer, bodyStart, bodyEnd, matches)
       }
-      out.bytes(lt)
+      out.byte(o.lineTerminator)
       out.endLine()
     }
 
@@ -258,7 +261,7 @@ export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
           ? buffer.subarray(m.start, m.end)
           : Printers.expand(o.replace, buffer, m.groups, m.start, m.end)
       )
-      out.bytes(lt)
+      out.byte(o.lineTerminator)
       out.endLine()
     }
 
@@ -274,7 +277,8 @@ export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
       for (let s = lines.start; s < lines.end; n++) {
         const i = buffer.indexOf(o.lineTerminator, s)
         const e = i < 0 || i >= lines.end ? lines.end : i + 1
-        line(buffer, s, e, { lineNumber: n, column: columnOf(matches, s, e) }, matches, "matching")
+        const column = o.column ? columnOf(matches, s, e) : undefined
+        line(buffer, s, e, { lineNumber: n, column }, matches, "matching")
         s = e
       }
     }

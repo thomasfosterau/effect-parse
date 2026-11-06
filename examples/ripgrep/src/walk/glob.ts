@@ -119,6 +119,46 @@ const fold = (regex: Regex): Regex => {
   }
 }
 
+const plain = /^[^*?[\]{}\\]+$/
+const extension = /^(\*\*\/)?\*([^*?[\]{}\\/]+)$/
+const basename = /^\*\*\/([^*?[\]{}\\/]+)$/
+
+const endsWith = (path: Uint8Array, suffix: Uint8Array): boolean => {
+  const offset = path.length - suffix.length
+  if (offset < 0) return false
+  for (let i = 0; i < suffix.length; i++) if (path[offset + i] !== suffix[i]) return false
+  return true
+}
+
+const equals = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && endsWith(a, b)
+
+/**
+ * The common globs without the regex engine, as ripgrep's globset matches
+ * them: a literal path, a file extension (`*.rs`, at any depth after a
+ * leading `**` and slash) and a name at any depth (`Makefile` after them).
+ */
+const quickMatcher = (source: string): ((path: Uint8Array) => boolean) | undefined => {
+  const encoder = new TextEncoder()
+  if (plain.test(source)) {
+    const literal = encoder.encode(source)
+    return (path) => equals(path, literal)
+  }
+  const ext = extension.exec(source)
+  if (ext !== null) {
+    const suffix = encoder.encode(ext[2] ?? "")
+    // Without `**/`, the `*` cannot cross a `/`.
+    const anyDepth = ext[1] !== undefined
+    return (path) => endsWith(path, suffix) && (anyDepth || path.indexOf(0x2f) < 0)
+  }
+  const name = basename.exec(source)
+  if (name !== null) {
+    const literal = encoder.encode(name[1] ?? "")
+    const slashed = encoder.encode(`/${name[1] ?? ""}`)
+    return (path) => equals(path, literal) || endsWith(path, slashed)
+  }
+  return undefined
+}
+
 /**
  * Compiles a glob, or returns an error message for a malformed one. With
  * `caseInsensitive`, letters match either case.
@@ -133,6 +173,8 @@ const fold = (regex: Regex): Regex => {
  * @since 0.0.0
  */
 export const compileGlob = (source: string, caseInsensitive: boolean): Result.Result<Glob, string> => {
+  const quick = caseInsensitive ? undefined : quickMatcher(source)
+  if (quick !== undefined) return Result.succeed({ source, matches: quick })
   const parsed = Parser.parse(glob, source)
   if (Result.isFailure(parsed)) return Result.fail(`error parsing glob '${source}': ${parsed.failure.message}`)
   const body = caseInsensitive ? fold(parsed.success) : parsed.success

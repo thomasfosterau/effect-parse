@@ -5,7 +5,6 @@
  *
  * @since 0.0.0
  */
-import * as ChildProcess from "node:child_process"
 import * as Fs from "node:fs"
 import * as Os from "node:os"
 import * as Path from "node:path"
@@ -85,7 +84,8 @@ const readPatternFile = (file: string, env: Environment): ReadonlyArray<string> 
 
 const hostname = (args: Args): string => {
   if (args.hostnameBin === undefined) return Os.hostname()
-  const r = ChildProcess.spawnSync(args.hostnameBin, { encoding: "utf8" })
+  // Loaded on first use: most runs never start a process.
+  const r = process.getBuiltinModule("node:child_process").spawnSync(args.hostnameBin, { encoding: "utf8" })
   return r.status === 0 ? r.stdout.trim() : Os.hostname()
 }
 
