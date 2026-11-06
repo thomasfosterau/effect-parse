@@ -6,7 +6,7 @@
  * time is only reported for a correct answer.
  *
  * ```sh
- * node bench/compare.ts              # bundles erg, then a 12 MB corpus, 5 runs per case
+ * node bench/compare.ts              # bundles erg, then a 32 MB corpus, 5 runs per case
  * node bench/compare.ts --files 800 --lines 4000 --runs 10
  * node bench/compare.ts --corpus ~/src/linux --cases literal,word
  * node bench/compare.ts --backends jit,closure,none --json results.json
@@ -113,7 +113,7 @@ const { values: options } = parseArgs({
     corpus: { type: "string" },
     cases: { type: "string" },
     tools: { type: "string" },
-    backends: { type: "string", default: "jit,closure" },
+    backends: { type: "string", default: "jit" },
     json: { type: "string" },
     "no-verify": { type: "boolean", default: false }
   }
