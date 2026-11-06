@@ -55,7 +55,7 @@ Before you report work as done, run the gates below in order and quote each comm
 6. `vp run build`
 7. `vp run check:dist`
 8. `pnpm audit --audit-level high` (network)
-9. `vp run test:coverage`, then `fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` (the fallow gate below; not a CI step).
+9. `vp run test:coverage`, then `vp exec fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` (the fallow gate below; not a CI step).
 
 Steps 2–8 are CI's required `ci` job, in its order ([ci.yml](.github/workflows/ci.yml)). A change to a hot path also reports `vp run bench` (and the benchmark for the area touched) before and after. `CONTRIBUTING.md` and the PR template link here rather than restating the list.
 
@@ -78,8 +78,8 @@ Never guess at an Effect API. Read the installed package: `node_modules/effect/d
 
 ## Agent sessions
 
-- The SessionStart hook (`.claude/hooks/session-start.sh`) installs dependencies against the lockfile with pnpm and puts `vp` (a re-exec shim that prefers the nearest worktree's `node_modules`) and `fallow` on PATH for non-interactive shells. It hydrates no secrets; none are needed, and nothing here can publish.
-- A PreToolUse hook (`.claude/hooks/fallow-gate.sh`) blocks `git commit` / `git push` when `fallow audit --base origin/trunk` fails; it reads the coverage map on disk, so run `vp run test:coverage` first. A PostToolUse hook runs `vp fmt` on every source, JSON, CSS or Markdown file you write or edit.
+- The SessionStart hook (`.claude/hooks/session-start.sh`) installs the global Vite+ CLI at the catalog's `vite-plus` pin with the official installer (npm-provenance and SHA-512 checked; it needs `vite.plus` and `viteplus.dev` on the environment's network allowlist), links `vp` and `vpx` into `~/.local/bin`, and runs `vp install --frozen-lockfile`. The global `vp` delegates to each checkout's own `vite-plus` (worktrees included), and everything else goes through it: `vp exec fallow …` for fallow, `vpx <file>.ts` for a TypeScript script. Nothing else is put on PATH. If the installer can't run, `vp` falls back to this checkout's `node_modules` copy. It hydrates no secrets; none are needed, and nothing here can publish.
+- A PreToolUse hook (`.claude/hooks/fallow-gate.sh`) blocks `git commit` / `git push` when `fallow audit --base origin/trunk` (run as `vp exec fallow`) fails; it audits only this checkout and its `.claude/worktrees/*`, skipping any other tree with a notice, and reads the coverage map on disk, so run `vp run test:coverage` first. A PostToolUse hook runs `vp fmt` on every source, JSON, CSS or Markdown file you write or edit.
 - Every gate in [Verification](#verification) runs in an agent session; `pnpm audit` needs the network.
 
 ## Documentation surfaces
