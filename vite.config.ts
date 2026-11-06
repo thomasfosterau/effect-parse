@@ -391,6 +391,51 @@ export default defineConfig({
           "effect/avoid-ts-ignore": "off"
         }
       },
+      // ---- examples/ripgrep: ripgrep's command line on effect-parse --------
+      // `erg` is a command-line program run by `bin/erg.ts` in bare Node, with
+      // no Effect runtime and no platform layer (`@effect/platform-node` is not
+      // a dependency of this repository), and its benchmark harness and tests
+      // spawn the tools they compare. `node:*` modules, `process`, and
+      // `try`/`catch` around Node's throwing APIs (the caught value arriving
+      // as `unknown`) are all it has for I/O, as in `scripts/**`.
+      {
+        files: ["examples/ripgrep/**"],
+        rules: {
+          "effect/avoid-node-imports": "off",
+          "effect/avoid-sync-fs": "off",
+          "effect/avoid-process-env": "off",
+          "effect/avoid-try-catch": "off",
+          "effect/use-filesystem-service": "off",
+          "effect/use-path-service": "off",
+          "effect/use-command-executor-service": "off",
+          "effect/use-temp-file-scoped": "off",
+          "effect/no-unknown-parameters": "off"
+        }
+      },
+      // Its matcher and searcher are the same kind of code as the parser
+      // runtime in `src/**`, and the reasons recorded there for these rules
+      // apply unchanged: loops over the bytes of a buffer, its lines and the
+      // code point ranges of a class (`imperative-loops`); `undefined` as the
+      // absent value of the step protocol, of `Parser.optional` and of the
+      // `?: T | undefined` options (`prefer-option-over-null`; a match search
+      // runs once per match, where an `Option` allocates); mutable lookup
+      // tables keyed by code point, flag or name, built once
+      // (`avoid-native-object-helpers`); and exhaustive `switch`es over the
+      // regex syntax tree, which tsc checks (`prefer-match-over-switch`,
+      // `avoid-direct-tag-checks`). `JSON.stringify` writes ripgrep's `--json`
+      // records and quoted literals in messages, compared byte for byte with
+      // ripgrep's own output (`avoid-direct-json`).
+      {
+        files: ["examples/ripgrep/**"],
+        rules: {
+          "effect/imperative-loops": "off",
+          "effect/prefer-option-over-null": "off",
+          "effect/avoid-native-object-helpers": "off",
+          "effect/prefer-match-over-switch": "off",
+          "effect/avoid-direct-tag-checks": "off",
+          "effect/avoid-direct-json": "off"
+        }
+      },
       // Build/test configs and the dist guard are evaluated in bare Node,
       // before any Effect runtime exists — there is no `Config` provider to
       // read from and no `FileSystem` service to call, so `process.env` and
@@ -531,7 +576,9 @@ export default defineConfig({
     }
   },
   test: {
-    include: ["test/**/*.test.ts"],
+    // The example packages' suites run with the library's: examples/ripgrep
+    // checks its output against ripgrep's when `rg` is installed.
+    include: ["test/**/*.test.ts", "examples/*/test/**/*.test.ts"],
     ...(maxWorkers === undefined ? {} : { maxWorkers: Number(maxWorkers) }),
     coverage: {
       provider: "istanbul",
@@ -539,9 +586,15 @@ export default defineConfig({
       // reads (`health.coverage` in .fallowrc.json).
       reporter: ["text-summary", "json-summary", "json"],
       reportsDirectory: "./coverage",
-      include: ["src/**/*.ts"],
+      include: ["src/**/*.ts", "examples/ripgrep/src/**/*.ts"],
       exclude: ["**/*.d.ts"],
-      thresholds: { statements: 90, branches: 85, functions: 90, lines: 90 }
+      // Per glob, so the library's floor covers the library alone, as it did
+      // before the example's sources were measured (a top-level threshold
+      // counts every included file).
+      thresholds: {
+        "src/**/*.ts": { statements: 90, branches: 85, functions: 90, lines: 90 },
+        "examples/ripgrep/src/**/*.ts": { statements: 80, branches: 70, functions: 80, lines: 80 }
+      }
     }
   }
 })

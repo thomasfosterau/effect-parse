@@ -1,6 +1,7 @@
 # pnpm workspace settings for the single published package
-# `@thomasfosterau/effect-parse` (no `packages:` list: the root is the only
-# project). Shaped like the owner's other Effect libraries (effect-web,
+# `@thomasfosterau/effect-parse` (the root project) and the private example
+# packages under `examples/` that consume it by name, as a dependent library
+# would. Shaped like the owner's other Effect libraries (effect-web,
 # effect-schema-ext).
 #
 # EVERY external dependency version lives here — package.json references only
@@ -10,6 +11,11 @@
 # pnpm-lock.yaml — a stale lockfile fails CI at once with
 # ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
 catalogMode: strict
+
+# Private, never published: examples that depend on the root package through
+# `workspace:*` (examples/ripgrep: a ripgrep-compatible CLI and benchmarks).
+packages:
+  - examples/ripgrep
 
 catalog:
   "@changesets/changelog-github": ^1.0.1
