@@ -739,10 +739,11 @@ const lineStrategies = (
  * pass: the matcher runs only where a match starts, so the first attempt
  * succeeds. The starts are kept for the next search in the same line
  * (after a match, with `-o` or colors); `scan` takes over when the DFA
- * runs out of states.
+ * runs out of states, or the reversed regex has none (`make` builds it on
+ * first use).
  */
 const reverseScan = (
-  reverse: LineDfa,
+  make: () => LineDfa | undefined,
   t: number,
   attempt: (state: Input.State<Bytes>, s: number) => number,
   found: (s: number, e: number) => Match,
@@ -752,7 +753,14 @@ const reverseScan = (
   let lineEnd = -1
   const starts: Array<number> = []
   let ok = true
+  let reverse: LineDfa | undefined
+  let made = false
   return (state, from, to) => {
+    if (!made) {
+      made = true
+      reverse = make()
+    }
+    if (reverse === undefined) return scan(state, from, to)
     if (state.input !== input || to !== lineEnd) {
       input = state.input
       lineEnd = to
@@ -880,8 +888,10 @@ export const compile = (regex: Regex, groups: number, lineTerminator: number, op
     }
     return undefined
   }
-  const reverse = options.multiline ? undefined : LineDfa.make(regex, lineTerminator, true)
-  const inLine = reverse === undefined ? scan : reverseScan(reverse, lineTerminator, attempt, found, scan)
+  // Built on first use: a search that only counts lines never needs it
+  const inLine = options.multiline
+    ? scan
+    : reverseScan(() => LineDfa.make(regex, lineTerminator, true), lineTerminator, attempt, found, scan)
   const { find, line } = strategy(regex, first, options, lineTerminator, attempt, found, scan, inLine)
   const takeOverflow = () => {
     const at = overflow
