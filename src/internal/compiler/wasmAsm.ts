@@ -123,6 +123,7 @@ export const Simd = {
   i8x16AllTrue: 0x63,
   i8x16Bitmask: 0x64,
   i8x16ShrU: 0x6d,
+  i8x16RelaxedSwizzle: 0x100,
   i16x8ExtendLowI8x16U: 0x89,
   i16x8ExtendHighI8x16U: 0x8a
 } as const
