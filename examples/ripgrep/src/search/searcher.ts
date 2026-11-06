@@ -236,11 +236,26 @@ class Search {
       return undefined
     }
     const matches = [first]
+    const start = this.lineStartOf(first.start)
     const end = this.extendGroup(first, matches)
     this.searchFrom = end
     // A group that reaches the last line leaves nothing to search after it.
     if (end >= this.limit && this.pending === undefined) this.exhausted = true
-    return { start: lineStart(this.buffer, this.t, first.start), end, matches }
+    return { start, end, matches }
+  }
+
+  /**
+   * The start of the line holding `offset`. The search resumes at a line
+   * start (the last group's end), so when no terminator lies between there
+   * and `offset`, that is it: one forward search instead of a backward one.
+   */
+  private lineStartOf(offset: number): number {
+    const from = this.searchFrom
+    if (from <= offset) {
+      const nl = this.buffer.indexOf(this.t, from)
+      if (nl < 0 || nl >= offset) return from
+    }
+    return lineStart(this.buffer, this.t, offset)
   }
 
   /**
@@ -374,7 +389,7 @@ export const search = (input: Uint8Array, options: SearchOptions, sink: Sink): S
   if (options.lazyBinary && options.binary !== "none" && !anyMatch(buffer, options)) return noMatch(buffer.length)
   const { limit, nul } = binaryLimit(buffer, options)
   const withheld = options.binary === "convert" && nul !== undefined && nul < BUFFER
-  const { hits, matchedLines, matches } = report(new Search(buffer, options, sink, limit), buffer, options, withheld)
+  const { hits, matchedLines, matches } = report(new Search(buffer, options, sink, limit), options, withheld)
   const quit = options.binary === "quit" && nul !== undefined
   return {
     bytesSearched: limit,
@@ -399,7 +414,7 @@ interface Counts {
 }
 
 /** Reports every hit, with its context, up to `--max-count`; returns the counts. */
-const report = (run: Search, buffer: Uint8Array, options: SearchOptions, withheld: boolean): Counts => {
+const report = (run: Search, options: SearchOptions, withheld: boolean): Counts => {
   const next = options.invert ? () => run.nextInverted() : () => run.nextGroup()
   let matchedLines = 0
   let matches = 0
@@ -412,7 +427,9 @@ const report = (run: Search, buffer: Uint8Array, options: SearchOptions, withhel
     run.emitHit(hit, withheld)
     hits++
     // In multiline mode ripgrep counts each match group as one matching line.
-    matchedLines += options.multiline ? 1 : countLines(buffer, options.lineTerminator, hit.start, hit.end)
+    // A hit is one line outside multiline mode; in it, ripgrep counts a match
+    // group as one line.
+    matchedLines++
     matches += options.invert ? 0 : hit.matches.length
     cursor = hit.end
   }
@@ -435,10 +452,4 @@ const afterContextEnd = (b: Uint8Array, t: number, from: number, limit: number, 
   let end = from
   for (let i = 0; i < n && end < limit; i++) end = lineEnd(b, t, end, limit)
   return end
-}
-
-const countLines = (b: Uint8Array, t: number, start: number, end: number): number => {
-  let n = 0
-  for (let i = b.indexOf(t, start); i >= 0 && i < end; i = b.indexOf(t, i + 1)) n++
-  return end > start && b[end - 1] !== t ? n + 1 : Math.max(n, 1)
 }

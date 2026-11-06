@@ -58,7 +58,8 @@ export class LiteralFinder {
     const lit = this.literals[i] ?? new Uint8Array()
     const a = this.anchors[i] ?? -1
     const view = this.view
-    if (a < 0) return view.indexOf(lit, pos)
+    // A one-byte needle as a number: Buffer#indexOf's memchr path.
+    if (a < 0) return lit.length === 1 ? view.indexOf(lit[0] ?? 0, pos) : view.indexOf(lit, pos)
     const n = lit.length
     const byte = lit[a]
     for (let c = view.indexOf(byte, pos + a); c >= 0; c = view.indexOf(byte, c + 1)) {

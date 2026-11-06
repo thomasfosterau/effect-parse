@@ -554,7 +554,7 @@ const sequential = (search: FileSearch, each: (visit: (entry: Walk.Entry) => voi
  * Roughly how fast one thread searches, in bytes per millisecond, for each
  * kind of matcher (measured on the benchmark corpus).
  */
-const throughput: Record<Compile.Cost, number> = { literal: 800_000, literals: 300_000, regex: 40_000 }
+const throughput: Record<Compile.Cost, number> = { literal: 1_500_000, literals: 300_000, regex: 150_000 }
 
 /** Workers pay off when a search would take longer than this on one thread. */
 const PARALLEL_MS = 200

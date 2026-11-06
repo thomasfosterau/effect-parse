@@ -183,18 +183,19 @@ let everyScalar: string | undefined
 
 const scalars = (): string => {
   if (everyScalar === undefined) {
-    const parts: Array<string> = []
-    const chunk = (from: number, to: number) => {
-      for (let start = from; start <= to; start += 0x1000) {
-        const end = Math.min(to, start + 0xfff)
-        const cps: Array<number> = []
-        for (let c = start; c <= end; c++) cps.push(c)
-        parts.push(String.fromCodePoint(...cps))
-      }
+    // Every scalar as UTF-16 code units, decoded in one native call: several
+    // times faster than building the string from code points in chunks.
+    const bmp = SURROGATE_START + (0x10000 - (SURROGATE_END + 1))
+    const units = new Uint16Array(bmp + 2 * (MAX + 1 - 0x10000))
+    let at = 0
+    for (let c = 0; c < SURROGATE_START; c++) units[at++] = c
+    for (let c = SURROGATE_END + 1; c < 0x10000; c++) units[at++] = c
+    for (let c = 0x10000; c <= MAX; c++) {
+      const v = c - 0x10000
+      units[at++] = 0xd800 | (v >> 10)
+      units[at++] = 0xdc00 | (v & 0x3ff)
     }
-    chunk(0, SURROGATE_START - 1)
-    chunk(SURROGATE_END + 1, MAX)
-    everyScalar = parts.join("")
+    everyScalar = new TextDecoder("utf-16le").decode(units)
   }
   return everyScalar
 }
