@@ -90,6 +90,28 @@ const MaxPositions = 3
 /** Teddy's buckets: one bit each in a nibble table's bytes. */
 const Buckets = 8
 
+/** For each low nibble, the high nibbles `from` to `from + 7` of the bytes `set` accepts, as bits from 0. */
+/** Whether `set` accepts any byte. */
+const accepts = (set: Membership): boolean =>
+  Array.from({ length: 256 }, (_, c) => (set.cs.table[c] === 1) !== set.negate).some((ok) => ok)
+
+const nibbleTable = (set: Membership, from: number): Array<number> => {
+  const table = new Array<number>(16).fill(0)
+  for (let c = from << 4; c < (from + 8) << 4; c++) {
+    if ((set.cs.table[c] === 1) !== set.negate) table[c & 15] = (table[c & 15] ?? 0) | (1 << ((c >> 4) - from))
+  }
+  return table
+}
+
+/** The most rejected bytes a vectorised `takeWhile` compares with one by one. */
+const MaxStops = 3
+
+/** For a high nibble `h` from 8 up, bit `h - 8`; none below. */
+const UpperNibbleBits: ReadonlyArray<number> = [0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 4, 8, 16, 32, 64, 128]
+
+/** For a high nibble `h`, bit `h` below 8 (ASCII), none above. */
+const HighNibbleBits: ReadonlyArray<number> = [1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0]
+
 const Zeros: ReadonlyArray<number> = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 const LowNibbles: ReadonlyArray<number> = [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]
 
@@ -1557,6 +1579,7 @@ class WasmCompiler {
     const wide = enc === utf8 && s.out !== "" ? b.local() : -1
     if (wide >= 0) b.i32(0).set(wide)
     b.block((stop) => {
+      if (!counted && this.vectorRun(enc, set)) this.byteRun(b, set, stop)
       b.loop((again) => {
         this.atEnd(b, 0)
         b.brIf(stop)
@@ -1572,6 +1595,102 @@ class WasmCompiler {
       this.failIf(b, s.fail)
     }
     return this.sliceValue(s, enc, st, wide)
+  }
+
+  /**
+   * The vector steps of an unbounded `takeWhile` on bytes, where every
+   * byte is a token: sixteen bytes, up to the first that is not accepted,
+   * which ends the run (most runs, tokens, end in the first sixteen); after
+   * sixteen accepted, thirty-two at a time while all are. The
+   * scalar loop takes the last fifteen bytes. Applies to `Token` and
+   * Latin-1 text on bytes, where SIMD validates. (UTF-8, whose bytes from
+   * 0x80 up are parts of code points, and strings, whose units are
+   * sixteen-bit, stay scalar: on the JSON benchmark, whose runs are short,
+   * a vector step there costs more than it saves.)
+   */
+  private byteRun(b: Body, set: Membership, stop: Label): void {
+    const x = b.localV128()
+    const y = b.localV128()
+    const accepted = this.acceptedBytes(b, set)
+    b.block((done) => {
+      b.loop((again) => {
+        this.end(b).get(0).op(Op.i32Sub).i32(16).op(Op.i32LtS).brIf(done)
+        b.get(0).simd(Simd.v128Load, 0, Input).set(x)
+        accepted(x)
+        b.tee(x).simd(Simd.i8x16AllTrue)
+        b.if(() => {
+          this.advance(b, 16)
+          // A run this long may be longer: thirty-two bytes at a time
+          b.block((short) => {
+            b.loop((more) => {
+              this.end(b).get(0).op(Op.i32Sub).i32(32).op(Op.i32LtS).brIf(short)
+              b.get(0).simd(Simd.v128Load, 0, Input).set(x)
+              b.get(0)
+                .simd(Simd.v128Load, 0, Input + 16)
+                .set(y)
+              accepted(x)
+              accepted(y)
+              b.simd(Simd.v128And).simd(Simd.i8x16AllTrue).op(Op.i32Eqz).brIf(short)
+              this.advance(b, 32)
+              b.br(more)
+            })
+          })
+          b.br(again)
+        })
+        // Up to the first byte that is not accepted: the end of the run
+        b.get(0).get(x).simd(Simd.i8x16Bitmask).i32(-1).op(Op.i32Xor).op(Op.i32Ctz).op(Op.i32Add).set(0)
+        b.br(stop)
+      })
+    })
+  }
+
+  /** Whether a `takeWhile` of `set` in `enc` has vector steps (see {@link byteRun}). */
+  private vectorRun(enc: Enc, set: Membership): boolean {
+    return this.kind === 1 && (enc === undefined || enc === latin1) && simd() && accepts(set)
+  }
+
+  /**
+   * Code that pushes, for the sixteen bytes in a local, 0xFF where the byte
+   * is accepted and 0 where not: comparisons with the rejected bytes when
+   * there are at most three of them (`takeTill` of a few stops), else two
+   * swizzles of nibble tables for each half of the byte values. Its
+   * constants are set up here, in locals.
+   */
+  private acceptedBytes(b: Body, set: Membership): (x: number) => void {
+    const rejected: Array<number> = []
+    for (let c = 0; c < 256 && rejected.length <= MaxStops; c++) {
+      if ((set.cs.table[c] === 1) === set.negate) rejected.push(c)
+    }
+    if (rejected.length <= MaxStops) {
+      const stops = rejected.map((c) => {
+        const l = b.localV128()
+        b.i32(c).simd(Simd.i8x16Splat).set(l)
+        return l
+      })
+      return (x) => {
+        b.v128(Zeros)
+        for (const l of stops) b.get(x).get(l).simd(Simd.i8x16Eq).simd(Simd.v128Or)
+        b.simd(Simd.v128Not)
+      }
+    }
+    const tables = [nibbleTable(set, 0), nibbleTable(set, 8)].map((table, k) => {
+      const lo = b.localV128()
+      const bits = b.localV128()
+      b.v128(table)
+        .set(lo)
+        .v128(k === 0 ? HighNibbleBits : UpperNibbleBits)
+        .set(bits)
+      return [lo, bits] as const
+    })
+    return (x) => {
+      tables.forEach(([lo, bits], k) => {
+        b.get(lo).get(x).v128(LowNibbles).simd(Simd.v128And).simd(Simd.i8x16Swizzle)
+        b.get(bits).get(x).i32(4).simd(Simd.i8x16ShrU).simd(Simd.i8x16Swizzle)
+        b.simd(Simd.v128And)
+        if (k > 0) b.simd(Simd.v128Or)
+      })
+      b.v128(Zeros).simd(Simd.i8x16Ne)
+    }
   }
 
   /** One code point of a `takeWhile`: advances past it, or branches to `stop`. */
@@ -1653,7 +1772,16 @@ class WasmCompiler {
     const st = b.local()
     const c = b.local()
     const mask = b.local()
-    const v = b.localV128()
+    const acc = b.localV128()
+    // The tables and the nibble mask, in locals for the loop
+    const nibbles = b.localV128()
+    b.v128(LowNibbles).set(nibbles)
+    const tables = teddyTables(bytes, m).map(([lo, hi]) => {
+      const l = b.localV128()
+      const h = b.localV128()
+      b.v128(lo).set(l).v128(hi).set(h)
+      return [l, h] as const
+    })
     b.get(0).set(st)
     b.block((found) => {
       b.block((tail) => {
@@ -1665,23 +1793,28 @@ class WasmCompiler {
             .i32(15 + m)
             .op(Op.i32LtS)
             .brIf(tail)
-          teddyTables(bytes, m).forEach(([lo, hi], j) => {
+          tables.forEach(([lo, hi], j) => {
             b.get(0)
               .simd(Simd.v128Load, 0, Input + j)
-              .set(v)
-            b.v128(lo).get(v).v128(LowNibbles).simd(Simd.v128And).simd(Simd.i8x16Swizzle)
-            b.v128(hi).get(v).i32(4).simd(Simd.i8x16ShrU).simd(Simd.i8x16Swizzle)
+              .set(acc)
+            b.get(lo).get(acc).get(nibbles).simd(Simd.v128And).simd(Simd.i8x16Swizzle)
+            b.get(hi).get(acc).i32(4).simd(Simd.i8x16ShrU).simd(Simd.i8x16Swizzle)
             b.simd(Simd.v128And)
             if (j > 0) b.simd(Simd.v128And)
           })
-          b.v128(Zeros).simd(Simd.i8x16Ne).simd(Simd.i8x16Bitmask).tee(mask).op(Op.i32Eqz)
+          b.tee(acc).simd(Simd.v128AnyTrue).op(Op.i32Eqz)
           b.if(() => {
             this.advance(b, 16)
             b.br(again)
           })
-          b.get(0).get(mask).op(Op.i32Ctz).op(Op.i32Add).set(c)
-          this.literalAt(b, bytes, c, found)
-          b.get(c).i32(1).op(Op.i32Add).set(0)
+          // Each candidate of the sixteen, in order, checked in full
+          b.get(acc).v128(Zeros).simd(Simd.i8x16Ne).simd(Simd.i8x16Bitmask).set(mask)
+          b.loop((bits) => {
+            b.get(0).get(mask).op(Op.i32Ctz).op(Op.i32Add).set(c)
+            this.literalAt(b, bytes, c, found)
+            b.get(mask).get(mask).i32(1).op(Op.i32Sub).op(Op.i32And).tee(mask).brIf(bits)
+          })
+          this.advance(b, 16)
           b.br(again)
         })
       })

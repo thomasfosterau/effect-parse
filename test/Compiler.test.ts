@@ -922,6 +922,40 @@ describe("compiled combinators", () => {
     })
   })
 
+  it("takeWhile and takeTill over long runs (SIMD in WebAssembly)", () => {
+    const random = rng(23)
+    const alphabet = ["a", "b", " ", "0", "\\", '"', "é", "😀", "\ud800", "\u0100", "\u00ff", "\u7fff", "\u8000"]
+    const text = () =>
+      Array.from({ length: Math.floor(random() * 120) }, () =>
+        // Mostly runs of one class, so the vector steps are taken
+        random() < 0.9 ? "ab "[Math.floor(random() * 3)] : alphabet[Math.floor(random() * alphabet.length)]
+      ).join("")
+    const grammar = (T: typeof Text.string | typeof Text.utf8) =>
+      Parser.repeat(
+        Parser.alt(T.takeWhile("ab", { min: 1 }), T.takeTill('\\"0', { min: 1 }), T.takeWhile(" ", { min: 1 }), T.any)
+      )
+    ;[Text.string, Text.utf8, Text.latin1].forEach((T) => {
+      const p = grammar(T)
+      Array.from({ length: 300 }).forEach(() => {
+        const input = text()
+        if (T === Text.latin1 && beyondLatin1(input)) return
+        same(p, T.encoding.encode(input))
+      })
+    })
+    const tokens = Parser.repeat(
+      Parser.alt(Token.takeWhile("ab", { min: 1 }), Token.takeTill("\\0", { min: 1 }), Token.anyToken())
+    )
+    Array.from({ length: 300 }).forEach(() => same(tokens, text()))
+    const bytes = Parser.repeat(
+      Parser.alt(
+        Token.takeWhile<Uint8Array>([0x61, 0x62], { min: 1 }),
+        Token.takeTill<Uint8Array>([0x30, 0x80], { min: 1 }),
+        Token.anyToken<Uint8Array>()
+      )
+    )
+    Array.from({ length: 300 }).forEach(() => same(bytes, new TextEncoder().encode(text())))
+  })
+
   it("Binary numbers", () => {
     const grammars: ReadonlyArray<Parser.Parser<any, any, never, Uint8Array>> = [
       Parser.repeat(Binary.beU32),
