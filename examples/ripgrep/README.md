@@ -29,7 +29,7 @@ Everything else (the flag table, the directory walker with gitignore semantics, 
 The matcher is a backtracker, and running it at every byte of the input made `erg` 40 to 130 times slower than ripgrep. It now runs only where a match is possible, found the way ripgrep finds it:
 
 - **Literal prefilters** ([`src/regex/prefilter.ts`](src/regex/prefilter.ts)): from the syntax tree, the literals every match starts with or contains, and, under `-i`, the sequence of small byte sets (`[sS][hH]…`). A literal is found by `Buffer#indexOf` on its rarest byte (a vectorised `memchr`, many times faster than its substring search) and checked around it; several are found once each and merged ([`src/regex/finder.ts`](src/regex/finder.ts)). A set of plain literals needs no matcher at all. Several literals, a literal with no rare byte, and a sequence of common bytes are found instead by an effect-parse parser, `Token.takeUntilAny` repeated and compiled by `Compiler.wasm`, which searches with WebAssembly SIMD: Teddy, from ripgrep, testing the first three bytes of every literal at sixteen positions at once with nibble-table lookups. One parse per file lists every occurrence.
-- **A lazy DFA** ([`src/regex/dfa.ts`](src/regex/dfa.ts)): a Thompson NFA over UTF-8 bytes (Unicode classes as tries of byte ranges), determinised as the input reaches its states, with byte classes and line anchors resolved as RE2 does. One table lookup per byte finds the lines that hold a match; the matcher then finds the match in them. A single scan waits on each lookup in turn, so the input is searched in batches split into eight stretches of whole lines, stepped together in one loop so their lookups overlap (about twice the speed of one scan); a stretch that finishes early takes over half of the longest one left. Patterns with word boundaries, and multiline search, are left to the matcher.
+- **A lazy DFA** ([`src/regex/dfa.ts`](src/regex/dfa.ts)): a Thompson NFA over UTF-8 bytes (Unicode classes as tries of byte ranges), determinised as the input reaches its states, with byte classes and line anchors resolved as RE2 does. One table lookup per byte finds the lines that hold a match; the matcher then finds the match in them. A single scan waits on each lookup in turn, so the input is searched in batches split into eight stretches of whole lines, stepped together in one loop so their lookups overlap (about twice the speed of one scan); a stretch that finishes early takes over half of the longest one left. Where only the lines matter (`-c`, `-l`, uncoloured output) a line the DFA confirms needs nothing more; where the match does, a DFA of the regex read backwards finds, in one pass over the line, every offset a match starts at, and the matcher runs only there. Patterns with word boundaries, and multiline search, are left to the matcher.
 - **Follow sets**: a repetition such as `\w+` gives characters back only where the rest of the pattern can start, and an attempt that fails at the start of a run of the leading class skips the rest of the run.
 - **Parallel search** ([`src/parallel.ts`](src/parallel.ts)): when a search would take more than about 150 ms on one thread, worker threads search files into memory while the main thread searches too, and the output is written in walk order. The workers start during the walk, as soon as it has found that much input, so they load while it finishes.
 - **Less work per file and per run**: files read into one reused `Buffer` (whose `indexOf` is the native one); binary detection skipped for files without a match where it changes nothing; line numbers counted only when printed; output written straight from the input buffer; ignore files read only when a directory has them; Unicode tables precomputed ([`scripts/unicode-tables.mjs`](scripts/unicode-tables.mjs)); one bundled module with Node's compile cache, and the heavier Node built-ins loaded on first use.
@@ -49,39 +49,39 @@ Results on a 4-core cloud VM (Intel Xeon at 2.1 GHz, Node 22.23, ripgrep 14.1.0,
 
 The generated corpus (32.5 MB, 7 runs per case):
 
-| case               |      rg |        erg (jit) |            grep |
-| ------------------ | ------: | ---------------: | --------------: |
-| literal            | 27.5 ms |  144.6 ms (5.3×) |  61.6 ms (2.2×) |
-| literal-count      | 11.4 ms |  104.2 ms (9.2×) |  40.7 ms (3.6×) |
-| ignore-case        | 11.7 ms | 164.9 ms (14.1×) |  30.1 ms (2.6×) |
-| word               | 30.5 ms |  177.8 ms (5.8×) |  79.4 ms (2.6×) |
-| alternation        | 15.4 ms |  136.9 ms (8.9×) |  36.3 ms (2.4×) |
-| class-repeat       | 19.4 ms | 206.6 ms (10.6×) | 114.9 ms (5.9×) |
-| unicode-class      | 25.4 ms |  245.8 ms (9.7×) |  95.2 ms (3.7×) |
-| word-chars         | 19.5 ms | 280.0 ms (14.3×) |  72.6 ms (3.7×) |
-| no-match           | 11.3 ms |   80.1 ms (7.1×) |  11.9 ms (1.1×) |
-| invert-count       | 16.2 ms |  145.1 ms (9.0×) |  25.1 ms (1.6×) |
-| files-with-matches | 10.5 ms |   84.8 ms (8.1×) |  12.9 ms (1.2×) |
-| context            | 80.8 ms |  239.1 ms (3.0×) | 182.1 ms (2.3×) |
+| case               |      rg |       erg (jit) |            grep |
+| ------------------ | ------: | --------------: | --------------: |
+| literal            | 32.4 ms | 160.7 ms (5.0×) |  59.1 ms (1.8×) |
+| literal-count      | 16.0 ms | 115.1 ms (7.2×) |  49.1 ms (3.1×) |
+| ignore-case        | 15.8 ms | 151.9 ms (9.6×) |  33.7 ms (2.1×) |
+| word               | 32.7 ms | 210.5 ms (6.4×) |  81.1 ms (2.5×) |
+| alternation        | 15.7 ms | 118.4 ms (7.6×) |  40.6 ms (2.6×) |
+| class-repeat       | 25.3 ms | 223.8 ms (8.9×) | 125.8 ms (5.0×) |
+| unicode-class      | 27.2 ms | 208.8 ms (7.7×) | 106.9 ms (3.9×) |
+| word-chars         | 23.1 ms | 194.2 ms (8.4×) |  73.6 ms (3.2×) |
+| no-match           | 11.2 ms | 100.2 ms (9.0×) |  12.5 ms (1.1×) |
+| invert-count       | 19.2 ms | 103.2 ms (5.4×) |  30.5 ms (1.6×) |
+| files-with-matches | 12.5 ms | 100.2 ms (8.0×) |  14.3 ms (1.1×) |
+| context            | 88.1 ms | 269.9 ms (3.1×) | 164.8 ms (1.9×) |
 
 A larger corpus (180 MB, 5 runs per case):
 
-| case               |       rg |        erg (jit) |            grep |
-| ------------------ | -------: | ---------------: | --------------: |
-| literal            | 124.2 ms |  391.4 ms (3.2×) | 331.3 ms (2.7×) |
-| literal-count      |  29.9 ms |  202.1 ms (6.8×) | 215.3 ms (7.2×) |
-| ignore-case        |  30.3 ms | 366.7 ms (12.1×) | 155.1 ms (5.1×) |
-| word               | 120.1 ms |  428.1 ms (3.6×) | 344.7 ms (2.9×) |
-| alternation        |  37.2 ms |  331.2 ms (8.9×) | 176.6 ms (4.7×) |
-| class-repeat       |  88.0 ms |  614.7 ms (7.0×) | 676.3 ms (7.7×) |
-| unicode-class      |  98.6 ms |  585.2 ms (5.9×) | 483.5 ms (4.9×) |
-| word-chars         |  46.7 ms | 630.7 ms (13.5×) | 352.9 ms (7.6×) |
-| no-match           |  18.3 ms |  111.7 ms (6.1×) |  42.3 ms (2.3×) |
-| invert-count       |  43.5 ms |  360.8 ms (8.3×) | 111.8 ms (2.6×) |
-| files-with-matches |  20.8 ms |  115.5 ms (5.5×) |  50.4 ms (2.4×) |
-| context            | 440.3 ms |  891.2 ms (2.0×) | 951.6 ms (2.2×) |
+| case               |       rg |       erg (jit) |            grep |
+| ------------------ | -------: | --------------: | --------------: |
+| literal            | 148.8 ms | 403.4 ms (2.7×) | 315.6 ms (2.1×) |
+| literal-count      |  31.0 ms | 204.2 ms (6.6×) | 223.0 ms (7.2×) |
+| ignore-case        |  35.9 ms | 274.3 ms (7.6×) | 162.6 ms (4.5×) |
+| word               | 126.2 ms | 461.7 ms (3.7×) | 362.1 ms (2.9×) |
+| alternation        |  39.0 ms | 198.4 ms (5.1×) | 183.7 ms (4.7×) |
+| class-repeat       |  89.6 ms | 454.0 ms (5.1×) | 683.5 ms (7.6×) |
+| unicode-class      |  93.3 ms | 420.9 ms (4.5×) | 514.3 ms (5.5×) |
+| word-chars         |  47.9 ms | 396.7 ms (8.3×) | 368.2 ms (7.7×) |
+| no-match           |  23.9 ms | 124.8 ms (5.2×) |  50.9 ms (2.1×) |
+| invert-count       |  46.5 ms | 219.8 ms (4.7×) | 126.4 ms (2.7×) |
+| files-with-matches |  21.3 ms | 173.2 ms (8.2×) |  62.7 ms (2.9×) |
+| context            | 480.7 ms | 991.8 ms (2.1×) | 892.4 ms (1.9×) |
 
-`erg` is 2 to 14 times slower than ripgrep, where the first unoptimised version was 40 to 130 times slower. About 45 ms of every run is starting Node and loading `erg`, against a couple of milliseconds for ripgrep. Beyond that the remaining gap is ripgrep's SIMD literal search (Teddy) and its compiled DFA, which a JavaScript loop over bytes does not match, and its threads, which start in microseconds where a worker thread takes tens of milliseconds.
+`erg` is 2 to 10 times slower than ripgrep, where the first unoptimised version was 40 to 130 times slower. About 45 ms of every run is starting Node and loading `erg`, against a couple of milliseconds for ripgrep, and walking and reading the 180 MB corpus on one Node thread takes about 78 ms before any search. Beyond that the remaining gap is ripgrep's compiled DFA, which a JavaScript loop over bytes does not match even stepping eight lines at once, and its threads, which start in microseconds where a worker thread takes tens of milliseconds and brings its own garbage collector and compiler threads.
 
 ## Where erg differs from ripgrep
 
