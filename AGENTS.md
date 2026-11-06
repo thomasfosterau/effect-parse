@@ -74,7 +74,7 @@ Steps 2–8 are CI's required `ci` job, in its order ([ci.yml](.github/workflows
 
 ## Effect
 
-Never guess at an Effect API. Read the installed package: `node_modules/effect/dist/*.d.ts`, `node_modules/effect/src`, and the guidance it ships (`node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/`). The pinned version is the `effect` entry in `pnpm-workspace.yaml`'s catalog; the published peer range is `catalogs.peers.effect` (`^4.0.0`), and raising its floor is a breaking change for every consumer.
+Never guess at an Effect API. Read the installed package: `node_modules/effect/dist/*.d.ts`, `node_modules/effect/src`, and the guidance it ships (`node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/`). The pinned version is the `effect` entry in `pnpm-workspace.yaml`'s catalog; the published peer range is `catalogs.peers.effect`. The `effect` peer is `^4.0.0`; raise it only when a dependency requires it, naming the dependency in the catalog comment (the package's own code uses the 4.0 API instead). Raising the floor is a breaking change for every consumer.
 
 ## Agent sessions
 
