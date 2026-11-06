@@ -8,6 +8,7 @@
 import * as Fs from "node:fs"
 import * as Os from "node:os"
 import * as Path from "node:path"
+import type { Worker } from "node:worker_threads"
 import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import * as Cli from "./cli/args.ts"
@@ -557,7 +558,7 @@ const sequential = (search: FileSearch, each: (visit: (entry: Walk.Entry) => voi
 const throughput: Record<Compile.Cost, number> = { literal: 1_500_000, literals: 300_000, regex: 150_000 }
 
 /** Workers pay off when a search would take longer than this on one thread. */
-const PARALLEL_MS = 200
+const PARALLEL_MS = 150
 
 /** The files a search will visit, and the input's total size. */
 interface Collected {
@@ -565,13 +566,21 @@ interface Collected {
   readonly bytes: number
 }
 
-/** The files to search, with the input's total size. */
-const collect = (setup: Setup): Collected => {
+/**
+ * The files to search, with the input's total size; `large` runs once, as
+ * soon as the files seen so far hold more than `threshold` bytes.
+ */
+const collect = (setup: Setup, threshold: number, large: () => void): Collected => {
   const entries: Array<Walk.Entry> = []
   let bytes = 0
+  let pending = true
   Walk.walk(setup.given.roots, setup.walk, (entry) => {
     entries.push(entry)
     if (!entry.stdin) bytes += Walk.sizeOf(entry.absolute)
+    if (pending && bytes > threshold) {
+      pending = false
+      large()
+    }
   })
   return { entries, bytes }
 }
@@ -583,44 +592,67 @@ const collect = (setup: Setup): Collected => {
  */
 const workerCount = (args: Args, files: number, bytes: number, cost: Compile.Cost): number => {
   const estimate = bytes / throughput[cost]
-  const explicit = args.threads > 1
-  if (files < 2 || (!explicit && estimate < PARALLEL_MS)) return 0
-  // This thread searches too, so one worker fewer than there are cores.
-  const threads = explicit ? args.threads - 1 : Os.availableParallelism() - 1
-  return Math.min(threads, files, Math.max(1, Math.ceil(estimate / (PARALLEL_MS / 2))))
+  if (files < 2 || (args.threads <= 1 && estimate < PARALLEL_MS)) return 0
+  return Math.min(maxWorkers(args), files, Math.max(1, Math.ceil(estimate / (PARALLEL_MS / 2))))
 }
+
+/** The most workers a search uses: this thread searches too, so one fewer than there are cores, or than `-j`. */
+const maxWorkers = (args: Args): number => (args.threads > 1 ? args.threads : Os.availableParallelism()) - 1
+
+/**
+ * Whether a search may use workers at all, known before the walk: it has a
+ * directory to walk, and is not on one thread, sorted, or reading standard
+ * input.
+ */
+const mayParallel = (setup: Setup): boolean =>
+  setup.env.workerUrl !== undefined &&
+  setup.args.sort === undefined &&
+  setup.args.threads !== 1 &&
+  maxWorkers(setup.args) > 0 &&
+  !setup.given.roots.some((root) => root === "-") &&
+  setup.given.roots.some((root) => root === "" || Walk.isDirectoryPath(Path.resolve(setup.env.cwd, root)))
 
 /** Searches `roots`: in parallel when it is worth it, otherwise on this thread. */
 const search = (setup: Setup): number | Promise<number> => {
   const built = fileSearch(setup, true)
   if (Result.isFailure(built)) return fail(setup.env, built.failure)
   const workerUrl = setup.env.workerUrl
-  if (workerUrl === undefined || setup.args.sort !== undefined || setup.args.threads === 1) {
+  if (workerUrl === undefined || !mayParallel(setup)) {
     return sequential(built.success, (visit) => Walk.walk(setup.given.roots, setup.walk, visit))
   }
-  const { bytes, entries } = collect(setup)
-  // Standard input is read here, once: such a search stays on this thread.
-  const cost = built.success.cost
-  const workers = entries.some((e) => e.stdin) ? 0 : workerCount(setup.args, entries.length, bytes, cost)
-  if (workers === 0) return sequential(built.success, (visit) => entries.forEach(visit))
   const { env, given } = setup
   const data = { argv: env.argv, env: env.env, cwd: env.cwd, stdoutIsTty: env.stdoutIsTty, ...given }
+  const cost = built.success.cost
+  // Workers start as soon as the walk has found enough to search, so they
+  // load while it finishes; with `-j`, before it starts.
+  let spawned: ReadonlyArray<Worker> = []
+  const threshold = setup.args.threads > 1 ? -1 : PARALLEL_MS * throughput[cost]
+  const { bytes, entries } = collect(setup, threshold, () => {
+    spawned = Parallel.spawn(workerUrl, data, maxWorkers(setup.args))
+  })
+  // Standard input is read here, once: such a search stays on this thread.
+  const n = entries.some((e) => e.stdin) ? 0 : workerCount(setup.args, entries.length, bytes, cost)
+  Parallel.stop(spawned.slice(n))
+  if (n === 0) return sequential(built.success, (visit) => entries.forEach(visit))
+  // None have started when the input came to exactly the threshold.
+  const pool = Arr.isReadonlyArrayNonEmpty(spawned) ? spawned.slice(0, n) : Parallel.spawn(workerUrl, data, n)
   // This thread's own share prints into memory, like a worker's.
   const local = fileSearch(setup, false)
-  if (Result.isFailure(local)) return fail(env, local.failure)
+  if (Result.isFailure(local)) {
+    Parallel.stop(pool)
+    return fail(env, local.failure)
+  }
   return Parallel.run(
     built.success,
     local.success,
     entries,
     {
-      workers,
-      url: workerUrl,
-      data,
       stderr: env.stderr,
       count,
       status: (matchedAny) => status(setup.args, setup.reporter, matchedAny)
     },
-    Printers.totals()
+    Printers.totals(),
+    pool
   )
 }
 

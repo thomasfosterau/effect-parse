@@ -55,9 +55,6 @@ export interface Reply {
  * @since 0.0.0
  */
 export interface ParallelOptions {
-  readonly workers: number
-  readonly url: URL
-  readonly data: WorkerData
   readonly stderr: (message: string) => void
   readonly count: (totals: Printers.Totals, outcome: FileOutcome) => void
   readonly status: (matchedAny: boolean) => number
@@ -144,7 +141,32 @@ export const searchInto = (search: FileSearch, job: Job, stderr: () => string): 
 }
 
 /**
- * Searches `entries` on this thread and `options.workers` worker threads;
+ * Starts `n` workers, before the search knows whether it will use them, so
+ * they load while this thread walks the tree: a worker takes tens of
+ * milliseconds to start.
+ *
+ * @since 0.0.0
+ */
+export const spawn = (url: URL, data: WorkerData, n: number): ReadonlyArray<Worker> => {
+  // Loaded on first use: most searches stay on one thread.
+  const Threads = process.getBuiltinModule("node:worker_threads")
+  return Array.from({ length: n }, () => new Threads.Worker(url, { workerData: data }))
+}
+
+/**
+ * Stops workers the search did not need.
+ *
+ * @since 0.0.0
+ */
+export const stop = (workers: ReadonlyArray<Worker>): void => {
+  for (const w of workers) {
+    w.unref()
+    void w.terminate()
+  }
+}
+
+/**
+ * Searches `entries` on this thread and the `workers` (from {@link spawn});
  * resolves to the exit status once everything is written. `search` prints
  * to standard output; `local` is this thread's search, printing into
  * memory like a worker's; `local` and the workers take files from the
@@ -157,16 +179,11 @@ export const run = (
   local: FileSearch,
   entries: ReadonlyArray<Walk.Entry>,
   options: ParallelOptions,
-  totals: Printers.Totals
+  totals: Printers.Totals,
+  workers: ReadonlyArray<Worker>
 ): Promise<number> =>
   new Promise((resolve, reject) => {
     const assembler = new Assembler(search, options, totals)
-    // Loaded on first use: most searches stay on one thread.
-    const Threads = process.getBuiltinModule("node:worker_threads")
-    const workers = Array.from(
-      { length: options.workers },
-      () => new Threads.Worker(options.url, { workerData: options.data })
-    )
     let taken = 0
     let written = 0
     let finished = false
@@ -174,7 +191,7 @@ export const run = (
     const finish = () => {
       if (finished || written < taken || !exhausted()) return
       finished = true
-      for (const w of workers) void w.terminate()
+      stop(workers)
       search.plan.printer.finish(assembler.totals)
       search.plan.out.flush()
       resolve(options.status(assembler.matchedAny))
@@ -197,6 +214,9 @@ export const run = (
         finish()
       })
       worker.on("error", reject)
+      // A first batch now: it waits in the worker's queue until it is ready
+      // (its Ready message may have gone before this listener was attached).
+      feed(worker)
     }
     // This thread searches too, a slice at a time, between its messages.
     const slice = () => {
