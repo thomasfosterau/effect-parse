@@ -397,6 +397,19 @@ export const walk = (roots: ReadonlyArray<string>, options: WalkOptions, visit: 
 }
 
 /**
+ * A file's size in bytes, or 0 if it cannot be read.
+ *
+ * @since 0.0.0
+ */
+export const sizeOf = (path: string): number => {
+  try {
+    return Fs.statSync(path).size
+  } catch {
+    return 0
+  }
+}
+
+/**
  * Whether a path names a directory (used to decide whether to print file
  * names by default).
  *

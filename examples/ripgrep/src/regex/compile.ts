@@ -21,7 +21,7 @@ import type { Look, Regex } from "./ast.ts"
 import * as Ast from "./ast.ts"
 import * as CharSet from "./charset.ts"
 import type { Ranges } from "./charset.ts"
-import { LiteralFinder } from "./finder.ts"
+import { LiteralFinder, SequenceFinder } from "./finder.ts"
 import * as Prefilter from "./prefilter.ts"
 
 type Bytes = Uint8Array
@@ -75,6 +75,12 @@ export interface Matcher {
    * {@link Matcher.takeOverflow} reports where.
    */
   readonly find: (state: Input.State<Bytes>, from: number) => Match | undefined
+  /**
+   * How the matcher finds candidates, from cheapest per byte: one literal,
+   * several literals or a byte-set sequence, or the regex itself on every
+   * candidate line or position.
+   */
+  readonly cost: Cost
   /** Where an attempt overflowed the stack since the last call, if one did; clears it. */
   readonly takeOverflow: () => number | undefined
   /** The end of a match starting exactly at `at`, or -1. */
@@ -233,10 +239,32 @@ const classThen = (set: Ranges, k: Step): Step => {
   })
 }
 
+/** How far a greedy repetition of `t` reaches from `start`: the end and the count. */
+const takeClass = (t: ClassTest, b: Bytes, start: number, max: number): readonly [number, number] => {
+  const ascii = t.ascii
+  const length = b.length
+  let p = start
+  let n = 0
+  while (n < max && p < length) {
+    const x = b[p]
+    if (x < 0x80) {
+      if (ascii[x] === 0) break
+      p++
+    } else {
+      const q = stepClass(t, b, p)
+      if (q < 0) break
+      p = q
+    }
+    n++
+  }
+  return [p, n]
+}
+
 /**
  * Greedy: takes as many characters as allowed, then tries `k`, giving one
- * character back after each failure. (The matcher never builds a syntax
- * tree, so the cursor moves back by assignment rather than `rewind`.)
+ * character back after each failure, and only calling `k` where its follow
+ * set allows. (The matcher never builds a syntax tree, so the cursor moves
+ * back by assignment rather than `rewind`.)
  */
 const greedyRepeat = (
   t: ClassTest,
@@ -248,12 +276,7 @@ const greedyRepeat = (
 ): void | Input.Fail => {
   const b = state.input
   const start = state.pos
-  let p = start
-  let n = 0
-  for (let q = stepClass(t, b, p); n < max && q >= 0; q = stepClass(t, b, p)) {
-    p = q
-    n++
-  }
+  let [p, n] = takeClass(t, b, start, max)
   if (n < min) return reject(state)
   for (; ; n--) {
     if (follows(follow, b, p)) {
@@ -497,6 +520,22 @@ const leadingRun = (regex: Regex): Uint8Array | undefined => {
   return table
 }
 
+/**
+ * How expensive a matcher's search is per byte (see {@link Matcher.cost}).
+ *
+ * @since 0.0.0
+ */
+export type Cost = "literal" | "literals" | "regex"
+
+/** The cost of the strategy {@link strategy} picks. */
+const costOf = (pre: Prefilter.Prefilter, multiline: boolean): Cost => {
+  const startSequence = pre.sequence?.atStart === true ? pre.sequence.sets.length : 0
+  const prefixLength = Math.max(shortest(pre.prefixes), startSequence)
+  const requiredLength = Math.max(shortest(pre.required), pre.sequence?.sets.length ?? 0)
+  if (prefixLength === 0 || (!multiline && prefixLength < requiredLength)) return "regex"
+  return pre.prefixes?.length === 1 && !preferSequence(pre.prefixes, pre.sequence) ? "literal" : "literals"
+}
+
 type Find = (state: Input.State<Bytes>, from: number) => Match | undefined
 
 /**
@@ -504,6 +543,75 @@ type Find = (state: Input.State<Bytes>, from: number) => Match | undefined
  * every match starts with; from the lines holding a literal every match
  * contains (outside multiline mode, where a match lies within one line); or
  * from every position a match can start at.
+ */
+type Finder = LiteralFinder | SequenceFinder
+
+const shortest = (set: ReadonlyArray<Uint8Array> | undefined): number =>
+  set === undefined ? 0 : Math.min(...set.map((l) => l.length))
+
+/**
+ * A byte-set sequence beats a literal set when the set is case variants (more
+ * than one member) and the sequence is at least as long: one rare byte's
+ * occurrences instead of a pass over the input per variant.
+ */
+const preferSequence = (literals: ReadonlyArray<Uint8Array> | undefined, sequence: Prefilter.Sequence | undefined) =>
+  sequence !== undefined &&
+  (literals === undefined || (literals.length > 1 && sequence.sets.length >= shortest(literals)))
+
+/** Candidate starts from the literals (or byte-set sequence) every match starts with. */
+const prefixStrategy = (
+  regex: Regex,
+  pre: Prefilter.Prefilter,
+  options: CompileOptions,
+  attempt: (state: Input.State<Bytes>, s: number) => number,
+  found: (s: number, e: number) => Match
+): Find => {
+  const sequence = pre.sequence?.atStart === true ? pre.sequence : undefined
+  const literals = pre.prefixes === undefined ? undefined : new LiteralFinder(pre.prefixes)
+  const finder: Finder =
+    literals === undefined || (sequence !== undefined && preferSequence(pre.prefixes, sequence))
+      ? new SequenceFinder(sequence?.sets ?? [])
+      : literals
+  // A set of plain literals needs no matcher: an occurrence is a match.
+  const literal = finder === literals && !options.captures && Prefilter.isLiteralSet(regex)
+  return (state, from) => {
+    const input = state.input
+    for (let p = from; ; p++) {
+      p = finder.find(input, p)
+      if (p < 0) return undefined
+      if (literal) return found(p, p + (literals?.literalAt(input, p)?.length ?? 0))
+      const e = attempt(state, p)
+      if (e >= 0) return found(p, e)
+    }
+  }
+}
+
+/** Candidate lines: those holding a literal (or byte-set sequence) every match contains. */
+const lineStrategy =
+  (
+    finder: Finder,
+    lineTerminator: number,
+    scan: (state: Input.State<Bytes>, from: number, to: number) => Match | undefined
+  ): Find =>
+  (state, from) => {
+    const input = state.input
+    for (let p = from; ;) {
+      const o = finder.find(input, p)
+      if (o < 0) return undefined
+      const start = Math.max(p, o === 0 ? 0 : input.lastIndexOf(lineTerminator, o - 1) + 1)
+      const nl = input.indexOf(lineTerminator, o)
+      const end = nl < 0 ? input.length : nl
+      const m = scan(state, start, end)
+      if (m !== undefined) return m
+      p = end + 1
+    }
+  }
+
+/**
+ * How `find` looks for the next match: from the occurrences of what every
+ * match starts with; from the lines holding what every match contains
+ * (outside multiline mode, where a match lies within one line); or from
+ * every position a match can start at.
  */
 const strategy = (
   regex: Regex,
@@ -514,40 +622,17 @@ const strategy = (
   found: (s: number, e: number) => Match,
   scan: (state: Input.State<Bytes>, from: number, to: number) => Match | undefined
 ): Find => {
-  const shortest = (set: ReadonlyArray<Uint8Array> | undefined) =>
-    set === undefined ? 0 : Math.min(...set.map((l) => l.length))
-  const usePrefix =
-    pre.prefixes !== undefined && (options.multiline || shortest(pre.prefixes) >= shortest(pre.required))
-  if (usePrefix && pre.prefixes !== undefined) {
-    const finder = new LiteralFinder(pre.prefixes)
-    // A set of plain literals needs no matcher: an occurrence is a match.
-    const literal = !options.captures && Prefilter.isLiteralSet(regex)
-    return (state, from) => {
-      const input = state.input
-      for (let p = from; ; p++) {
-        p = finder.find(input, p)
-        if (p < 0) return undefined
-        if (literal) return found(p, p + (finder.literalAt(input, p)?.length ?? 0))
-        const e = attempt(state, p)
-        if (e >= 0) return found(p, e)
-      }
-    }
+  const startSequence = pre.sequence?.atStart === true ? pre.sequence.sets.length : 0
+  const prefixLength = Math.max(shortest(pre.prefixes), startSequence)
+  const requiredLength = Math.max(shortest(pre.required), pre.sequence?.sets.length ?? 0)
+  if (prefixLength > 0 && (options.multiline || prefixLength >= requiredLength)) {
+    return prefixStrategy(regex, pre, options, attempt, found)
   }
-  if (!options.multiline && pre.required !== undefined) {
-    const finder = new LiteralFinder(pre.required)
-    return (state, from) => {
-      const input = state.input
-      for (let p = from; ;) {
-        const o = finder.find(input, p)
-        if (o < 0) return undefined
-        const start = Math.max(p, o === 0 ? 0 : input.lastIndexOf(lineTerminator, o - 1) + 1)
-        const nl = input.indexOf(lineTerminator, o)
-        const end = nl < 0 ? input.length : nl
-        const m = scan(state, start, end)
-        if (m !== undefined) return m
-        p = end + 1
-      }
-    }
+  if (!options.multiline && requiredLength > 0) {
+    const finder: Finder = preferSequence(pre.required, pre.sequence)
+      ? new SequenceFinder(pre.sequence?.sets ?? [])
+      : new LiteralFinder(pre.required ?? [])
+    return lineStrategy(finder, lineTerminator, scan)
   }
   return (state, from) => scan(state, from, state.input.length)
 }
@@ -621,6 +706,7 @@ export const compile = (regex: Regex, groups: number, lineTerminator: number, op
   return {
     find: (state, from) => (overflow === undefined ? find(state, from) : undefined),
     matchAt: attempt,
+    cost: costOf(first, options.multiline),
     takeOverflow,
     slots,
     groups

@@ -17,12 +17,13 @@ import * as Help from "./cli/help.ts"
 import * as Color from "./print/color.ts"
 import * as Json from "./print/json.ts"
 import { Output } from "./print/output.ts"
-import type { Printer } from "./print/printer.ts"
+import type { FileEnd, Printer } from "./print/printer.ts"
 import * as Printers from "./print/printer.ts"
 import * as Standard from "./print/standard.ts"
 import * as Summary from "./print/summary.ts"
 import type * as Compile from "./regex/compile.ts"
 import * as Input from "./search/input.ts"
+import * as Parallel from "./parallel.ts"
 import * as Pattern from "./search/pattern.ts"
 import * as Searcher from "./search/searcher.ts"
 import * as Glob from "./walk/glob.ts"
@@ -44,6 +45,11 @@ export interface Environment {
   readonly stdout: number
   /** Writes a message to standard error. */
   readonly stderr: (message: string) => void
+  /**
+   * The worker module to search in parallel with (`src/worker.ts`, or the
+   * bundle's), or `undefined` to search on this thread only.
+   */
+  readonly workerUrl: URL | undefined
   /** Standard input: whether it is a file or pipe (searched when no path is given), and its contents. */
   readonly stdin: { readonly readable: boolean; readonly read: () => Uint8Array }
 }
@@ -83,9 +89,16 @@ const hostname = (args: Args): string => {
   return r.status === 0 ? r.stdout.trim() : Os.hostname()
 }
 
-interface Plan {
+/**
+ * A printer and its output, with what goes between two files' output when
+ * they are printed apart.
+ *
+ * @since 0.0.0
+ */
+export interface Plan {
   readonly printer: Printer
   readonly out: Output
+  readonly separator: (separate: boolean) => string
 }
 
 const usesColor = (args: Args, env: Environment): boolean =>
@@ -103,6 +116,7 @@ interface PrintContext {
   readonly names: ReadonlyArray<string | undefined>
   readonly lineTerminator: number
   readonly withFilename: boolean
+  readonly separateFiles: boolean
 }
 
 const summaryPrinter = (c: PrintContext, mode: Summary.SummaryOptions["mode"], out: Output): Printer => {
@@ -133,62 +147,71 @@ const hyperlinkOf = (args: Args): { readonly format: string; readonly host: stri
   return { format: Color.hyperlinkAliases.get(args.hyperlinkFormat) ?? args.hyperlinkFormat, host: hostname(args) }
 }
 
-const standardPrinter = (c: PrintContext, out: Output): Printer => {
+const standardOptions = (c: PrintContext): Standard.StandardOptions => {
   const { args, env } = c
   const column = args.column ?? args.vimgrep
-  return Standard.standardPrinter(
-    {
-      withFilename: c.withFilename,
-      heading: !args.vimgrep && (args.heading ?? env.stdoutIsTty),
-      lineNumber: args.vimgrep || (args.lineNumber ?? (env.stdoutIsTty || column)),
-      column,
-      byteOffset: args.byteOffset,
-      onlyMatching: args.onlyMatching,
-      vimgrep: args.vimgrep,
-      replace: args.replace === undefined ? undefined : Printers.parseTemplate(args.replace, c.names),
-      trim: args.trim,
-      maxColumns: args.maxColumns,
-      maxColumnsPreview: args.maxColumnsPreview,
-      nullPath: args.nullPath,
-      contextSeparator: args.contextSeparator,
-      context: !args.passthru && hasContext(args),
-      fieldMatchSeparator: args.fieldMatchSeparator,
-      fieldContextSeparator: args.fieldContextSeparator,
-      colors: c.colors,
-      hyperlink: hyperlinkOf(args),
-      lineTerminator: c.lineTerminator,
-      invert: args.invertMatch,
-      stats: args.stats,
-      quiet: args.quiet
-    },
-    out
-  )
+  return {
+    withFilename: c.withFilename,
+    heading: !args.vimgrep && (args.heading ?? env.stdoutIsTty),
+    lineNumber: args.vimgrep || (args.lineNumber ?? (env.stdoutIsTty || column)),
+    column,
+    byteOffset: args.byteOffset,
+    onlyMatching: args.onlyMatching,
+    vimgrep: args.vimgrep,
+    replace: args.replace === undefined ? undefined : Printers.parseTemplate(args.replace, c.names),
+    trim: args.trim,
+    maxColumns: args.maxColumns,
+    maxColumnsPreview: args.maxColumnsPreview,
+    nullPath: args.nullPath,
+    contextSeparator: args.contextSeparator,
+    context: !args.passthru && hasContext(args),
+    fieldMatchSeparator: args.fieldMatchSeparator,
+    fieldContextSeparator: args.fieldContextSeparator,
+    colors: c.colors,
+    hyperlink: hyperlinkOf(args),
+    lineTerminator: c.lineTerminator,
+    invert: args.invertMatch,
+    stats: args.stats,
+    quiet: args.quiet,
+    separateFiles: c.separateFiles
+  }
 }
+
+const noSeparator = () => ""
 
 const makePrinter = (c: Omit<PrintContext, "colors">): Result.Result<Plan, string> => {
   const { args, env } = c
-  const out = new Output(
-    env.stdout,
-    args.blockBuffered === false || (args.blockBuffered === undefined && env.stdoutIsTty)
-  )
+  // A worker (separateFiles off) keeps its output in memory for the main thread.
+  const fd = c.separateFiles ? env.stdout : -1
+  const out = new Output(fd, args.blockBuffered === false || (args.blockBuffered === undefined && env.stdoutIsTty))
   // ripgrep checks --colors even when colours are off.
   const specs = Color.parseSpecs(args.colors)
   if (Predicate.isString(specs)) return Result.fail(`error parsing flag --colors: ${specs}`)
   const context = { ...c, colors: usesColor(args, env) ? specs : undefined }
   const mode = args.onlyMatching && args.mode === "count" ? "countMatches" : args.mode
-  if (mode === "json")
-    return Result.succeed({
-      out,
-      printer: Json.jsonPrinter({ lineNumber: args.lineNumber !== false, quiet: args.quiet }, out)
-    })
-  if (mode !== "standard") return Result.succeed({ out, printer: summaryPrinter(context, mode, out) })
-  return Result.succeed({ out, printer: standardPrinter(context, out) })
+  if (mode === "json") {
+    const printer = Json.jsonPrinter({ lineNumber: args.lineNumber !== false, quiet: args.quiet }, out)
+    return Result.succeed({ out, printer, separator: noSeparator })
+  }
+  if (mode !== "standard")
+    return Result.succeed({ out, printer: summaryPrinter(context, mode, out), separator: noSeparator })
+  const options = standardOptions(context)
+  return Result.succeed({
+    out,
+    printer: Standard.standardPrinter(options, out),
+    separator: (separate) => Standard.separator(options, separate)
+  })
 }
 
 const displayPath = (path: string, args: Args): string =>
   args.pathSeparator === undefined ? path : path.replaceAll("/", args.pathSeparator)
 
-/** Collects errors: they are printed (unless `--no-messages`) and make the exit status 2. */
+/**
+ * Collects errors: they are printed (unless `--no-messages`) and make the
+ * exit status 2.
+ *
+ * @since 0.0.0
+ */
 class Reporter {
   hadError = false
   private readonly args: Args
@@ -231,11 +254,8 @@ const readEntry = (
   if (entry.stdin) return Result.succeed(Input.decode(env.stdin.read(), args.encoding))
   const name = encoder.encode(Path.basename(entry.path))
   const pre = Arr.isReadonlyArrayEmpty(preGlobs) || preGlobs.some((g) => g.matches(name)) ? args.pre : undefined
-  // A Buffer is a Uint8Array: no copy.
   const raw =
-    pre === undefined
-      ? Result.succeed<Uint8Array>(Fs.readFileSync(entry.absolute))
-      : Input.preprocess(pre, entry.absolute, env.cwd)
+    pre === undefined ? Result.succeed(Input.readFile(entry.absolute)) : Input.preprocess(pre, entry.absolute, env.cwd)
   const bytes = args.searchZip && pre === undefined ? Result.flatMap(raw, (b) => Input.decompress(entry.path, b)) : raw
   return Result.map(bytes, (b) => Input.decode(b, args.encoding))
 }
@@ -282,8 +302,12 @@ const unsupported = (args: Args): string | undefined =>
     ? "PCRE2 is not available in this build of ripgrep."
     : Input.checkEncoding(args.encoding)
 
-/** The patterns (`-e`, `-f`, or the first positional) and the paths to search. */
-interface Inputs {
+/**
+ * The patterns (`-e`, `-f`, or the first positional) and the paths to search.
+ *
+ * @since 0.0.0
+ */
+export interface Inputs {
   readonly sources: ReadonlyArray<string>
   readonly roots: ReadonlyArray<string>
 }
@@ -348,7 +372,7 @@ const compileGlobs = (globs: ReadonlyArray<string>): Result.Result<ReadonlyArray
 }
 
 /** The searcher's settings for explicit (named) and implicit (walked) files. */
-const searchOptions = (args: Args, patterns: Pattern.Patterns, allMatches: boolean) => {
+const searchOptions = (args: Args, patterns: Pattern.Patterns, allMatches: boolean, lineNumbers: boolean) => {
   const summaryStop = args.mode === "filesWithMatches" || args.mode === "filesWithoutMatch"
   const contextLines = args.mode === "standard" || args.mode === "json"
   const make = (explicit: boolean): Searcher.SearchOptions => ({
@@ -362,6 +386,7 @@ const searchOptions = (args: Args, patterns: Pattern.Patterns, allMatches: boole
     passthru: args.passthru && contextLines,
     stopOnNonmatch: args.stopOnNonmatch,
     allMatches,
+    lineNumbers,
     multiline: args.multiline,
     // With --null-data, NUL ends lines, so no file is binary.
     binary: args.text || args.nullData ? "none" : explicit || args.binary ? "convert" : "quit"
@@ -369,95 +394,231 @@ const searchOptions = (args: Args, patterns: Pattern.Patterns, allMatches: boole
   return { explicit: make(true), implicit: make(false) }
 }
 
-/** The search over every file, accumulating totals. */
-class Run {
-  matchedAny = false
-  readonly totals = Printers.totals()
-  private readonly args: Args
+/**
+ * What searching one file came to.
+ *
+ * @since 0.0.0
+ */
+export interface FileOutcome {
+  readonly end: FileEnd
+  readonly matches: number
+  readonly matchedLines: number
+  readonly bytesSearched: number
+  readonly nanos: number
+}
+
+/**
+ * Searches files one at a time into one printer: the main thread's search,
+ * or a worker's.
+ *
+ * @since 0.0.0
+ */
+export class FileSearch {
+  readonly args: Args
+  readonly plan: Plan
+  readonly reporter: Reporter
   private readonly env: Environment
-  private readonly plan: Plan
   private readonly options: { readonly explicit: Searcher.SearchOptions; readonly implicit: Searcher.SearchOptions }
   private readonly matcher: Compile.Matcher
   private readonly preGlobs: ReadonlyArray<Glob.Glob>
-  private readonly reporter: Reporter
+  /** How expensive the search is per byte. */
+  readonly cost: Compile.Cost
 
-  constructor(
-    args: Args,
-    env: Environment,
-    plan: Plan,
-    patterns: Pattern.Patterns,
-    preGlobs: ReadonlyArray<Glob.Glob>,
-    reporter: Reporter
-  ) {
-    this.args = args
-    this.env = env
+  constructor(setup: Setup, plan: Plan, patterns: Pattern.Patterns, preGlobs: ReadonlyArray<Glob.Glob>) {
+    this.args = setup.args
+    this.env = setup.env
+    this.reporter = setup.reporter
     this.plan = plan
     this.matcher = patterns.matcher
-    this.options = searchOptions(args, patterns, plan.printer.allMatches)
+    this.cost = patterns.matcher.cost
+    this.options = searchOptions(setup.args, patterns, plan.printer.allMatches, plan.printer.lineNumbers)
     this.preGlobs = preGlobs
-    this.reporter = reporter
   }
 
-  readonly visit = (entry: Walk.Entry): void => {
-    if ((this.args.quiet && this.matchedAny && !this.args.stats) || this.plan.out.closed) return
+  /** Searches one file into the printer; `undefined` when it could not be read. */
+  file(entry: Walk.Entry): FileOutcome | undefined {
     let read: Result.Result<Uint8Array, string>
     try {
       read = readEntry(entry, this.args, this.preGlobs, this.env)
     } catch (error) {
       this.reporter.report(`${entry.path}: ${Walk.describeError(error)}`)
-      return
+      return undefined
     }
     if (Result.isFailure(read)) {
       this.reporter.report(`${entry.path}: ${read.failure}`)
-      return
+      return undefined
     }
-    const bytes = read.success
     const filePrinter = this.plan.printer.file({ path: displayPath(entry.path, this.args), absolute: entry.absolute })
     const started = process.hrtime.bigint()
-    const result = Searcher.search(
-      bytes,
-      entry.explicit ? this.options.explicit : this.options.implicit,
-      filePrinter.sink
-    )
+    const options = entry.explicit ? this.options.explicit : this.options.implicit
+    const result = Searcher.search(read.success, options, filePrinter.sink)
     const overflow = this.matcher.takeOverflow()
-    if (overflow !== undefined)
+    if (overflow !== undefined) {
       this.reporter.report(`${entry.path}: the pattern nested too deeply at byte offset ${overflow}`)
+    }
     const nanos = Number(process.hrtime.bigint() - started)
-    if (filePrinter.end(result, result.bytesSearched, nanos)) this.matchedAny = true
-    this.count(result, nanos)
-  }
-
-  private count(result: Searcher.SearchResult, nanos: number): void {
-    const t = this.totals
-    t.filesSearched++
-    t.bytesSearched += result.bytesSearched
-    t.searchNanos += nanos
-    t.matches += result.matches
-    t.matchedLines += result.matchedLines
-    if (result.matchedLines > 0) t.filesWithMatches++
+    const end = filePrinter.end(result, result.bytesSearched, nanos)
+    return {
+      end,
+      matches: result.matches,
+      matchedLines: result.matchedLines,
+      bytesSearched: result.bytesSearched,
+      nanos
+    }
   }
 }
 
-/** Searches `roots` with the patterns, printing as it goes; returns the exit status. */
-const search = (args: Args, env: Environment, given: Inputs, options: Walk.WalkOptions, reporter: Reporter): number => {
-  const patterns = Pattern.build(args, given.sources, Pattern.backend(env.env.ERG_COMPILER))
-  if (Result.isFailure(patterns)) return fail(env, patterns.failure)
-  const plan = makePrinter({
-    args,
-    env,
-    names: patterns.success.names,
-    lineTerminator: patterns.success.lineTerminator,
-    withFilename: defaultWithFilename(args, env, given.roots)
+/** Adds one file's outcome to the totals. */
+const count = (t: Printers.Totals, o: FileOutcome): void => {
+  t.filesSearched++
+  t.bytesSearched += o.bytesSearched
+  t.searchNanos += o.nanos
+  t.matches += o.matches
+  t.matchedLines += o.matchedLines
+  t.printed += o.end.printed
+  if (o.matchedLines > 0) t.filesWithMatches++
+}
+
+/** The checked command line: what the main thread and every worker start from. */
+interface Setup {
+  readonly args: Args
+  readonly env: Environment
+  readonly given: Inputs
+  readonly walk: Walk.WalkOptions
+  readonly reporter: Reporter
+}
+
+/** Builds the matcher and printer for a search; `separateFiles` is off in workers (see `Standard.separator`). */
+const fileSearch = (setup: Setup, separateFiles: boolean): Result.Result<FileSearch, string> => {
+  const { args, env, given } = setup
+  return Pattern.build(args, given.sources, Pattern.backend(env.env.ERG_COMPILER)).pipe(
+    Result.flatMap((patterns) =>
+      makePrinter({
+        args,
+        env,
+        names: patterns.names,
+        lineTerminator: patterns.lineTerminator,
+        withFilename: defaultWithFilename(args, env, given.roots),
+        separateFiles
+      }).pipe(
+        Result.flatMap((plan) =>
+          Result.map(compileGlobs(args.preGlobs), (globs) => new FileSearch(setup, plan, patterns, globs))
+        )
+      )
+    )
+  )
+}
+
+/** The exit status: 0 for a match, 1 for none, 2 after an error. */
+const status = (args: Args, reporter: Reporter, matchedAny: boolean): number => {
+  if (reporter.hadError) return args.quiet && matchedAny ? 0 : 2
+  return matchedAny ? 0 : 1
+}
+
+/** Searches the files `each` produces on this thread, printing as it goes; returns the exit status. */
+const sequential = (search: FileSearch, each: (visit: (entry: Walk.Entry) => void) => void): number => {
+  const { args, plan, reporter } = search
+  const totals = Printers.totals()
+  let matchedAny = false
+  each((entry) => {
+    if ((args.quiet && matchedAny && !args.stats) || plan.out.closed) return
+    const outcome = search.file(entry)
+    if (outcome === undefined) return
+    count(totals, outcome)
+    if (outcome.end.matched) matchedAny = true
   })
-  if (Result.isFailure(plan)) return fail(env, plan.failure)
-  const preGlobs = compileGlobs(args.preGlobs)
-  if (Result.isFailure(preGlobs)) return fail(env, preGlobs.failure)
-  const run = new Run(args, env, plan.success, patterns.success, preGlobs.success, reporter)
-  Walk.walk(given.roots, options, run.visit)
-  plan.success.printer.finish(run.totals)
-  plan.success.out.flush()
-  if (reporter.hadError) return args.quiet && run.matchedAny ? 0 : 2
-  return run.matchedAny ? 0 : 1
+  plan.printer.finish(totals)
+  plan.out.flush()
+  return status(args, reporter, matchedAny)
+}
+
+/**
+ * Roughly how fast one thread searches, in bytes per millisecond, for each
+ * kind of matcher (measured on the benchmark corpus).
+ */
+const throughput: Record<Compile.Cost, number> = { literal: 800_000, literals: 300_000, regex: 40_000 }
+
+/** Workers pay off when a search would take longer than this on one thread. */
+const PARALLEL_MS = 200
+
+/** The files a search will visit, and the input's total size. */
+interface Collected {
+  readonly entries: ReadonlyArray<Walk.Entry>
+  readonly bytes: number
+}
+
+/** The files to search, with the input's total size. */
+const collect = (setup: Setup): Collected => {
+  const entries: Array<Walk.Entry> = []
+  let bytes = 0
+  Walk.walk(setup.given.roots, setup.walk, (entry) => {
+    entries.push(entry)
+    if (!entry.stdin) bytes += Walk.sizeOf(entry.absolute)
+  })
+  return { entries, bytes }
+}
+
+/**
+ * How many workers to search with: none when the search would be quick on
+ * this thread (workers take tens of milliseconds to start), else one per
+ * core, or `-j`.
+ */
+const workerCount = (args: Args, files: number, bytes: number, cost: Compile.Cost): number => {
+  const estimate = bytes / throughput[cost]
+  const explicit = args.threads > 1
+  if (files < 2 || (!explicit && estimate < PARALLEL_MS)) return 0
+  // This thread searches too, so one worker fewer than there are cores.
+  const threads = explicit ? args.threads - 1 : Os.availableParallelism() - 1
+  return Math.min(threads, files, Math.max(1, Math.ceil(estimate / (PARALLEL_MS / 2))))
+}
+
+/** Searches `roots`: in parallel when it is worth it, otherwise on this thread. */
+const search = (setup: Setup): number | Promise<number> => {
+  const built = fileSearch(setup, true)
+  if (Result.isFailure(built)) return fail(setup.env, built.failure)
+  const workerUrl = setup.env.workerUrl
+  if (workerUrl === undefined || setup.args.sort !== undefined || setup.args.threads === 1) {
+    return sequential(built.success, (visit) => Walk.walk(setup.given.roots, setup.walk, visit))
+  }
+  const { bytes, entries } = collect(setup)
+  // Standard input is read here, once: such a search stays on this thread.
+  const cost = built.success.cost
+  const workers = entries.some((e) => e.stdin) ? 0 : workerCount(setup.args, entries.length, bytes, cost)
+  if (workers === 0) return sequential(built.success, (visit) => entries.forEach(visit))
+  const { env, given } = setup
+  const data = { argv: env.argv, env: env.env, cwd: env.cwd, stdoutIsTty: env.stdoutIsTty, ...given }
+  // This thread's own share prints into memory, like a worker's.
+  const local = fileSearch(setup, false)
+  if (Result.isFailure(local)) return fail(env, local.failure)
+  return Parallel.run(
+    built.success,
+    local.success,
+    entries,
+    {
+      workers,
+      url: workerUrl,
+      data,
+      stderr: env.stderr,
+      count,
+      status: (matchedAny) => status(setup.args, setup.reporter, matchedAny)
+    },
+    Printers.totals()
+  )
+}
+
+/**
+ * The search a worker runs: the main thread's command line, printed into
+ * memory without the separators between files.
+ *
+ * @since 0.0.0
+ */
+export const workerSearch = (env: Environment, given: Inputs): Result.Result<FileSearch, string> => {
+  const args = parseArgs(env)
+  if (args.error !== undefined) return Result.fail(args.error)
+  const reporter = new Reporter(args, env)
+  return Result.flatMap(walkOptions(args, env, reporter), (walk) =>
+    fileSearch({ args, env, given, walk, reporter }, false)
+  )
 }
 
 /**
@@ -480,7 +641,7 @@ const search = (args: Args, env: Environment, given: Inputs, options: Walk.WalkO
  *
  * @since 0.0.0
  */
-export const main = (env: Environment): number => {
+export const main = (env: Environment): number | Promise<number> => {
   const args = parseArgs(env)
   if (args.error !== undefined) return fail(env, args.error)
   const done = special(args, env)
@@ -493,5 +654,5 @@ export const main = (env: Environment): number => {
   const options = walkOptions(args, env, reporter)
   if (Result.isFailure(options)) return fail(env, options.failure)
   if (args.special === "files") return listFiles(args, env, given.success.roots, options.success, reporter)
-  return search(args, env, given.success, options.success, reporter)
+  return search({ args, env, given: given.success, walk: options.success, reporter })
 }

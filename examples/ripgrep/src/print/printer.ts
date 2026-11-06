@@ -33,6 +33,8 @@ export interface Totals {
   bytesSearched: number
   searchNanos: number
   startNanos: bigint
+  /** What the JSON summary counts as printed. */
+  printed: number
 }
 
 /**
@@ -48,7 +50,8 @@ export const totals = (): Totals => ({
   bytesPrinted: 0,
   bytesSearched: 0,
   searchNanos: 0,
-  startNanos: process.hrtime.bigint()
+  startNanos: process.hrtime.bigint(),
+  printed: 0
 })
 
 /**
@@ -58,9 +61,30 @@ export const totals = (): Totals => ({
  */
 export interface FilePrinter {
   readonly sink: Sink
-  /** Called once the file has been searched. Returns whether the file counts as a match for the exit status. */
-  readonly end: (result: SearchResult, bytesSearched: number, nanos: number) => boolean
+  /** Called once the file has been searched. */
+  readonly end: (result: SearchResult, bytesSearched: number, nanos: number) => FileEnd
 }
+
+/**
+ * What printing one file came to.
+ *
+ * @since 0.0.0
+ */
+export interface FileEnd {
+  /** Whether the file counts as a match for the exit status. */
+  readonly matched: boolean
+  /** The bytes the JSON summary counts as printed for the file. */
+  readonly printed: number
+  /** Whether the file's output began, and whether that beginning separates it from the file before. */
+  readonly began: "no" | "separate" | "joined"
+}
+
+/**
+ * A file's end with nothing printed but the match status.
+ *
+ * @since 0.0.0
+ */
+export const ended = (matched: boolean): FileEnd => ({ matched, printed: 0, began: "no" })
 
 /**
  * A printer: one of the output modes.
@@ -70,6 +94,8 @@ export interface FilePrinter {
 export interface Printer {
   /** Whether the sink needs every match in a line, not just whether the line matched. */
   readonly allMatches: boolean
+  /** Whether the sink reads line numbers. */
+  readonly lineNumbers: boolean
   readonly file: (info: FileInfo) => FilePrinter
   /** Called after the last file. */
   readonly finish: (totals: Totals) => void
