@@ -1,0 +1,23 @@
+{
+  "name": "effect-parse",
+  // The Vite+ base image: Node + pnpm + the vp CLI. The tag is the catalog's
+  // `vite-plus` pin in pnpm-workspace.yaml; Dependabot cannot move it, so bump it
+  // by hand on the toolchain PR that moves `vite-plus`.
+  "image": "ghcr.io/voidzero-dev/vite-plus:1.4.0",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers-extra/features/ripgrep:1": {},
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
+    "ghcr.io/devcontainer-community/devcontainer-features/jq:1": {}
+  },
+  // Same provisioning as an agent session: .claude/hooks/session-start.sh installs
+  // the pinned Vite+ CLI, links `vp` / `vpx` into ~/.local/bin and runs
+  // `vp install --frozen-lockfile` (see that file's header).
+  "postCreateCommand": "bash .claude/hooks/session-start.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": ["Anthropic.claude-code", "oxc.oxc-vscode"]
+    }
+  },
+  "workspaceFolder": "/workspaces/effect-parse"
+}

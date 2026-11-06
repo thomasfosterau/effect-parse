@@ -46,6 +46,8 @@
 # - the `overrides` keys in pnpm-workspace.yaml (`vite@*`, `vitest@*`,
 #   `effect`) follow their catalog entries and need no bump of their own.
 # - the `npm@11.20.0` that release.yml installs for OIDC publishing.
+# - the `ghcr.io/voidzero-dev/vite-plus:<tag>` image in .devcontainer/devcontainer.json:
+#   it equals the catalog's `vite-plus` pin, moved on the toolchain PR.
 #
 # The `github-actions` entry also scans the local composite action under
 # .github/actions/, whose `uses:` pins it would otherwise never see. Every
@@ -110,3 +112,19 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "ci"
+  # The dev container's features (.devcontainer/devcontainer.json) and their
+  # lockfile. The base image tag is not a feature: it is the catalog's
+  # `vite-plus` pin, moved by hand on the toolchain PR.
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    target-branch: "trunk"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 1
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
