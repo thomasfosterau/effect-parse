@@ -956,6 +956,39 @@ describe("compiled combinators", () => {
     Array.from({ length: 300 }).forEach(() => same(bytes, new TextEncoder().encode(text())))
   })
 
+  it("long literals, compared many bytes at a time", () => {
+    const words = ["Sherlock Holmes, consulting detective", "null", "ab", "Baker Street, 221B"]
+    const grammar = Parser.repeat(
+      Parser.alt(
+        ...words.map((w) => Token.literal(w)),
+        ...words.map((w) => Ascii.caseless(w)),
+        Token.literal("é😀éé😀é"),
+        Token.anyToken<string>()
+      )
+    )
+    const bytes = Parser.repeat(
+      Parser.alt(
+        ...words.map((w) => Token.literal(new TextEncoder().encode(w))),
+        ...words.map((w) => Ascii.caseless(new TextEncoder().encode(w))),
+        Token.anyToken<Uint8Array>()
+      )
+    )
+    const random = rng(29)
+    // Each literal, or one with a byte changed or its case flipped, at every position
+    const variants = words.flatMap((w) =>
+      Array.from({ length: w.length + 1 }, (_, i) =>
+        i === w.length ? w : w.slice(0, i) + (random() < 0.5 ? "x" : (w[i]?.toUpperCase() ?? "")) + w.slice(i + 1)
+      )
+    )
+    Array.from({ length: 400 }).forEach(() => {
+      const input = Array.from({ length: 4 }, () => variants[Math.floor(random() * variants.length)]).join(
+        random() < 0.5 ? "" : "é"
+      )
+      same(grammar, input)
+      same(bytes, new TextEncoder().encode(input))
+    })
+  })
+
   it("Binary numbers", () => {
     const grammars: ReadonlyArray<Parser.Parser<any, any, never, Uint8Array>> = [
       Parser.repeat(Binary.beU32),
