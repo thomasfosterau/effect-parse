@@ -60,11 +60,15 @@ export const rg = (args: ReadonlyArray<string>, cwd: string, env: Record<string,
   run("rg", args, cwd, env, input)
 
 /**
- * Whether ripgrep is installed.
+ * Whether ripgrep 14.1, the release `erg` implements, is installed. Other
+ * releases print some things differently, so the comparisons skip them.
  *
  * @since 0.0.0
  */
-export const hasRipgrep = (): boolean => ChildProcess.spawnSync("rg", ["--version"]).status === 0
+export const hasRipgrep = (): boolean => {
+  const r = ChildProcess.spawnSync("rg", ["--version"], { encoding: "utf8" })
+  return r.status === 0 && r.stdout.startsWith("ripgrep 14.1.")
+}
 
 /**
  * Replaces the timings in `--json` and `--stats` output, which differ on

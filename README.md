@@ -612,6 +612,8 @@ The `Nom` module provides the nom names directly, with nom's argument orders, fo
 
 `vp run bench` (from a clone) compares the JSON examples, on each encoding, with `JSON.parse`.
 
+[`examples/ripgrep`](examples/ripgrep) is a larger example, a package of its own: `erg`, a search tool with ripgrep's command line whose regex engine is built from these combinators (Rust's regex syntax parsed with effect-parse, and compiled to a backtracking matcher over UTF-8 bytes), with a harness that benchmarks it against ripgrep, grep and other search tools, and tests that compare its output with ripgrep's.
+
 ## Design
 
 [`docs/DESIGN.md`](docs/DESIGN.md) records the research into nom, winnow and Effect, and the reasoning behind each decision in this port.
