@@ -22,7 +22,8 @@ import * as Ast from "./ast.ts"
 import * as CharSet from "./charset.ts"
 import type { Ranges } from "./charset.ts"
 import { LineDfa } from "./dfa.ts"
-import { LiteralFinder, SequenceFinder } from "./finder.ts"
+import type { Finder } from "./finder.ts"
+import { LiteralFinder, literalFinder, sequenceFinder } from "./finder.ts"
 import * as Prefilter from "./prefilter.ts"
 
 type Bytes = Uint8Array
@@ -545,7 +546,6 @@ type Find = (state: Input.State<Bytes>, from: number) => Match | undefined
  * contains (outside multiline mode, where a match lies within one line); or
  * from every position a match can start at.
  */
-type Finder = LiteralFinder | SequenceFinder
 
 const shortest = (set: ReadonlyArray<Uint8Array> | undefined): number =>
   set === undefined ? 0 : Math.min(...set.map((l) => l.length))
@@ -568,19 +568,18 @@ const prefixStrategy = (
   found: (s: number, e: number) => Match
 ): Find => {
   const sequence = pre.sequence?.atStart === true ? pre.sequence : undefined
-  const literals = pre.prefixes === undefined ? undefined : new LiteralFinder(pre.prefixes)
-  const finder: Finder =
-    literals === undefined || (sequence !== undefined && preferSequence(pre.prefixes, sequence))
-      ? new SequenceFinder(sequence?.sets ?? [])
-      : literals
+  const prefixes = pre.prefixes
+  const bySequence = prefixes === undefined || (sequence !== undefined && preferSequence(prefixes, sequence))
+  const finder: Finder = bySequence ? sequenceFinder(sequence?.sets ?? []) : literalFinder(prefixes)
   // A set of plain literals needs no matcher: an occurrence is a match.
-  const literal = finder === literals && !options.captures && Prefilter.isLiteralSet(regex)
+  const literals =
+    bySequence || options.captures || !Prefilter.isLiteralSet(regex) ? undefined : new LiteralFinder(prefixes)
   return (state, from) => {
     const input = state.input
     for (let p = from; ; p++) {
       p = finder.find(input, p)
       if (p < 0) return undefined
-      if (literal) return found(p, p + (literals?.literalAt(input, p)?.length ?? 0))
+      if (literals !== undefined) return found(p, p + (literals.literalAt(input, p)?.length ?? 0))
       const e = attempt(state, p)
       if (e >= 0) return found(p, e)
     }
@@ -670,8 +669,8 @@ const strategy = (
   if (dfa !== undefined && requiredLength < 3) return dfaStrategy(dfa, lineTerminator, scan)
   if (requiredLength > 0) {
     const finder: Finder = preferSequence(pre.required, pre.sequence)
-      ? new SequenceFinder(pre.sequence?.sets ?? [])
-      : new LiteralFinder(pre.required ?? [])
+      ? sequenceFinder(pre.sequence?.sets ?? [])
+      : literalFinder(pre.required ?? [])
     return lineStrategy(finder, dfa, lineTerminator, scan)
   }
   if (dfa !== undefined) return dfaStrategy(dfa, lineTerminator, scan)
