@@ -1,0 +1,486 @@
+/**
+ * The program: parses the command line, builds the matcher and the printer,
+ * walks the paths and searches each file, and returns the exit status
+ * (0: a match was found, 1: none, 2: an error occurred).
+ *
+ * @since 0.0.0
+ */
+import * as ChildProcess from "node:child_process"
+import * as Fs from "node:fs"
+import * as Os from "node:os"
+import * as Path from "node:path"
+import * as Predicate from "effect/Predicate"
+import * as Result from "effect/Result"
+import * as Cli from "./cli/args.ts"
+import type { Args } from "./cli/args.ts"
+import * as Help from "./cli/help.ts"
+import * as Color from "./print/color.ts"
+import * as Json from "./print/json.ts"
+import { Output } from "./print/output.ts"
+import type { Printer } from "./print/printer.ts"
+import * as Printers from "./print/printer.ts"
+import * as Standard from "./print/standard.ts"
+import * as Summary from "./print/summary.ts"
+import { TooDeep } from "./regex/compile.ts"
+import * as Input from "./search/input.ts"
+import * as Pattern from "./search/pattern.ts"
+import * as Searcher from "./search/searcher.ts"
+import * as Glob from "./walk/glob.ts"
+import * as Types from "./walk/types.ts"
+import * as Walk from "./walk/walk.ts"
+import * as Arr from "effect/Array"
+
+/**
+ * The process environment the program reads.
+ *
+ * @since 0.0.0
+ */
+export interface Environment {
+  readonly argv: ReadonlyArray<string>
+  readonly env: Readonly<Record<string, string | undefined>>
+  readonly cwd: string
+  readonly stdoutIsTty: boolean
+  /** The file descriptor results are written to. */
+  readonly stdout: number
+  /** Writes a message to standard error. */
+  readonly stderr: (message: string) => void
+  /** Standard input: whether it is a file or pipe (searched when no path is given), and its contents. */
+  readonly stdin: { readonly readable: boolean; readonly read: () => Uint8Array }
+}
+
+const encoder = new TextEncoder()
+
+/** Reads the configuration file named by `RIPGREP_CONFIG_PATH`. */
+const configArgs = (env: Environment): ReadonlyArray<string> => {
+  const file = env.env.RIPGREP_CONFIG_PATH
+  if (file === undefined || file === "") return []
+  try {
+    return Cli.configArguments(Fs.readFileSync(file, "utf8"))
+  } catch (error) {
+    env.stderr(`erg: ${file}: ${Walk.describeError(error)}\n`)
+    return []
+  }
+}
+
+const parseArgs = (env: Environment): Args => {
+  const cli = Cli.parseArgv(env.argv, Cli.defaults())
+  if (cli.noConfig) return cli
+  const fromConfig = configArgs(env)
+  return Arr.isReadonlyArrayEmpty(fromConfig) ? cli : Cli.parseArgv([...fromConfig, ...env.argv], Cli.defaults())
+}
+
+const readPatternFile = (file: string, env: Environment): ReadonlyArray<string> => {
+  const text =
+    file === "-" ? new TextDecoder().decode(env.stdin.read()) : Fs.readFileSync(Path.resolve(env.cwd, file), "utf8")
+  const lines = text.split(/\r?\n/)
+  if (lines.at(-1) === "") lines.pop()
+  return lines
+}
+
+const hostname = (args: Args): string => {
+  if (args.hostnameBin === undefined) return Os.hostname()
+  const r = ChildProcess.spawnSync(args.hostnameBin, { encoding: "utf8" })
+  return r.status === 0 ? r.stdout.trim() : Os.hostname()
+}
+
+interface Plan {
+  readonly printer: Printer
+  readonly out: Output
+}
+
+const usesColor = (args: Args, env: Environment): boolean =>
+  args.color === "always" ||
+  args.color === "ansi" ||
+  (args.color === "auto" && env.stdoutIsTty && env.env.TERM !== "dumb" && env.env.NO_COLOR === undefined)
+
+type Colors = ReadonlyMap<Color.ColorTarget, Color.Spec> | undefined
+
+/** What every printer needs to know about the run. */
+interface PrintContext {
+  readonly args: Args
+  readonly env: Environment
+  readonly colors: Colors
+  readonly names: ReadonlyArray<string | undefined>
+  readonly lineTerminator: number
+  readonly withFilename: boolean
+}
+
+const summaryPrinter = (c: PrintContext, mode: Summary.SummaryOptions["mode"], out: Output): Printer => {
+  const { args } = c
+  return Summary.summaryPrinter(
+    {
+      mode,
+      withFilename: c.withFilename,
+      includeZero: args.includeZero,
+      nullPath: args.nullPath,
+      fieldMatchSeparator: args.fieldMatchSeparator,
+      colors: c.colors,
+      invert: args.invertMatch,
+      quiet: args.quiet,
+      stats: args.stats,
+      lineTerminator: String.fromCharCode(c.lineTerminator)
+    },
+    out
+  )
+}
+
+/** Whether context lines were asked for (`-A`, `-B`, `-C`). */
+const hasContext = (args: Args): boolean =>
+  (args.afterContext ?? args.context ?? 0) > 0 || (args.beforeContext ?? args.context ?? 0) > 0
+
+const hyperlinkOf = (args: Args): { readonly format: string; readonly host: string } | undefined => {
+  if (args.hyperlinkFormat === undefined) return undefined
+  return { format: Color.hyperlinkAliases.get(args.hyperlinkFormat) ?? args.hyperlinkFormat, host: hostname(args) }
+}
+
+const standardPrinter = (c: PrintContext, out: Output): Printer => {
+  const { args, env } = c
+  const column = args.column ?? args.vimgrep
+  return Standard.standardPrinter(
+    {
+      withFilename: c.withFilename,
+      heading: !args.vimgrep && (args.heading ?? env.stdoutIsTty),
+      lineNumber: args.vimgrep || (args.lineNumber ?? (env.stdoutIsTty || column)),
+      column,
+      byteOffset: args.byteOffset,
+      onlyMatching: args.onlyMatching,
+      vimgrep: args.vimgrep,
+      replace: args.replace === undefined ? undefined : Printers.parseTemplate(args.replace, c.names),
+      trim: args.trim,
+      maxColumns: args.maxColumns,
+      maxColumnsPreview: args.maxColumnsPreview,
+      nullPath: args.nullPath,
+      contextSeparator: args.contextSeparator,
+      context: !args.passthru && hasContext(args),
+      fieldMatchSeparator: args.fieldMatchSeparator,
+      fieldContextSeparator: args.fieldContextSeparator,
+      colors: c.colors,
+      hyperlink: hyperlinkOf(args),
+      lineTerminator: c.lineTerminator,
+      invert: args.invertMatch,
+      stats: args.stats,
+      quiet: args.quiet
+    },
+    out
+  )
+}
+
+const makePrinter = (c: Omit<PrintContext, "colors">): Result.Result<Plan, string> => {
+  const { args, env } = c
+  const out = new Output(
+    env.stdout,
+    args.blockBuffered === false || (args.blockBuffered === undefined && env.stdoutIsTty)
+  )
+  // ripgrep checks --colors even when colours are off.
+  const specs = Color.parseSpecs(args.colors)
+  if (Predicate.isString(specs)) return Result.fail(`error parsing flag --colors: ${specs}`)
+  const context = { ...c, colors: usesColor(args, env) ? specs : undefined }
+  const mode = args.onlyMatching && args.mode === "count" ? "countMatches" : args.mode
+  if (mode === "json")
+    return Result.succeed({
+      out,
+      printer: Json.jsonPrinter({ lineNumber: args.lineNumber !== false, quiet: args.quiet }, out)
+    })
+  if (mode !== "standard") return Result.succeed({ out, printer: summaryPrinter(context, mode, out) })
+  return Result.succeed({ out, printer: standardPrinter(context, out) })
+}
+
+const displayPath = (path: string, args: Args): string =>
+  args.pathSeparator === undefined ? path : path.replaceAll("/", args.pathSeparator)
+
+/** Collects errors: they are printed (unless `--no-messages`) and make the exit status 2. */
+class Reporter {
+  hadError = false
+  private readonly args: Args
+  private readonly env: Environment
+  constructor(args: Args, env: Environment) {
+    this.args = args
+    this.env = env
+  }
+  readonly report = (message: string): void => {
+    this.hadError = true
+    if (!this.args.noMessages) this.env.stderr(`erg: ${message}\n`)
+  }
+  readonly reportIgnore = (message: string): void => {
+    if (!this.args.noMessages && !this.args.noIgnoreMessages) this.env.stderr(`erg: ${message}\n`)
+  }
+}
+
+const walkOptions = (args: Args, env: Environment, reporter: Reporter): Result.Result<Walk.WalkOptions, string> =>
+  Types.definitions(args.types).pipe(
+    Result.flatMap((defs) => Types.filter(defs, args.types)),
+    Result.flatMap((types) =>
+      Result.map(Walk.buildOverrides(args, env.cwd), (overrides) => ({
+        args,
+        overrides,
+        types,
+        cwd: env.cwd,
+        onError: reporter.report,
+        onIgnoreError: reporter.reportIgnore
+      }))
+    )
+  )
+
+const readEntry = (entry: Walk.Entry, args: Args, preGlobs: ReadonlyArray<Glob.Glob>, env: Environment): Uint8Array => {
+  if (entry.stdin) return env.stdin.read()
+  const name = encoder.encode(Path.basename(entry.path))
+  const pre = Arr.isReadonlyArrayEmpty(preGlobs) || preGlobs.some((g) => g.matches(name)) ? args.pre : undefined
+  let bytes =
+    pre === undefined ? new Uint8Array(Fs.readFileSync(entry.absolute)) : Input.preprocess(pre, entry.absolute, env.cwd)
+  if (args.searchZip && pre === undefined) bytes = Input.decompress(entry.path, bytes)
+  return Input.decode(bytes, args.encoding)
+}
+
+/** `-h`, `--help`, `-V`, `--pcre2-version`, `--generate` and `--type-list`: their exit status, or `undefined` to search. */
+const special = (args: Args, env: Environment): number | undefined => {
+  const say = (text: string) => {
+    const out = new Output(env.stdout, false)
+    out.text(text)
+    out.flush()
+    return 0
+  }
+  switch (args.special) {
+    case "shortHelp":
+      return say(Help.shortHelp())
+    case "longHelp":
+      return say(Help.longHelp())
+    case "version":
+      return say(Help.versionText())
+    case "generate":
+      return say(Help.generate(args.generate ?? "man"))
+    case "pcre2Version":
+      env.stderr("PCRE2 is not available in this build of ripgrep.\n")
+      return 1
+    case "typeList":
+      return Result.match(Types.definitions(args.types), {
+        onFailure: (message) => fail(env, message),
+        onSuccess: (defs) => say(Types.list(defs))
+      })
+    default:
+      return undefined
+  }
+}
+
+/** Prints an error and returns exit status 2. */
+const fail = (env: Environment, message: string): number => {
+  env.stderr(`erg: ${message}\n`)
+  return 2
+}
+
+/** Flags this build cannot honour. */
+const unsupported = (args: Args): string | undefined =>
+  args.pcre2 || args.engine === "pcre2"
+    ? "PCRE2 is not available in this build of ripgrep."
+    : Input.checkEncoding(args.encoding)
+
+/** The patterns (`-e`, `-f`, or the first positional) and the paths to search. */
+interface Inputs {
+  readonly sources: ReadonlyArray<string>
+  readonly roots: ReadonlyArray<string>
+}
+
+const inputs = (args: Args, env: Environment): Result.Result<Inputs, string> => {
+  const positional = [...args.positional]
+  const sources = [...args.patterns]
+  try {
+    for (const f of args.patternFiles) sources.push(...readPatternFile(f, env))
+  } catch (error) {
+    return Result.fail(Walk.describeError(error))
+  }
+  const filesMode = args.special === "files"
+  if (!filesMode && Arr.isReadonlyArrayEmpty(args.patterns) && Arr.isReadonlyArrayEmpty(args.patternFiles)) {
+    const first = positional.shift()
+    if (first === undefined) return Result.fail("ripgrep requires at least one pattern to execute a search")
+    sources.push(first)
+  }
+  // With no path, ripgrep searches standard input if it is a file or pipe,
+  // and the current directory ("", printed without "./") otherwise.
+  if (Arr.isReadonlyArrayNonEmpty(positional)) return Result.succeed({ sources, roots: positional })
+  return Result.succeed({ sources, roots: !filesMode && env.stdin.readable ? ["-"] : [""] })
+}
+
+/** `--files`: the paths that would be searched. */
+const listFiles = (
+  args: Args,
+  env: Environment,
+  roots: ReadonlyArray<string>,
+  options: Walk.WalkOptions,
+  reporter: Reporter
+): number => {
+  const out = new Output(env.stdout, env.stdoutIsTty)
+  let any = false
+  Walk.walk(roots, options, (entry) => {
+    if (entry.stdin) return
+    any = true
+    if (args.quiet) return
+    out.text(displayPath(entry.path, args))
+    out.text(args.nullPath ? "\0" : "\n")
+    out.endLine()
+  })
+  out.flush()
+  return reporter.hadError ? 2 : any ? 0 : 1
+}
+
+/** Whether to print file names by default: for more than one path, or any directory. */
+const defaultWithFilename = (args: Args, env: Environment, roots: ReadonlyArray<string>): boolean =>
+  args.withFilename ??
+  (args.vimgrep ||
+    roots.length > 1 ||
+    roots.some((r) => r === "" || (r !== "-" && Walk.isDirectoryPath(Path.resolve(env.cwd, r)))))
+
+const compileGlobs = (globs: ReadonlyArray<string>): Result.Result<ReadonlyArray<Glob.Glob>, string> => {
+  const compiled: Array<Glob.Glob> = []
+  for (const g of globs) {
+    const glob = Glob.compileGlob(g, false)
+    if (Result.isFailure(glob)) return Result.fail(glob.failure)
+    compiled.push(glob.success)
+  }
+  return Result.succeed(compiled)
+}
+
+/** The searcher's settings for explicit (named) and implicit (walked) files. */
+const searchOptions = (args: Args, patterns: Pattern.Patterns, allMatches: boolean) => {
+  const summaryStop = args.mode === "filesWithMatches" || args.mode === "filesWithoutMatch"
+  const contextLines = args.mode === "standard" || args.mode === "json"
+  const make = (explicit: boolean): Searcher.SearchOptions => ({
+    matcher: patterns.matcher,
+    lineTerminator: patterns.lineTerminator,
+    invert: args.invertMatch,
+    // --stats needs every match, so it turns off the early exits.
+    maxCount: (args.quiet || summaryStop) && !args.stats ? 1 : args.maxCount,
+    before: contextLines && !args.passthru ? (args.beforeContext ?? args.context ?? 0) : 0,
+    after: contextLines && !args.passthru ? (args.afterContext ?? args.context ?? 0) : 0,
+    passthru: args.passthru && contextLines,
+    stopOnNonmatch: args.stopOnNonmatch,
+    allMatches,
+    multiline: args.multiline,
+    // With --null-data, NUL ends lines, so no file is binary.
+    binary: args.text || args.nullData ? "none" : explicit || args.binary ? "convert" : "quit"
+  })
+  return { explicit: make(true), implicit: make(false) }
+}
+
+/** The search over every file, accumulating totals. */
+class Run {
+  matchedAny = false
+  readonly totals = Printers.totals()
+  private readonly args: Args
+  private readonly env: Environment
+  private readonly plan: Plan
+  private readonly options: { readonly explicit: Searcher.SearchOptions; readonly implicit: Searcher.SearchOptions }
+  private readonly preGlobs: ReadonlyArray<Glob.Glob>
+  private readonly reporter: Reporter
+
+  constructor(
+    args: Args,
+    env: Environment,
+    plan: Plan,
+    patterns: Pattern.Patterns,
+    preGlobs: ReadonlyArray<Glob.Glob>,
+    reporter: Reporter
+  ) {
+    this.args = args
+    this.env = env
+    this.plan = plan
+    this.options = searchOptions(args, patterns, plan.printer.allMatches)
+    this.preGlobs = preGlobs
+    this.reporter = reporter
+  }
+
+  readonly visit = (entry: Walk.Entry): void => {
+    if ((this.args.quiet && this.matchedAny && !this.args.stats) || this.plan.out.closed) return
+    let bytes: Uint8Array
+    try {
+      bytes = readEntry(entry, this.args, this.preGlobs, this.env)
+    } catch (error) {
+      this.reporter.report(`${entry.path}: ${Walk.describeError(error)}`)
+      return
+    }
+    const filePrinter = this.plan.printer.file({ path: displayPath(entry.path, this.args), absolute: entry.absolute })
+    const started = process.hrtime.bigint()
+    let result: Searcher.SearchResult
+    try {
+      result = Searcher.search(bytes, entry.explicit ? this.options.explicit : this.options.implicit, filePrinter.sink)
+    } catch (error) {
+      if (!(error instanceof TooDeep)) throw error
+      this.reporter.report(`${entry.path}: the pattern nested too deeply at byte offset ${error.offset}`)
+      return
+    }
+    const nanos = Number(process.hrtime.bigint() - started)
+    if (filePrinter.end(result, result.bytesSearched, nanos)) this.matchedAny = true
+    this.count(result, nanos)
+  }
+
+  private count(result: Searcher.SearchResult, nanos: number): void {
+    const t = this.totals
+    t.filesSearched++
+    t.bytesSearched += result.bytesSearched
+    t.searchNanos += nanos
+    t.matches += result.matches
+    t.matchedLines += result.matchedLines
+    if (result.matchedLines > 0) t.filesWithMatches++
+  }
+}
+
+/** Searches `roots` with the patterns, printing as it goes; returns the exit status. */
+const search = (args: Args, env: Environment, given: Inputs, options: Walk.WalkOptions, reporter: Reporter): number => {
+  const patterns = Pattern.build(args, given.sources, Pattern.backend(env.env.ERG_COMPILER))
+  if (Result.isFailure(patterns)) return fail(env, patterns.failure)
+  const plan = makePrinter({
+    args,
+    env,
+    names: patterns.success.names,
+    lineTerminator: patterns.success.lineTerminator,
+    withFilename: defaultWithFilename(args, env, given.roots)
+  })
+  if (Result.isFailure(plan)) return fail(env, plan.failure)
+  const preGlobs = compileGlobs(args.preGlobs)
+  if (Result.isFailure(preGlobs)) return fail(env, preGlobs.failure)
+  const run = new Run(args, env, plan.success, patterns.success, preGlobs.success, reporter)
+  Walk.walk(given.roots, options, run.visit)
+  plan.success.printer.finish(run.totals)
+  plan.success.out.flush()
+  if (reporter.hadError) return args.quiet && run.matchedAny ? 0 : 2
+  return run.matchedAny ? 0 : 1
+}
+
+/**
+ * Runs the program and returns its exit status.
+ *
+ * @example
+ * ```ts
+ * import { main } from "./main.ts"
+ *
+ * const status = main({
+ *   argv: ["-n", "TODO", "src"],
+ *   env: process.env,
+ *   cwd: process.cwd(),
+ *   stdoutIsTty: false,
+ *   stdout: 1,
+ *   stderr: (m) => process.stderr.write(m),
+ *   stdin: { readable: false, read: () => new Uint8Array() }
+ * })
+ * ```
+ *
+ * @since 0.0.0
+ */
+export const main = (env: Environment): number => {
+  let args: Args
+  try {
+    args = parseArgs(env)
+  } catch (error) {
+    if (error instanceof Cli.UsageError) return fail(env, error.message)
+    throw error
+  }
+  const done = special(args, env)
+  if (done !== undefined) return done
+  const problem = unsupported(args)
+  if (problem !== undefined) return fail(env, problem)
+  const given = inputs(args, env)
+  if (Result.isFailure(given)) return fail(env, given.failure)
+  const reporter = new Reporter(args, env)
+  const options = walkOptions(args, env, reporter)
+  if (Result.isFailure(options)) return fail(env, options.failure)
+  if (args.special === "files") return listFiles(args, env, given.success.roots, options.success, reporter)
+  return search(args, env, given.success, options.success, reporter)
+}
