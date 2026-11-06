@@ -100,6 +100,7 @@ export const jsonPrinter = (o: JsonOptions, out: Output): Printer => {
     }
   }
   return {
+    countsOnly: false,
     allMatches: true,
     lineNumbers: o.lineNumber,
     file,

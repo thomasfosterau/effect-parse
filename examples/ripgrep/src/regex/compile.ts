@@ -99,6 +99,12 @@ export interface Matcher {
   readonly slots: ReadonlyArray<number>
   /** The number of groups, group 0 (the whole match) included. */
   readonly groups: number
+  /**
+   * For a set of literals outside multiline mode: how many lines the input
+   * has and how many hold a match, in one compiled scan (see
+   * {@link lineCounter}); `undefined` for other regexes.
+   */
+  readonly countLines: ((input: Bytes) => LineCounts | undefined) | undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -765,6 +771,49 @@ const reverseScan = (
   }
 }
 
+/**
+ * How many lines an input has, and how many of them hold a match.
+ *
+ * @since 0.0.0
+ */
+export interface LineCounts {
+  readonly lines: number
+  readonly matched: number
+}
+
+/**
+ * Counts lines and the lines holding one of `literals` with one parse,
+ * compiled by `Compiler.wasm`: from each line start, `Token.takeUntilAny`
+ * finds the first literal or line terminator (Teddy, in SIMD); a literal
+ * first makes it a matching line, whose rest `Token.takeTill` skips (a
+ * vectorised run). A last line without a terminator and without a literal
+ * is the rest of the input.
+ */
+const lineCounter = (literals: ReadonlyArray<Uint8Array>, t: number): ((input: Bytes) => LineCounts | undefined) => {
+  const end = Uint8Array.of(t)
+  const plain = Parser.as(Token.literal(end), 0)
+  const matching = Parser.as(Parser.seq(Token.takeTill<Uint8Array>([t]), Parser.opt(Token.literal(end))), 1)
+  const line = Parser.alt(
+    Parser.preceded(Token.takeUntilAny([...literals, end]), Parser.alt(plain, matching)),
+    Parser.as(Token.takeWhile<Uint8Array>([Token.range(0, 255)], { min: 1 }), 0)
+  )
+  const counted = Parser.fold(line, {
+    init: () => ({ lines: 0, matched: 0 }),
+    f: (acc: { lines: number; matched: number }, x: number) => {
+      acc.lines++
+      acc.matched += x
+      return acc
+    }
+  })
+  // Compiled on first use: most searches never count
+  let run: ((state: Input.State<Bytes>) => LineCounts | Input.Fail) | undefined
+  return (input) => {
+    run ??= Compiler.runner(Compiler.wasm(counted), noDiagnostics)
+    const r = run(new Input.State(input))
+    return r === Input.Fail ? undefined : r
+  }
+}
+
 /** A matcher's two searches: for matches, and for the lines that hold one (see {@link Matcher.findLine}). */
 interface Strategies {
   readonly find: Find
@@ -847,6 +896,10 @@ export const compile = (regex: Regex, groups: number, lineTerminator: number, op
     cost: costOf(first, options.multiline),
     takeOverflow,
     slots,
-    groups
+    groups,
+    countLines:
+      options.multiline || options.captures || !Prefilter.isLiteralSet(regex) || first.prefixes === undefined
+        ? undefined
+        : lineCounter(first.prefixes, lineTerminator)
   }
 }

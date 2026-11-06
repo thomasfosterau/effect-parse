@@ -393,7 +393,7 @@ const binaryOf = (args: Args, explicit: boolean): Searcher.BinaryMode =>
   args.text || args.nullData ? "none" : explicit || args.binary ? "convert" : "quit"
 
 /** The searcher's settings for explicit (named) and implicit (walked) files. */
-const searchOptions = (args: Args, patterns: Pattern.Patterns, allMatches: boolean, lineNumbers: boolean) => {
+const searchOptions = (args: Args, patterns: Pattern.Patterns, printer: Printer) => {
   const [before, after] = contextOf(args)
   const make = (explicit: boolean): Searcher.SearchOptions => ({
     matcher: patterns.matcher,
@@ -404,8 +404,9 @@ const searchOptions = (args: Args, patterns: Pattern.Patterns, allMatches: boole
     after,
     passthru: args.passthru && (args.mode === "standard" || args.mode === "json"),
     stopOnNonmatch: args.stopOnNonmatch,
-    allMatches,
-    lineNumbers,
+    allMatches: printer.allMatches,
+    countsOnly: printer.countsOnly,
+    lineNumbers: printer.lineNumbers,
     lazyBinary: lazyBinaryOf(args),
     multiline: args.multiline,
     binary: binaryOf(args, explicit)
@@ -450,7 +451,7 @@ export class FileSearch {
     this.plan = plan
     this.matcher = patterns.matcher
     this.cost = patterns.matcher.cost
-    this.options = searchOptions(setup.args, patterns, plan.printer.allMatches, plan.printer.lineNumbers)
+    this.options = searchOptions(setup.args, patterns, plan.printer)
     this.preGlobs = preGlobs
   }
 

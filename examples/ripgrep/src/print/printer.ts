@@ -94,6 +94,8 @@ export const ended = (matched: boolean): FileEnd => ({ matched, printed: 0, bega
 export interface Printer {
   /** Whether the sink needs every match in a line, not just whether the line matched. */
   readonly allMatches: boolean
+  /** Whether it prints nothing per line: a file's counts of matching lines are all it reads (`-c`, `-l`, `-q`). */
+  readonly countsOnly: boolean
   /** Whether the sink reads line numbers. */
   readonly lineNumbers: boolean
   readonly file: (info: FileInfo) => FilePrinter

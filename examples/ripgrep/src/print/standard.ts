@@ -335,6 +335,7 @@ export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
   return {
     // vimgrep and hyperlinks need them even when they are not printed.
     lineNumbers: o.lineNumber || o.vimgrep || o.hyperlink !== undefined,
+    countsOnly: false,
     allMatches: o.onlyMatching || o.vimgrep || o.colors !== undefined || o.replace !== undefined || o.column || o.stats,
     file,
     finish: (t: Totals) => {
