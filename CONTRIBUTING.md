@@ -51,4 +51,5 @@ vp run bench:native                  # compiled JSON parser vs JSON.parse
 vp run bench:stream                  # parsing a fetch body as it downloads vs Response.json()
 vp run bench:gen                     # parsers built inside a Parser.gen body vs hoisted
 vp run bench:syntax                  # building a syntax tree, and reparsing after edits
+vp run bench:jq                      # the jq example (examples/jq.ts) vs the real jq; needs jq on the PATH
 ```

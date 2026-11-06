@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test"
 import * as Arithmetic from "../examples/arithmetic.js"
 import * as Http from "../examples/http.js"
 import * as Ini from "../examples/ini.js"
+import * as Jq from "../examples/jq.js"
 import * as Json from "../examples/json.js"
 import * as JsonFast from "../examples/json-fast.js"
 import { jsonGrammar } from "../examples/json-text.js"
@@ -100,6 +101,68 @@ describe("examples/json-fast", () => {
     expectSuccess(JsonFast.json, '"\\udc00"', "\udc00")
     const err = expectFailure(JsonFast.json, '"\\ud83d\\u0041"')
     expect(err.mode).toBe("Cut")
+  })
+})
+
+describe("examples/jq", () => {
+  const doc = '{"a":[1,2,{"b":"x"}],"c":null,"d":"hi","n":3} {"a":[],"n":-1}'
+  // Each filter with what jq 1.7 prints for `doc` with `-c`, one line per output
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    [".", '{"a":[1,2,{"b":"x"}],"c":null,"d":"hi","n":3}|{"a":[],"n":-1}'],
+    [".a[2].b", '"x"|null'],
+    [".a[]?", '1|2|{"b":"x"}'],
+    [".[]?", '[1,2,{"b":"x"}]|null|"hi"|3|[]|-1'],
+    [".a[1:]", '[2,{"b":"x"}]|[]'],
+    [".a[:1]", "[1]|[]"],
+    ["[.a[] | numbers] | add", "3|null"],
+    ["to_entries | map(.key)", '["a","c","d","n"]|["a","n"]'],
+    ['{n, d: .d, (.d // "z"): 1}', '{"n":3,"d":"hi","hi":1}|{"n":-1,"d":null,"z":1}'],
+    ['if .n > 0 then "pos" elif .n == 0 then "zero" else "neg" end', '"pos"|"neg"'],
+    ['try error("x") catch .', '"x"|"x"'],
+    ["select(.n > 0) | .d", '"hi"'],
+    ["[.[] | type]", '["array","null","string","number"]|["array","number"]'],
+    ["[3,1,2] | sort_by(-.)", "[3,2,1]|[3,2,1]"],
+    ["[.. | numbers]", "[1,2,3]|[-1]"],
+    ["[limit(2; .a[])]", "[1,2]|[]"],
+    ['"x" * 0', '""|""'],
+    [".end", "null|null"],
+    ["{total: .a | length}", '{"total":3}|{"total":0}'],
+    [".a[0] == 1 and .n > 1 or false", "true|false"]
+  ]
+
+  it("agrees with jq, with every backend", () => {
+    const backends = ["interpreted", "closure", "jit", "wasm"] as const
+    backends.forEach((backend) =>
+      cases.forEach(([filter, expected]) => {
+        const { output, errors } = Jq.run(Jq.compile(filter), doc, { compact: true, backend })
+        expect(errors, `${filter} (${backend})`).toEqual([])
+        expect(output.trimEnd().split("\n").join("|"), `${filter} (${backend})`).toBe(expected)
+      })
+    )
+  })
+
+  it("reads UTF-8 bytes", () => {
+    const { output } = Jq.run(Jq.compile(".[]"), new TextEncoder().encode('["é", 1]'), { compact: true })
+    expect(output).toBe('"é"\n1\n')
+  })
+
+  it("pretty-prints, raw strings and slurps", () => {
+    expect(Jq.run(Jq.compile("."), '{"a":[1]}').output).toBe('{\n  "a": [\n    1\n  ]\n}\n')
+    expect(Jq.run(Jq.compile(".a"), '{"a":"x\\ny"}', { raw: true }).output).toBe("x\ny\n")
+    expect(Jq.run(Jq.compile("add"), "1 2 3", { slurp: true }).output).toBe("6\n")
+    expect(Jq.run(Jq.compile("[1, 2]"), "", { nullInput: true, compact: true }).output).toBe("[1,2]\n")
+  })
+
+  it("reports runtime errors per input, keeping earlier outputs", () => {
+    const { output, errors } = Jq.run(Jq.compile(".a, (.a | ascii_upcase)"), '{"a":1} {"a":"x"}', { compact: true })
+    expect(output).toBe('1\n"x"\n"X"\n')
+    expect(errors).toEqual(["jq: error: number (1) cannot be uppercased"])
+  })
+
+  it("rejects malformed programs and input", () => {
+    expect(() => Jq.compile(".a |")).toThrow("found end of input")
+    expect(() => Jq.run(Jq.compile("."), '{"a": }')).toThrow("expected value")
+    expect(() => Jq.compile("nope")).toThrow("nope/0 is not defined")
   })
 })
 
