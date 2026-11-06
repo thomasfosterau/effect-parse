@@ -6,8 +6,7 @@
  * time is only reported for a correct answer.
  *
  * ```sh
- * vp run build                       # erg imports the built package
- * node bench/compare.ts              # default corpus, 5 runs per case
+ * node bench/compare.ts              # bundles erg, then a 12 MB corpus, 5 runs per case
  * node bench/compare.ts --files 800 --lines 4000 --runs 10
  * node bench/compare.ts --corpus ~/src/linux --cases literal,word
  * node bench/compare.ts --backends jit,closure,none --json results.json
@@ -121,6 +120,11 @@ const { values: options } = parseArgs({
 })
 
 const runs = Number(options.runs)
+
+// erg is timed as the bundle, which loads as one module.
+ChildProcess.execFileSync(process.execPath, [Path.join(import.meta.dirname, "..", "scripts", "bundle.mjs")], {
+  stdio: "inherit"
+})
 const which = (tool: string): boolean => ChildProcess.spawnSync("sh", ["-c", `command -v ${tool}`]).status === 0
 
 const root =

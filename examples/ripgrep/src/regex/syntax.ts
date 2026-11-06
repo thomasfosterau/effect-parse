@@ -137,8 +137,9 @@ const classEscapes = (unicode: boolean): ReadonlyMap<string, Parser.Parser<Escap
     ["x", Parser.map(hexEscape(2), char)],
     ["u", Parser.map(hexEscape(4), char)],
     ["U", Parser.map(hexEscape(8), char)],
-    ...["d", "s", "w"].map((c) => [c, Parser.succeed(set(perlClass(c, unicode)))] as const),
-    ...["D", "S", "W"].map((c) => [c, Parser.succeed(set(CharSet.negate(perlClass(c, unicode))))] as const),
+    // Built on first use: the Unicode tables take milliseconds to compute.
+    ...["d", "s", "w"].map((c) => [c, Parser.sync(() => set(perlClass(c, unicode)))] as const),
+    ...["D", "S", "W"].map((c) => [c, Parser.sync(() => set(CharSet.negate(perlClass(c, unicode))))] as const),
     ["p", Parser.map(unicodeClass(false), set)],
     ["P", Parser.map(unicodeClass(true), set)]
   ])

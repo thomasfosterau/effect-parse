@@ -6,7 +6,6 @@
  */
 import * as Fs from "node:fs"
 import * as Predicate from "effect/Predicate"
-import * as Str from "effect/String"
 
 const encoder = new TextEncoder()
 
@@ -47,10 +46,26 @@ export class Output {
     this.used += b.length
   }
 
-  /** Appends a string as UTF-8. */
+  /** Appends a string as UTF-8, writing ASCII directly into the buffer. */
   text(s: string): void {
-    if (Str.isEmpty(s)) return
-    this.bytes(encoder.encode(s))
+    if (this.closed) return
+    const n = s.length
+    if (this.used + 3 * n > this.buffer.length) {
+      this.bytes(encoder.encode(s))
+      return
+    }
+    const b = this.buffer
+    let at = this.used
+    for (let i = 0; i < n; i++) {
+      const c = s.charCodeAt(i)
+      if (c >= 0x80) {
+        at += encoder.encodeInto(s.slice(i), b.subarray(at)).written
+        break
+      }
+      b[at++] = c
+    }
+    this.written += at - this.used
+    this.used = at
   }
 
   /** Ends a line of output: flushes when line buffered. */

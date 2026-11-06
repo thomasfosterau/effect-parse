@@ -137,7 +137,7 @@ export const compileGlob = (source: string, caseInsensitive: boolean): Result.Re
   if (Result.isFailure(parsed)) return Result.fail(`error parsing glob '${source}': ${parsed.failure.message}`)
   const body = caseInsensitive ? fold(parsed.success) : parsed.success
   const regex = Ast.concat([body, { _tag: "Look", look: "EndText" }])
-  const matcher = Compile.compile(regex, 1, 0x0a, { captures: false, backend: "none" })
+  const matcher = Compile.compile(regex, 1, 0x0a, { captures: false, backend: "none", multiline: true })
   return Result.succeed({
     source,
     matches: (path) => matcher.matchAt(new Input.State(path), 0) >= 0

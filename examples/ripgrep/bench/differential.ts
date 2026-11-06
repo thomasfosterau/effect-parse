@@ -10,11 +10,12 @@ import * as Arr from "effect/Array"
 import * as Order from "effect/Order"
 
 /**
- * The `erg` entry point.
+ * The `erg` entry point the benchmarks time: the bundle `scripts/bundle.mjs`
+ * builds (one module, no type stripping, compile cache on).
  *
  * @since 0.0.0
  */
-export const ergBin = Path.join(import.meta.dirname, "..", "bin", "erg.ts")
+export const ergBin = Path.join(import.meta.dirname, "..", "dist", "erg.mjs")
 
 /**
  * What a run produced.

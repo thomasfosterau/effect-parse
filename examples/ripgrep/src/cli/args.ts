@@ -1,4 +1,3 @@
-import * as Schema from "effect/Schema"
 import * as Str from "effect/String"
 
 /**
@@ -168,6 +167,8 @@ export interface Args {
   special: Special
   generate: string | undefined
   noConfig: boolean
+  /** The first problem with the command line, if any. */
+  error: string | undefined
 }
 
 /**
@@ -260,17 +261,17 @@ export const defaults = (): Args => ({
   stats: false,
   special: "none",
   generate: undefined,
-  noConfig: false
+  noConfig: false,
+  error: undefined
 })
 
 /**
- * Raised for a malformed command line; the message is ripgrep's wording.
- *
- * @since 0.0.0
+ * Records a malformed command line on `args` (the first problem wins, in
+ * ripgrep's wording); the parser stops at it.
  */
-export class UsageError extends Schema.TaggedError<UsageError, { readonly brand: unique symbol }>()("UsageError", {
-  message: Schema.String
-}) {}
+const usage = (args: Args, message: string): void => {
+  args.error ??= message
+}
 
 /**
  * The help category a flag is listed under.
@@ -300,8 +301,8 @@ export interface Flag {
   readonly negate?: ((args: Args) => void) | undefined
 }
 
-const number = (flag: string, value: string): number => {
-  if (!/^\d+$/.test(value)) throw new UsageError({ message: `failed to parse ${flag} value '${value}' as a number` })
+const number = (args: Args, flag: string, value: string): number => {
+  if (!/^\d+$/.test(value)) usage(args, `failed to parse ${flag} value '${value}' as a number`)
   return Number(value)
 }
 
@@ -312,21 +313,25 @@ const sizeSuffixes: ReadonlyMap<string, number> = new Map([
   ["G", 1024 ** 3]
 ])
 
-const size = (flag: string, value: string): number => {
+const size = (args: Args, flag: string, value: string): number => {
   const m = /^(\d+)([KMG]?)$/i.exec(value)
-  if (m === null) throw new UsageError({ message: `invalid ${flag} value '${value}'` })
+  if (m === null) {
+    usage(args, `invalid ${flag} value '${value}'`)
+    return 0
+  }
   return Number(m[1]) * (sizeSuffixes.get((m[2] ?? "").toUpperCase()) ?? 1)
 }
 
-const oneOf = <T extends string>(flag: string, value: string, choices: ReadonlyArray<T>): T => {
+const oneOf = <T extends string>(args: Args, flag: string, value: string, choices: readonly [T, ...Array<T>]): T => {
   const found = choices.find((c) => c === value)
   if (found === undefined) {
-    throw new UsageError({ message: `invalid value '${value}' for ${flag}: choose from ${choices.join(", ")}` })
+    usage(args, `invalid value '${value}' for ${flag}: choose from ${choices.join(", ")}`)
+    return choices[0]
   }
   return found
 }
 
-const sorts: ReadonlyArray<SortBy> = ["none", "path", "modified", "accessed", "created"]
+const sorts: readonly [SortBy, ...Array<SortBy>] = ["none", "path", "modified", "accessed", "created"]
 
 /**
  * Every flag ripgrep 14.1 accepts.
@@ -398,7 +403,7 @@ export const flags: ReadonlyArray<Flag> = [
     category: "search",
     doc: "The upper size limit of the regex DFA.",
     apply: (a, v) => {
-      size("--dfa-size-limit", v)
+      size(a, "--dfa-size-limit", v)
       a.dfaSizeLimit = v
     }
   },
@@ -417,7 +422,7 @@ export const flags: ReadonlyArray<Flag> = [
     value: "ENGINE",
     category: "search",
     doc: "Specify which regex engine to use.",
-    apply: (a, v) => (a.engine = oneOf("--engine", v, ["default", "pcre2", "auto"]))
+    apply: (a, v) => (a.engine = oneOf(a, "--engine", v, ["default", "pcre2", "auto"]))
   },
   {
     long: "fixed-strings",
@@ -460,7 +465,7 @@ export const flags: ReadonlyArray<Flag> = [
     value: "NUM",
     category: "search",
     doc: "Limit the number of matching lines.",
-    apply: (a, v) => (a.maxCount = number("--max-count", v))
+    apply: (a, v) => (a.maxCount = number(a, "--max-count", v))
   },
   {
     long: "mmap",
@@ -516,7 +521,7 @@ export const flags: ReadonlyArray<Flag> = [
     category: "search",
     doc: "The size limit of the compiled regex.",
     apply: (a, v) => {
-      size("--regex-size-limit", v)
+      size(a, "--regex-size-limit", v)
       a.regexSizeLimit = v
     }
   },
@@ -548,7 +553,7 @@ export const flags: ReadonlyArray<Flag> = [
     value: "NUM",
     category: "search",
     doc: "Set the approximate number of threads to use.",
-    apply: (a, v) => (a.threads = number("--threads", v))
+    apply: (a, v) => (a.threads = number(a, "--threads", v))
   },
   {
     long: "word-regexp",
@@ -648,14 +653,14 @@ export const flags: ReadonlyArray<Flag> = [
     aliases: ["maxdepth"],
     category: "filter",
     doc: "Descend at most NUM directories.",
-    apply: (a, v) => (a.maxDepth = number("--max-depth", v))
+    apply: (a, v) => (a.maxDepth = number(a, "--max-depth", v))
   },
   {
     long: "max-filesize",
     value: "NUM",
     category: "filter",
     doc: "Ignore files larger than NUM in size.",
-    apply: (a, v) => (a.maxFilesize = size("--max-filesize", v))
+    apply: (a, v) => (a.maxFilesize = size(a, "--max-filesize", v))
   },
   {
     long: "no-ignore",
@@ -778,7 +783,7 @@ export const flags: ReadonlyArray<Flag> = [
     value: "NUM",
     category: "output",
     doc: "Show NUM lines after each match.",
-    apply: (a, v) => (a.afterContext = number("--after-context", v))
+    apply: (a, v) => (a.afterContext = number(a, "--after-context", v))
   },
   {
     long: "before-context",
@@ -786,7 +791,7 @@ export const flags: ReadonlyArray<Flag> = [
     value: "NUM",
     category: "output",
     doc: "Show NUM lines before each match.",
-    apply: (a, v) => (a.beforeContext = number("--before-context", v))
+    apply: (a, v) => (a.beforeContext = number(a, "--before-context", v))
   },
   {
     long: "block-buffered",
@@ -810,7 +815,7 @@ export const flags: ReadonlyArray<Flag> = [
     value: "WHEN",
     category: "output",
     doc: "When to use color.",
-    apply: (a, v) => (a.color = oneOf("--color", v, ["never", "auto", "always", "ansi"]))
+    apply: (a, v) => (a.color = oneOf(a, "--color", v, ["never", "auto", "always", "ansi"]))
   },
   {
     long: "colors",
@@ -833,7 +838,7 @@ export const flags: ReadonlyArray<Flag> = [
     value: "NUM",
     category: "output",
     doc: "Show NUM lines before and after each match.",
-    apply: (a, v) => (a.context = number("--context", v))
+    apply: (a, v) => (a.context = number(a, "--context", v))
   },
   {
     long: "context-separator",
@@ -924,7 +929,7 @@ export const flags: ReadonlyArray<Flag> = [
     category: "output",
     doc: "Omit lines longer than this limit.",
     apply: (a, v) => {
-      const n = number("--max-columns", v)
+      const n = number(a, "--max-columns", v)
       a.maxColumns = n === 0 ? undefined : n
     }
   },
@@ -958,9 +963,10 @@ export const flags: ReadonlyArray<Flag> = [
     apply: (a, v) => {
       const sep = unescape(v)
       if (sep.length > 1)
-        throw new UsageError({
-          message: `A path separator must be exactly one byte, but the given separator is ${sep.length} bytes: ${v}`
-        })
+        return usage(
+          a,
+          `A path separator must be exactly one byte, but the given separator is ${sep.length} bytes: ${v}`
+        )
       a.pathSeparator = sep
     }
   },
@@ -1002,14 +1008,14 @@ export const flags: ReadonlyArray<Flag> = [
     value: "SORTBY",
     category: "output",
     doc: "Sort results in ascending order.",
-    apply: (a, v) => (a.sort = { by: oneOf("--sort", v, sorts), reverse: false })
+    apply: (a, v) => (a.sort = { by: oneOf(a, "--sort", v, sorts), reverse: false })
   },
   {
     long: "sortr",
     value: "SORTBY",
     category: "output",
     doc: "Sort results in descending order.",
-    apply: (a, v) => (a.sort = { by: oneOf("--sortr", v, sorts), reverse: true })
+    apply: (a, v) => (a.sort = { by: oneOf(a, "--sortr", v, sorts), reverse: true })
   },
   {
     long: "trim",
@@ -1137,7 +1143,7 @@ export const flags: ReadonlyArray<Flag> = [
     category: "other",
     doc: "Generate man pages and completion scripts.",
     apply: (a, v) => {
-      a.generate = oneOf("--generate", v, [
+      a.generate = oneOf(a, "--generate", v, [
         "man",
         "complete-bash",
         "complete-zsh",
@@ -1226,8 +1232,10 @@ const apply = (args: Args, lookup: Lookup, value: string, raw: string): void => 
 class Cursor {
   private index = 0
   private readonly argv: ReadonlyArray<string>
-  constructor(argv: ReadonlyArray<string>) {
+  private readonly args: Args
+  constructor(argv: ReadonlyArray<string>, args: Args) {
     this.argv = argv
+    this.args = args
   }
   /** The next argument, or `undefined` at the end. */
   take(): string | undefined {
@@ -1236,8 +1244,8 @@ class Cursor {
   /** A flag's value: the next argument, which must exist. */
   value(flag: string): string {
     const v = this.take()
-    if (v === undefined) throw new UsageError({ message: `flag '${flag}' requires a value` })
-    return v
+    if (v === undefined) usage(this.args, `flag '${flag}' requires a value`)
+    return v ?? ""
   }
   /** Every remaining argument. */
   rest(): ReadonlyArray<string> {
@@ -1252,9 +1260,9 @@ const parseLong = (args: Args, arg: string, cursor: Cursor): void => {
   const eq = arg.indexOf("=")
   const name = arg.slice(2, eq < 0 ? undefined : eq)
   const lookup = byLong.get(name)
-  if (lookup === undefined) throw new UsageError({ message: `unrecognized flag --${name}` })
+  if (lookup === undefined) return usage(args, `unrecognized flag --${name}`)
   const takesValue = lookup.flag.value !== undefined && !lookup.negation
-  if (!takesValue && eq >= 0) throw new UsageError({ message: `flag '--${name}' does not take a value` })
+  if (!takesValue && eq >= 0) return usage(args, `flag '--${name}' does not take a value`)
   const value = !takesValue ? "" : eq >= 0 ? arg.slice(eq + 1) : cursor.value(`--${name}`)
   apply(args, lookup, value, arg)
 }
@@ -1264,7 +1272,7 @@ const parseShort = (args: Args, arg: string, cursor: Cursor): void => {
   for (let j = 1; j < arg.length; j++) {
     const c = arg[j]
     const flag = byShort.get(c)
-    if (flag === undefined) throw new UsageError({ message: `unrecognized flag -${c}` })
+    if (flag === undefined) return usage(args, `unrecognized flag -${c}`)
     if (flag.value === undefined) {
       apply(args, { flag, negation: false }, "", `-${c}`)
       continue
@@ -1276,7 +1284,8 @@ const parseShort = (args: Args, arg: string, cursor: Cursor): void => {
 }
 
 /**
- * Parses a command line (without the program name) onto `args`.
+ * Parses a command line (without the program name) onto `args`. A
+ * malformed one sets `args.error`.
  *
  * @example
  * ```ts
@@ -1289,8 +1298,8 @@ const parseShort = (args: Args, arg: string, cursor: Cursor): void => {
  * @since 0.0.0
  */
 export const parseArgv = (argv: ReadonlyArray<string>, args: Args): Args => {
-  const cursor = new Cursor(argv)
-  for (let arg = cursor.take(); arg !== undefined; arg = cursor.take()) {
+  const cursor = new Cursor(argv, args)
+  for (let arg = cursor.take(); arg !== undefined && args.error === undefined; arg = cursor.take()) {
     if (arg === "--") args.positional.push(...cursor.rest())
     else if (arg.startsWith("--")) parseLong(args, arg, cursor)
     else if (arg.startsWith("-") && arg !== "-") parseShort(args, arg, cursor)

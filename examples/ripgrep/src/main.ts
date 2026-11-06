@@ -21,7 +21,7 @@ import type { Printer } from "./print/printer.ts"
 import * as Printers from "./print/printer.ts"
 import * as Standard from "./print/standard.ts"
 import * as Summary from "./print/summary.ts"
-import { TooDeep } from "./regex/compile.ts"
+import type * as Compile from "./regex/compile.ts"
 import * as Input from "./search/input.ts"
 import * as Pattern from "./search/pattern.ts"
 import * as Searcher from "./search/searcher.ts"
@@ -221,14 +221,23 @@ const walkOptions = (args: Args, env: Environment, reporter: Reporter): Result.R
     )
   )
 
-const readEntry = (entry: Walk.Entry, args: Args, preGlobs: ReadonlyArray<Glob.Glob>, env: Environment): Uint8Array => {
-  if (entry.stdin) return env.stdin.read()
+/** A file's contents, through `--pre` or `-z`, as UTF-8 (throws Node's I/O errors). */
+const readEntry = (
+  entry: Walk.Entry,
+  args: Args,
+  preGlobs: ReadonlyArray<Glob.Glob>,
+  env: Environment
+): Result.Result<Uint8Array, string> => {
+  if (entry.stdin) return Result.succeed(Input.decode(env.stdin.read(), args.encoding))
   const name = encoder.encode(Path.basename(entry.path))
   const pre = Arr.isReadonlyArrayEmpty(preGlobs) || preGlobs.some((g) => g.matches(name)) ? args.pre : undefined
-  let bytes =
-    pre === undefined ? new Uint8Array(Fs.readFileSync(entry.absolute)) : Input.preprocess(pre, entry.absolute, env.cwd)
-  if (args.searchZip && pre === undefined) bytes = Input.decompress(entry.path, bytes)
-  return Input.decode(bytes, args.encoding)
+  // A Buffer is a Uint8Array: no copy.
+  const raw =
+    pre === undefined
+      ? Result.succeed<Uint8Array>(Fs.readFileSync(entry.absolute))
+      : Input.preprocess(pre, entry.absolute, env.cwd)
+  const bytes = args.searchZip && pre === undefined ? Result.flatMap(raw, (b) => Input.decompress(entry.path, b)) : raw
+  return Result.map(bytes, (b) => Input.decode(b, args.encoding))
 }
 
 /** `-h`, `--help`, `-V`, `--pcre2-version`, `--generate` and `--type-list`: their exit status, or `undefined` to search. */
@@ -368,6 +377,7 @@ class Run {
   private readonly env: Environment
   private readonly plan: Plan
   private readonly options: { readonly explicit: Searcher.SearchOptions; readonly implicit: Searcher.SearchOptions }
+  private readonly matcher: Compile.Matcher
   private readonly preGlobs: ReadonlyArray<Glob.Glob>
   private readonly reporter: Reporter
 
@@ -382,6 +392,7 @@ class Run {
     this.args = args
     this.env = env
     this.plan = plan
+    this.matcher = patterns.matcher
     this.options = searchOptions(args, patterns, plan.printer.allMatches)
     this.preGlobs = preGlobs
     this.reporter = reporter
@@ -389,23 +400,28 @@ class Run {
 
   readonly visit = (entry: Walk.Entry): void => {
     if ((this.args.quiet && this.matchedAny && !this.args.stats) || this.plan.out.closed) return
-    let bytes: Uint8Array
+    let read: Result.Result<Uint8Array, string>
     try {
-      bytes = readEntry(entry, this.args, this.preGlobs, this.env)
+      read = readEntry(entry, this.args, this.preGlobs, this.env)
     } catch (error) {
       this.reporter.report(`${entry.path}: ${Walk.describeError(error)}`)
       return
     }
-    const filePrinter = this.plan.printer.file({ path: displayPath(entry.path, this.args), absolute: entry.absolute })
-    const started = process.hrtime.bigint()
-    let result: Searcher.SearchResult
-    try {
-      result = Searcher.search(bytes, entry.explicit ? this.options.explicit : this.options.implicit, filePrinter.sink)
-    } catch (error) {
-      if (!(error instanceof TooDeep)) throw error
-      this.reporter.report(`${entry.path}: the pattern nested too deeply at byte offset ${error.offset}`)
+    if (Result.isFailure(read)) {
+      this.reporter.report(`${entry.path}: ${read.failure}`)
       return
     }
+    const bytes = read.success
+    const filePrinter = this.plan.printer.file({ path: displayPath(entry.path, this.args), absolute: entry.absolute })
+    const started = process.hrtime.bigint()
+    const result = Searcher.search(
+      bytes,
+      entry.explicit ? this.options.explicit : this.options.implicit,
+      filePrinter.sink
+    )
+    const overflow = this.matcher.takeOverflow()
+    if (overflow !== undefined)
+      this.reporter.report(`${entry.path}: the pattern nested too deeply at byte offset ${overflow}`)
     const nanos = Number(process.hrtime.bigint() - started)
     if (filePrinter.end(result, result.bytesSearched, nanos)) this.matchedAny = true
     this.count(result, nanos)
@@ -465,13 +481,8 @@ const search = (args: Args, env: Environment, given: Inputs, options: Walk.WalkO
  * @since 0.0.0
  */
 export const main = (env: Environment): number => {
-  let args: Args
-  try {
-    args = parseArgs(env)
-  } catch (error) {
-    if (error instanceof Cli.UsageError) return fail(env, error.message)
-    throw error
-  }
+  const args = parseArgs(env)
+  if (args.error !== undefined) return fail(env, args.error)
   const done = special(args, env)
   if (done !== undefined) return done
   const problem = unsupported(args)

@@ -16,18 +16,17 @@
  *
  * @since 0.0.0
  */
-import { Compiler, Input, Parser, Text, Token } from "@thomasfosterau/effect-parse"
-import * as Schema from "effect/Schema"
+import { Compiler, Input, Parser, Token } from "@thomasfosterau/effect-parse"
 import type { Look, Regex } from "./ast.ts"
 import * as Ast from "./ast.ts"
 import * as CharSet from "./charset.ts"
 import type { Ranges } from "./charset.ts"
+import { LiteralFinder } from "./finder.ts"
+import * as Prefilter from "./prefilter.ts"
 
 type Bytes = Uint8Array
 /** A matcher node with its continuation: succeeds (with nothing) when the rest of the pattern matches. */
 type Step = Parser.Parser<void, never, never, Bytes>
-/** A parser for one character: a literal's bytes, a byte, or a decoded character (the value is never used). */
-type CharParser = Parser.Parser<Uint8Array | number | string, never, never, Bytes>
 
 /**
  * Which effect-parse compiler runs the matcher: `"jit"`, `"closure"`,
@@ -47,6 +46,8 @@ export interface CompileOptions {
   readonly captures: boolean
   /** The compiler to run the matcher with. */
   readonly backend: Backend
+  /** Whether matches may span lines (`-U`); otherwise none contains the line terminator. */
+  readonly multiline: boolean
 }
 
 /**
@@ -69,9 +70,13 @@ export interface Match {
 export interface Matcher {
   /**
    * The leftmost-first match starting at or after `from`, or `undefined`.
-   * Throws {@link TooDeep} when the pattern recursed past the stack.
+   * When an attempt recurses past the JavaScript stack (a repetition of a
+   * complex group over a very long line), it finds nothing more, and
+   * {@link Matcher.takeOverflow} reports where.
    */
   readonly find: (state: Input.State<Bytes>, from: number) => Match | undefined
+  /** Where an attempt overflowed the stack since the last call, if one did; clears it. */
+  readonly takeOverflow: () => number | undefined
   /** The end of a match starting exactly at `at`, or -1. */
   readonly matchAt: (state: Input.State<Bytes>, at: number) => number
   /** The capture slots of the last match: `[start, end]` per group, `-1` where unset. */
@@ -79,17 +84,6 @@ export interface Matcher {
   /** The number of groups, group 0 (the whole match) included. */
   readonly groups: number
 }
-
-/**
- * Thrown when a match attempt nests deeper than the JavaScript stack allows
- * (a repetition of a complex group over a very long line).
- *
- * @since 0.0.0
- */
-export class TooDeep extends Schema.TaggedError<TooDeep, { readonly brand: unique symbol }>()("TooDeep", {
-  /** The haystack offset where the attempt started. */
-  offset: Schema.Finite
-}) {}
 
 // ---------------------------------------------------------------------------
 // UTF-8 helpers for the zero-width assertions
@@ -136,9 +130,11 @@ const isAsciiWord = (c: number): boolean =>
 
 const lookTest = (look: Look, lineTerminator: number): ((b: Bytes, i: number) => boolean) => {
   const asciiWordAt = (c: number) => c >= 0 && isAsciiWord(c)
-  const word = look.endsWith("Ascii") ? asciiWordAt : unicodeWordTest()
-  const before = (b: Bytes, i: number) => word(decodeBefore(b, i))
-  const after = (b: Bytes, i: number) => word(decodeAt(b, i))
+  // The Unicode word table is only built for a word assertion that needs it.
+  let word: ((c: number) => boolean) | undefined
+  const isWord = (c: number) => (word ??= look.endsWith("Ascii") ? asciiWordAt : unicodeWordTest())(c)
+  const before = (b: Bytes, i: number) => isWord(decodeBefore(b, i))
+  const after = (b: Bytes, i: number) => isWord(decodeAt(b, i))
   switch (look) {
     case "StartText":
       return (_b, i) => i === 0
@@ -186,85 +182,150 @@ const previousBoundary = (b: Bytes, i: number): number => {
 
 const encoder = new TextEncoder()
 
-/** One character of a class, as a parser: a byte test for ASCII-only sets. */
-const charOf = (set: Ranges): CharParser => {
-  const name = "character class"
-  const single = CharSet.single(set)
-  if (single !== undefined) return Token.literal(encoder.encode(String.fromCodePoint(single)))
-  return CharSet.isAscii(set)
-    ? Token.oneOf<Bytes>(CharSet.toCodePoints(name, set))
-    : Text.utf8.oneOf(CharSet.toCodePoints(name, set))
+/**
+ * A class as a membership test over UTF-8 bytes: a table for ASCII, and a
+ * binary search of the ranges above it.
+ */
+interface ClassTest {
+  readonly ascii: Uint8Array
+  readonly set: Ranges
+  readonly asciiOnly: boolean
 }
 
-type CharStepFn = (state: Input.State<Bytes>) => Uint8Array | number | string | Input.Fail
+const classTest = (set: Ranges): ClassTest => {
+  const ascii = new Uint8Array(128)
+  for (const [a, b] of set) if (a < 128) ascii.fill(1, a, Math.min(b, 127) + 1)
+  return { ascii, set, asciiOnly: CharSet.isAscii(set) }
+}
+
+const utf8Width = (c: number): number => (c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4)
+
+/** The end of the character at `pos` if the class holds it, or -1. */
+const stepClass = (t: ClassTest, b: Bytes, pos: number): number => {
+  if (pos >= b.length) return -1
+  const x = b[pos]
+  if (x < 0x80) return t.ascii[x] === 1 ? pos + 1 : -1
+  if (t.asciiOnly) return -1
+  const c = decodeAt(b, pos)
+  return c >= 0 && CharSet.has(t.set, c) ? pos + utf8Width(c) : -1
+}
+
+/**
+ * Fails without recording a failure: the matcher runs with diagnostics off,
+ * where only the mode decides what happens next, and recording one would
+ * allocate on every failed step.
+ */
+const reject = (state: Input.State<Bytes>): Input.Fail => {
+  state.mode = "Backtrack"
+  return Input.Fail
+}
+
 type StepFn = (state: Input.State<Bytes>) => void | Input.Fail
+
+/** One character of a class, then `k`. */
+const classThen = (set: Ranges, k: Step): Step => {
+  const t = classTest(set)
+  return Parser.combinator([k], ([kStep]) => (state) => {
+    const p = stepClass(t, state.input, state.pos)
+    if (p < 0) return reject(state)
+    state.pos = p
+    return kStep(state)
+  })
+}
 
 /**
  * Greedy: takes as many characters as allowed, then tries `k`, giving one
- * character back after each failure.
+ * character back after each failure. (The matcher never builds a syntax
+ * tree, so the cursor moves back by assignment rather than `rewind`.)
  */
 const greedyRepeat = (
-  charStep: CharStepFn,
+  t: ClassTest,
   kStep: StepFn,
+  follow: Follow,
   state: Input.State<Bytes>,
   min: number,
   max: number
 ): void | Input.Fail => {
+  const b = state.input
   const start = state.pos
+  let p = start
   let n = 0
-  let before = start
-  while (n < max && charStep(state) !== Input.Fail) {
+  for (let q = stepClass(t, b, p); n < max && q >= 0; q = stepClass(t, b, p)) {
+    p = q
     n++
-    before = state.pos
   }
-  // A failed attempt may have moved the cursor.
-  state.rewind(before)
-  if (n < min) {
-    state.rewind(start)
-    return state.backtrack("Token")
-  }
+  if (n < min) return reject(state)
   for (; ; n--) {
-    const at = state.pos
-    const r = kStep(state)
-    if (r !== Input.Fail || state.mode !== "Backtrack") return r
-    if (n === min) {
-      state.rewind(start)
-      return Input.Fail
+    if (follows(follow, b, p)) {
+      state.pos = p
+      const r = kStep(state)
+      if (r !== Input.Fail || state.mode !== "Backtrack") return r
     }
-    state.rewind(previousBoundary(state.input, at))
+    if (n === min) {
+      state.pos = start
+      return reject(state)
+    }
+    p = t.asciiOnly ? p - 1 : previousBoundary(b, p)
   }
 }
 
 /** Lazy: takes the fewest characters allowed, then one more after each failure of `k`. */
 const lazyRepeat = (
-  charStep: CharStepFn,
+  t: ClassTest,
   kStep: StepFn,
+  follow: Follow,
   state: Input.State<Bytes>,
   min: number,
   max: number
 ): void | Input.Fail => {
+  const b = state.input
   const start = state.pos
+  let p = start
   for (let n = 0; ; n++) {
-    if (n >= min) {
-      const at = state.pos
+    if (n >= min && follows(follow, b, p)) {
+      state.pos = p
       const r = kStep(state)
       if (r !== Input.Fail || state.mode !== "Backtrack") return r
-      state.rewind(at)
     }
-    if (n >= max || charStep(state) === Input.Fail) {
-      state.rewind(start)
-      return Input.Fail
+    const q = n < max ? stepClass(t, b, p) : -1
+    if (q < 0) {
+      state.pos = start
+      return reject(state)
     }
+    p = q
   }
 }
 
-/** `char` repeated between `min` and `max` times, then `k`, backtracking one character at a time. */
-const repeatChar = (char: CharParser, k: Step, min: number, max: number, greedy: boolean): Step =>
-  Parser.combinator([char, k], ([charStep, kStep]) =>
+/** A class repeated between `min` and `max` times, then `k`, backtracking one character at a time. */
+const repeatChar = (set: Ranges, k: Step, follow: Follow, min: number, max: number, greedy: boolean): Step => {
+  const t = classTest(set)
+  return Parser.combinator([k], ([kStep]) =>
     greedy
-      ? (state) => greedyRepeat(charStep, kStep, state, min, max)
-      : (state) => lazyRepeat(charStep, kStep, state, min, max)
+      ? (state) => greedyRepeat(t, kStep, follow, state, min, max)
+      : (state) => lazyRepeat(t, kStep, follow, state, min, max)
   )
+}
+
+/**
+ * The bytes the rest of the pattern can start with (`table[b]` is 1), or
+ * `undefined` when it may match the empty string. A repetition hands
+ * control to the rest only where one of them follows, which spares a call
+ * for every other position it gives back.
+ */
+type Follow = Uint8Array | undefined
+
+/** Whether the rest of the pattern can start at `p`. */
+const follows = (follow: Follow, b: Bytes, p: number): boolean =>
+  follow === undefined || (p < b.length && follow[b[p]] === 1)
+
+/** The follow set before `regex`, given the follow set after it. */
+const followBefore = (regex: Regex, after: Follow): Follow => {
+  const { nullable, table } = Prefilter.firstBytes(regex)
+  if (!nullable) return table
+  if (after === undefined) return undefined
+  for (let i = 0; i < 256; i++) table[i] |= after[i]
+  return table
+}
 
 interface Context {
   readonly slots: Array<number>
@@ -278,7 +339,7 @@ const assertion = (test: (b: Bytes, i: number) => boolean, k: Step): Step =>
     [k],
     ([kStep]) =>
       (state) =>
-        test(state.input, state.pos) ? kStep(state) : state.backtrack("Token", ["assertion"])
+        test(state.input, state.pos) ? kStep(state) : reject(state)
   )
 
 const setSlot = (ctx: Context, slot: number, k: Step): Step =>
@@ -306,7 +367,7 @@ const loop = (ctx: Context, sub: Regex, greedy: boolean, k: Step): Step => {
   let core: Step = Parser.void_
   const again: Step = Parser.suspend(() => core)
   if (Ast.minLength(sub) > 0) {
-    const body = compileNode(ctx, sub, again)
+    const body = compileNode(ctx, sub, again, undefined)
     core = greedy ? Parser.alt(body, k) : Parser.alt(k, body)
     return core
   }
@@ -318,13 +379,13 @@ const loop = (ctx: Context, sub: Regex, greedy: boolean, k: Step): Step => {
   const iterate: Step = Parser.combinator([again], ([coreStep]) => (state) => {
     const top = frame.length - 1
     const began = frame[top]
-    if (state.pos === began) return state.backtrack("Token")
+    if (state.pos === began) return reject(state)
     frame[top] = state.pos
     const r = coreStep(state)
     if (r === Input.Fail) frame[top] = began
     return r
   })
-  const body = compileNode(ctx, sub, iterate)
+  const body = compileNode(ctx, sub, iterate, undefined)
   core = greedy ? Parser.alt(body, k) : Parser.alt(k, body)
   return Parser.combinator([core], ([coreStep]) => (state) => {
     frame.push(state.pos)
@@ -334,45 +395,51 @@ const loop = (ctx: Context, sub: Regex, greedy: boolean, k: Step): Step => {
   })
 }
 
-const repeat = (ctx: Context, regex: Extract<Regex, { _tag: "Repeat" }>, k: Step): Step => {
+const repeat = (ctx: Context, regex: Extract<Regex, { _tag: "Repeat" }>, k: Step, follow: Follow): Step => {
   const { greedy, max, min, sub } = regex
   const char = singleChar(sub)
-  if (char !== undefined) return repeatChar(charOf(char), k, min, max, greedy)
+  if (char !== undefined) return repeatChar(char, k, follow, min, max, greedy)
   let tail: Step
   if (max === Infinity) {
     tail = loop(ctx, sub, greedy, k)
   } else {
     tail = k
     for (let j = 0; j < max - min; j++) {
-      const more = compileNode(ctx, sub, tail)
+      const more = compileNode(ctx, sub, tail, undefined)
       tail = greedy ? Parser.alt(more, k) : Parser.alt(k, more)
     }
   }
-  for (let i = 0; i < min; i++) tail = compileNode(ctx, sub, tail)
+  for (let i = 0; i < min; i++) tail = compileNode(ctx, sub, tail, undefined)
   return tail
 }
 
-const compileNode = (ctx: Context, regex: Regex, k: Step): Step => {
+/** Compiles `regex` followed by `k`; `follow` is the bytes `k` can start with. */
+const compileNode = (ctx: Context, regex: Regex, k: Step, follow: Follow): Step => {
   switch (regex._tag) {
     case "Empty":
       return k
     case "Literal":
       return Parser.preceded(Token.literal(encoder.encode(regex.text)), k)
     case "Class":
-      return CharSet.isEmpty(regex.set)
-        ? Parser.backtrack(Parser.failMessage("empty class"))
-        : Parser.preceded(charOf(regex.set), k)
+      return CharSet.isEmpty(regex.set) ? Parser.backtrack(Parser.failMessage("empty class")) : classThen(regex.set, k)
     case "Look":
       return assertion(lookTest(regex.look, ctx.lineTerminator), k)
     case "Repeat":
-      return repeat(ctx, regex, k)
+      return repeat(ctx, regex, k, follow)
     case "Capture":
-      if (!ctx.captures) return compileNode(ctx, regex.sub, k)
-      return setSlot(ctx, 2 * regex.index, compileNode(ctx, regex.sub, setSlot(ctx, 2 * regex.index + 1, k)))
-    case "Concat":
-      return regex.subs.reduceRight((next, sub) => compileNode(ctx, sub, next), k)
+      if (!ctx.captures) return compileNode(ctx, regex.sub, k, follow)
+      return setSlot(ctx, 2 * regex.index, compileNode(ctx, regex.sub, setSlot(ctx, 2 * regex.index + 1, k), follow))
+    case "Concat": {
+      let next = k
+      let after = follow
+      for (let i = regex.subs.length - 1; i >= 0; i--) {
+        next = compileNode(ctx, regex.subs[i], next, after)
+        after = followBefore(regex.subs[i], after)
+      }
+      return next
+    }
     case "Alternate":
-      return Parser.alt(...regex.subs.map((sub) => compileNode(ctx, sub, k)))
+      return Parser.alt(...regex.subs.map((sub) => compileNode(ctx, sub, k, follow)))
   }
 }
 
@@ -384,6 +451,106 @@ const backends: Record<Backend, (p: Step) => Step> = {
 }
 
 const noDiagnostics: Parser.RunOptions = { diagnostics: false }
+
+/**
+ * The first position at or after `s` (and at most `to`) where a match can
+ * start: one whose byte is in the first-byte table, or, without a table, a
+ * character boundary (past `from`, which is tried as it is). -1 if none.
+ */
+const nextStart = (input: Bytes, s: number, from: number, to: number, table: Uint8Array | undefined): number => {
+  if (s > to) return -1
+  if (table === undefined) {
+    let p = s
+    if (p > from) while (p < input.length && (input[p] & 0xc0) === 0x80) p++
+    return p > to ? -1 : p
+  }
+  let p = s
+  while (p < to && table[input[p]] === 0) p++
+  return p < input.length && table[input[p]] === 1 ? p : -1
+}
+
+/** Past a failed start `s`, the last position of the run of the leading class (see {@link leadingRun}). */
+const skipRun = (skip: Uint8Array | undefined, input: Bytes, s: number, to: number): number => {
+  let p = s
+  if (skip !== undefined) while (p + 1 < to && skip[input[p + 1]] === 1) p++
+  return p
+}
+
+/**
+ * For a pattern that starts with an unbounded repetition of an ASCII class
+ * (`\w+…`, `[a-z]*…`), the class as a byte table. If the pattern fails from
+ * a position in a run of that class, it fails from every later position in
+ * the run: a match from there would extend back to the earlier position.
+ */
+const leadingRun = (regex: Regex): Uint8Array | undefined => {
+  let first = regex
+  while (first._tag === "Concat" || first._tag === "Capture") {
+    if (first._tag === "Capture") first = first.sub
+    else if (first.subs[0] === undefined) return undefined
+    else first = first.subs[0]
+  }
+  if (first._tag !== "Repeat" || first.max !== Infinity || first.sub._tag !== "Class") return undefined
+  const set = first.sub.set
+  if (!CharSet.isAscii(set)) return undefined
+  const table = new Uint8Array(256)
+  for (const [a, b] of set) table.fill(1, a, b + 1)
+  return table
+}
+
+type Find = (state: Input.State<Bytes>, from: number) => Match | undefined
+
+/**
+ * How `find` looks for the next match: from the occurrences of the literals
+ * every match starts with; from the lines holding a literal every match
+ * contains (outside multiline mode, where a match lies within one line); or
+ * from every position a match can start at.
+ */
+const strategy = (
+  regex: Regex,
+  pre: Prefilter.Prefilter,
+  options: CompileOptions,
+  lineTerminator: number,
+  attempt: (state: Input.State<Bytes>, s: number) => number,
+  found: (s: number, e: number) => Match,
+  scan: (state: Input.State<Bytes>, from: number, to: number) => Match | undefined
+): Find => {
+  const shortest = (set: ReadonlyArray<Uint8Array> | undefined) =>
+    set === undefined ? 0 : Math.min(...set.map((l) => l.length))
+  const usePrefix =
+    pre.prefixes !== undefined && (options.multiline || shortest(pre.prefixes) >= shortest(pre.required))
+  if (usePrefix && pre.prefixes !== undefined) {
+    const finder = new LiteralFinder(pre.prefixes)
+    // A set of plain literals needs no matcher: an occurrence is a match.
+    const literal = !options.captures && Prefilter.isLiteralSet(regex)
+    return (state, from) => {
+      const input = state.input
+      for (let p = from; ; p++) {
+        p = finder.find(input, p)
+        if (p < 0) return undefined
+        if (literal) return found(p, p + (finder.literalAt(input, p)?.length ?? 0))
+        const e = attempt(state, p)
+        if (e >= 0) return found(p, e)
+      }
+    }
+  }
+  if (!options.multiline && pre.required !== undefined) {
+    const finder = new LiteralFinder(pre.required)
+    return (state, from) => {
+      const input = state.input
+      for (let p = from; ;) {
+        const o = finder.find(input, p)
+        if (o < 0) return undefined
+        const start = Math.max(p, o === 0 ? 0 : input.lastIndexOf(lineTerminator, o - 1) + 1)
+        const nl = input.indexOf(lineTerminator, o)
+        const end = nl < 0 ? input.length : nl
+        const m = scan(state, start, end)
+        if (m !== undefined) return m
+        p = end + 1
+      }
+    }
+  }
+  return (state, from) => scan(state, from, state.input.length)
+}
 
 /**
  * Compiles a regex to a {@link Matcher}. `groups` is the number of capture
@@ -409,28 +576,53 @@ export const compile = (regex: Regex, groups: number, lineTerminator: number, op
     lineTerminator
   }
   const accept: Step = Parser.succeed(undefined)
-  const parser = backends[options.backend](compileNode(ctx, regex, accept))
+  const parser = backends[options.backend](compileNode(ctx, regex, accept, undefined))
   const { frames, slots } = ctx
-  const find = (state: Input.State<Bytes>, from: number): Match | undefined => {
+  const captures = options.captures
+  // Looks the compiled matcher up once, not on every attempt.
+  const run = Compiler.runner(parser, noDiagnostics)
+  // After a failed attempt at the start of a run of the leading class of
+  // `C+…`, every later start in that run fails too.
+  const skip = leadingRun(regex)
+  /** One attempt at `s`: the end of the match, or -1. */
+  let overflow: number | undefined
+  const attempt = (state: Input.State<Bytes>, s: number): number => {
+    if (overflow !== undefined) return -1
+    for (const f of frames) f.length = 0
+    if (captures) slots.fill(-1)
+    if (run(state.reset(s)) !== Input.Fail) return state.pos
+    if (state.mode !== "Backtrack") overflow = s
+    return -1
+  }
+  const found = (s: number, e: number): Match => {
+    if (!captures) return { start: s, end: e, groups: undefined }
+    slots[0] = s
+    slots[1] = e
+    return { start: s, end: e, groups: slots.slice() }
+  }
+  const first = Prefilter.analyze(regex)
+  const table = first.firstBytes
+  /** The leftmost match starting in `[from, to]`, trying only starts a match can begin with. */
+  const scan = (state: Input.State<Bytes>, from: number, to: number): Match | undefined => {
     const input = state.input
-    const length = input.length
-    for (let s = from; s <= length;) {
-      for (const f of frames) f.length = 0
-      if (options.captures) slots.fill(-1)
-      if (Parser.run(parser, state.reset(s), noDiagnostics) !== Input.Fail) {
-        slots[0] = s
-        slots[1] = state.pos
-        return { start: s, end: state.pos, groups: options.captures ? slots.slice() : undefined }
-      }
-      if (state.mode !== "Backtrack") throw new TooDeep({ offset: s })
-      s++
-      while (s < length && (input[s] & 0xc0) === 0x80) s++
+    for (let s = nextStart(input, from, from, to, table); s >= 0;) {
+      const e = attempt(state, s)
+      if (e >= 0) return found(s, e)
+      s = nextStart(input, skipRun(skip, input, s, to) + 1, from, to, table)
     }
     return undefined
   }
-  const matchAt = (state: Input.State<Bytes>, at: number): number => {
-    for (const f of frames) f.length = 0
-    return Parser.run(parser, state.reset(at), noDiagnostics) === Input.Fail ? -1 : state.pos
+  const find = strategy(regex, first, options, lineTerminator, attempt, found, scan)
+  const takeOverflow = () => {
+    const at = overflow
+    overflow = undefined
+    return at
   }
-  return { find, matchAt, slots, groups }
+  return {
+    find: (state, from) => (overflow === undefined ? find(state, from) : undefined),
+    matchAt: attempt,
+    takeOverflow,
+    slots,
+    groups
+  }
 }

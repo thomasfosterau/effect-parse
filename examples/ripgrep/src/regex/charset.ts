@@ -4,15 +4,15 @@
  * A set is a sorted list of disjoint, non-adjacent inclusive ranges, so that
  * the class algebra of Rust's regex syntax (union, intersection, difference,
  * symmetric difference, negation and simple case folding) is exact, and so
- * that the ranges can be handed to `Token.codePoints`, which compiled parsers
- * test as comparisons. Surrogates (U+D800–U+DFFF) are never members: they
+ * that matching can test a byte table for ASCII and search the ranges above
+ * it. Surrogates (U+D800–U+DFFF) are never members: they
  * have no UTF-8 encoding, so no input can contain them.
  *
  * @since 0.0.0
  */
-import { Token } from "@thomasfosterau/effect-parse"
 import * as Arr from "effect/Array"
 import * as Order from "effect/Order"
+import * as Tables from "./unicodeTables.ts"
 
 /**
  * Inclusive `[from, to]` code point ranges, sorted and disjoint.
@@ -169,21 +169,6 @@ export const isAscii = (set: Ranges): boolean => {
   return last === undefined || last[1] < 0x80
 }
 
-/**
- * A `Token.codePoints` predicate testing membership, carrying the ranges so
- * compiled parsers test them inline. ASCII members are looked up in a table.
- *
- * @since 0.0.0
- */
-export const toCodePoints = (name: string, set: Ranges): Token.CodePoints => {
-  const ascii = new Uint8Array(128)
-  for (const [a, b] of set) {
-    for (let c = a; c <= Math.min(b, 127); c++) ascii[c] = 1
-  }
-  const predicate = (c: number): boolean => (c < 128 ? ascii[c] === 1 : has(set, c))
-  return Token.codePoints(name, predicate, set)
-}
-
 // ---------------------------------------------------------------------------
 // Unicode properties
 // ---------------------------------------------------------------------------
@@ -316,32 +301,27 @@ const firstProperty = (bodies: ReadonlyArray<string>): Ranges | undefined => {
   return undefined
 }
 
-let unicodeWordSet: Ranges | undefined
-let unicodeDigitSet: Ranges | undefined
-let unicodeSpaceSet: Ranges | undefined
-
 /**
  * Rust's Unicode `\w`: `Alphabetic`, marks, decimal numbers, connector
- * punctuation and `Join_Control`.
+ * punctuation and `Join_Control` (precomputed in `unicodeTables.ts`).
  *
  * @since 0.0.0
  */
-export const unicodeWord = (): Ranges =>
-  (unicodeWordSet ??= fromRegExpClass("[\\p{Alphabetic}\\p{M}\\p{Nd}\\p{Pc}\\p{Join_Control}]"))
+export const unicodeWord = (): Ranges => Tables.word
 
 /**
  * Rust's Unicode `\d`: general category `Nd`.
  *
  * @since 0.0.0
  */
-export const unicodeDigit = (): Ranges => (unicodeDigitSet ??= fromRegExpClass("\\p{Nd}"))
+export const unicodeDigit = (): Ranges => Tables.digit
 
 /**
  * Rust's Unicode `\s`: the `White_Space` property.
  *
  * @since 0.0.0
  */
-export const unicodeSpace = (): Ranges => (unicodeSpaceSet ??= fromRegExpClass("\\p{White_Space}"))
+export const unicodeSpace = (): Ranges => Tables.space
 
 /**
  * ASCII `\w`: `[0-9A-Za-z_]`.
@@ -440,62 +420,9 @@ export const posixClasses: ReadonlyMap<string, Ranges> = new Map<string, Ranges>
 
 let foldClasses: ReadonlyMap<number, ReadonlyArray<number>> | undefined
 
-const singleCodePoint = (s: string): number | undefined => {
-  const c = s.codePointAt(0)
-  return c !== undefined && String.fromCodePoint(c).length === s.length ? c : undefined
-}
-
-/**
- * The equivalence classes of simple case folding: every code point that
- * changes under case mapping, with the others it maps to and from.
- */
-/** A union-find over code points, for building case equivalence classes. */
-class Equivalence {
-  private readonly parent = new Map<number, number>()
-
-  find(c: number): number {
-    let root = c
-    for (let up = this.parent.get(root); up !== undefined && up !== root; up = this.parent.get(root)) root = up
-    this.parent.set(c, root)
-    return root
-  }
-
-  join(a: number, b: number): void {
-    const ra = this.find(a)
-    const rb = this.find(b)
-    if (ra !== rb) this.parent.set(ra, rb)
-  }
-
-  /** The classes with more than one member, by member. */
-  classes(): ReadonlyMap<number, ReadonlyArray<number>> {
-    const groups = new Map<number, Array<number>>()
-    for (const c of this.parent.keys()) {
-      const root = this.find(c)
-      groups.set(root, [...(groups.get(root) ?? []), c])
-    }
-    const classes = new Map<number, ReadonlyArray<number>>()
-    for (const group of groups.values()) for (const c of group) if (group.length > 1) classes.set(c, group)
-    return classes
-  }
-}
-
-/** Joins `c` with its single-code-point lower and upper case mappings. */
-const joinCaseMappings = (classes: Equivalence, c: number): void => {
-  const s = String.fromCodePoint(c)
-  for (const mapped of [singleCodePoint(s.toLowerCase()), singleCodePoint(s.toUpperCase())]) {
-    if (mapped !== undefined && mapped !== c) classes.join(c, mapped)
-  }
-}
-
-const caseClasses = (): ReadonlyMap<number, ReadonlyArray<number>> => {
-  if (foldClasses !== undefined) return foldClasses
-  const classes = new Equivalence()
-  for (const [from, to] of fromRegExpClass("\\p{Changes_When_Casemapped}")) {
-    for (let c = from; c <= to; c++) joinCaseMappings(classes, c)
-  }
-  foldClasses = classes.classes()
-  return foldClasses
-}
+/** The classes of simple case folding, by member (precomputed in `unicodeTables.ts`). */
+const caseClasses = (): ReadonlyMap<number, ReadonlyArray<number>> =>
+  (foldClasses ??= new Map(Tables.foldClasses.flatMap((group) => group.map((c) => [c, group] as const))))
 
 /**
  * Closes a set under simple case folding: adds every case variant of every
