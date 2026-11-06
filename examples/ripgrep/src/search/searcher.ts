@@ -9,6 +9,7 @@
  *
  * @since 0.0.0
  */
+import { Buffer } from "node:buffer"
 import { Input } from "@thomasfosterau/effect-parse"
 import type { Match, Matcher } from "../regex/compile.ts"
 import * as Arr from "effect/Array"
@@ -42,6 +43,8 @@ export interface SearchOptions {
   /** Whether matches may span lines (`-U`). */
   readonly multiline: boolean
   readonly binary: BinaryMode
+  /** Whether the sink reads line numbers (counting them costs a pass over the lines). */
+  readonly lineNumbers: boolean
 }
 
 /**
@@ -188,7 +191,7 @@ class Search {
   }
 
   private lines(start: number, end: number): Lines {
-    return { start, end, lineNumber: this.counter.at(start) }
+    return { start, end, lineNumber: this.options.lineNumbers ? this.counter.at(start) : 0 }
   }
 
   private lineEnd(pos: number): number {
@@ -357,7 +360,10 @@ class Search {
  *
  * @since 0.0.0
  */
-export const search = (buffer: Uint8Array, options: SearchOptions, sink: Sink): SearchResult => {
+export const search = (input: Uint8Array, options: SearchOptions, sink: Sink): SearchResult => {
+  // As a Buffer (a view, no copy): its indexOf, which finds every line end
+  // and NUL byte, is a native memchr; a plain Uint8Array's is not.
+  const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input.buffer, input.byteOffset, input.byteLength)
   const { limit, nul } = binaryLimit(buffer, options)
   const withheld = options.binary === "convert" && nul !== undefined && nul < BUFFER
   const run = new Search(buffer, options, sink, limit)

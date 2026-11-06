@@ -6,6 +6,7 @@
  * @since 0.0.0
  */
 import * as ChildProcess from "node:child_process"
+import { Buffer } from "node:buffer"
 import * as Fs from "node:fs"
 import * as Zlib from "node:zlib"
 import * as Result from "effect/Result"
@@ -62,6 +63,41 @@ const run = (
  */
 export const preprocess = (command: string, path: string, cwd: string): Result.Result<Uint8Array, string> =>
   run(command, [path], Fs.readFileSync(path), cwd)
+
+// A Buffer, whose `indexOf` is a native memchr: the searcher scans with it.
+let scratch = Buffer.allocUnsafe(1 << 20)
+
+/**
+ * Reads a file into a buffer reused from call to call (no allocation, page
+ * faults or garbage per file, which a fresh buffer each time costs). The
+ * view returned is overwritten by the next call.
+ *
+ * @since 0.0.0
+ */
+export const readFile = (path: string): Uint8Array => {
+  const fd = Fs.openSync(path, "r")
+  try {
+    const size = Fs.fstatSync(fd).size
+    if (size + 1 > scratch.length) scratch = Buffer.allocUnsafe(Math.max(size + 1, 2 * scratch.length))
+    let n = 0
+    for (
+      let r = Fs.readSync(fd, scratch, 0, scratch.length, null);
+      r > 0;
+      r = Fs.readSync(fd, scratch, n, scratch.length - n, null)
+    ) {
+      n += r
+      // The file grew while it was read: make room and carry on.
+      if (n === scratch.length) {
+        const bigger = Buffer.allocUnsafe(2 * scratch.length)
+        bigger.set(scratch)
+        scratch = bigger
+      }
+    }
+    return scratch.subarray(0, n)
+  } finally {
+    Fs.closeSync(fd)
+  }
+}
 
 /**
  * Reads standard input to the end.

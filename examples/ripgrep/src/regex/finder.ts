@@ -57,3 +57,63 @@ export class LiteralFinder {
     return undefined
   }
 }
+
+/**
+ * A rough rank of how common each byte is in text and source code, higher
+ * for more common: lowercase letters by English frequency, then space and
+ * newline, uppercase letters and digits, punctuation, and the rest.
+ */
+const frequency = (b: number): number => {
+  const english = "etaoinshrdlcumwfgypbvkjxqz"
+  if (b >= 0x61 && b <= 0x7a) return 100 - english.indexOf(String.fromCharCode(b)) * 3
+  if (b === 0x20 || b === 0x0a) return 120
+  if (b >= 0x41 && b <= 0x5a) return 30 - english.indexOf(String.fromCharCode(b + 32))
+  if (b >= 0x30 && b <= 0x39) return 25
+  return b < 0x80 ? 15 : 5
+}
+
+/**
+ * Finds a byte-set sequence (`[sS][hH]…`): searches for the bytes of its
+ * rarest position with single-byte `indexOf`, and checks the whole sequence
+ * around each.
+ *
+ * @since 0.0.0
+ */
+export class SequenceFinder {
+  private readonly sets: ReadonlyArray<Uint8Array>
+  private readonly tables: ReadonlyArray<Uint8Array>
+  private readonly anchor: number
+  private readonly bytes: LiteralFinder
+
+  constructor(sets: ReadonlyArray<Uint8Array>) {
+    this.sets = sets
+    this.tables = sets.map((set) => {
+      const t = new Uint8Array(256)
+      for (const b of set) t[b] = 1
+      return t
+    })
+    const cost = (set: Uint8Array) => set.reduce((n, b) => n + frequency(b), 0)
+    let anchor = 0
+    sets.forEach((set, i) => {
+      if (cost(set) < cost(sets[anchor] ?? set)) anchor = i
+    })
+    this.anchor = anchor
+    this.bytes = new LiteralFinder(Array.from(sets[anchor] ?? [], (b) => Uint8Array.of(b)))
+  }
+
+  /** The start of the first occurrence of the sequence at or after `pos`, or -1. */
+  find(haystack: Uint8Array, pos: number): number {
+    const n = this.sets.length
+    for (let p = pos + this.anchor; ; p++) {
+      p = this.bytes.find(haystack, p)
+      if (p < 0) return -1
+      const start = p - this.anchor
+      if (start + n <= haystack.length && this.at(haystack, start)) return start
+    }
+  }
+
+  private at(haystack: Uint8Array, start: number): boolean {
+    for (let i = 0; i < this.tables.length; i++) if (this.tables[i]?.[haystack[start + i]] !== 1) return false
+    return true
+  }
+}

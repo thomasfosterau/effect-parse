@@ -1,6 +1,7 @@
 import * as Fs from "node:fs"
 import * as Os from "node:os"
 import * as Path from "node:path"
+import * as Predicate from "effect/Predicate"
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test"
 import * as Corpus from "../bench/corpus.ts"
 import * as Differential from "../bench/differential.ts"
@@ -33,7 +34,7 @@ const erg = (
   const out = Path.join(scratch, "stdout")
   const fd = Fs.openSync(out, "w+")
   let stderr = ""
-  let status: number
+  let status: number | Promise<number>
   try {
     status = main({
       argv,
@@ -44,12 +45,14 @@ const erg = (
       stderr: (m) => {
         stderr += m
       },
-      stdin: { readable: options.input !== undefined, read: () => encoder.encode(options.input ?? "") }
+      stdin: { readable: options.input !== undefined, read: () => encoder.encode(options.input ?? "") },
+      workerUrl: undefined
     })
   } finally {
     Fs.closeSync(fd)
   }
-  return { stdout: Fs.readFileSync(out, "utf8"), stderr, status }
+  // Without a worker URL the search runs on this thread, synchronously.
+  return { stdout: Fs.readFileSync(out, "utf8"), stderr, status: Predicate.isNumber(status) ? status : -1 }
 }
 
 // Command lines checked against ripgrep 14 byte for byte (stdout and exit
@@ -248,6 +251,56 @@ describe.skipIf(!Differential.hasRipgrep())("against ripgrep 14.1", () => {
     ]) {
       const env = { RIPGREP_CONFIG_PATH: config }
       expect(erg(c, { env }).stdout, c.join(" ")).toBe(Differential.rg(c, root, env).stdout)
+    }
+  })
+})
+
+/** Runs `erg` in-process with worker threads available, awaiting a parallel search. */
+const ergParallel = async (argv: ReadonlyArray<string>): Promise<Outcome> => {
+  const out = Path.join(scratch, "stdout-parallel")
+  const fd = Fs.openSync(out, "w+")
+  let stderr = ""
+  try {
+    const status = await main({
+      argv,
+      env: { RIPGREP_CONFIG_PATH: "" },
+      cwd: root,
+      stdoutIsTty: false,
+      stdout: fd,
+      stderr: (m) => {
+        stderr += m
+      },
+      stdin: { readable: false, read: () => new Uint8Array() },
+      workerUrl: new URL("../src/worker.ts", import.meta.url)
+    })
+    return { stdout: Fs.readFileSync(out, "utf8"), stderr, status }
+  } finally {
+    Fs.closeSync(fd)
+  }
+}
+
+// Workers run in plain Node, outside this runner's module aliases: they load
+// the package as a dependent does, from its build.
+const built = Fs.existsSync(Path.join(import.meta.dirname, "..", "..", "..", "dist", "index.js"))
+
+describe.skipIf(!built)("in parallel", () => {
+  it("prints what one thread prints, in the same order", async () => {
+    for (const c of [
+      ["-n", "parser"],
+      ["--heading", "-n", "Holmes"],
+      ["-C1", "Watson"],
+      ["-c", "e"],
+      ["-l", "TODO"],
+      ["--json", "Moriarty"],
+      ["--stats", "Baker"],
+      ["-q", "Sherlock"],
+      ["nothing-matches-this"],
+      ["x", "missing.txt", "src"]
+    ]) {
+      const one = await ergParallel(["-j1", ...c])
+      const many = await ergParallel(["-j4", ...c])
+      expect(Differential.normalizeTimings(many.stdout), c.join(" ")).toBe(Differential.normalizeTimings(one.stdout))
+      expect(many.status, c.join(" ")).toBe(one.status)
     }
   })
 })

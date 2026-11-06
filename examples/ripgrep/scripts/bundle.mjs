@@ -11,13 +11,16 @@ import { build } from "rolldown"
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 
 await build({
-  input: here("../bin/erg.ts"),
+  // The CLI and the search worker it starts, sharing one chunk of code.
+  input: { "erg-bundle": here("../bin/erg.ts"), "erg-worker-bundle": here("../src/worker.ts") },
   platform: "node",
   resolve: {
     alias: { "@thomasfosterau/effect-parse": here("../../../src/index.ts") }
   },
   output: {
-    file: here("../dist/erg-bundle.mjs"),
+    dir: here("../dist"),
+    entryFileNames: "[name].mjs",
+    chunkFileNames: "erg-[name].mjs",
     format: "esm",
     // ERG_NO_MINIFY=1 keeps names, for profiling.
     minify: process.env.ERG_NO_MINIFY !== "1"
@@ -27,6 +30,11 @@ await build({
 
 // The launcher turns on Node's compile cache (22.1+) before it loads the
 // bundle, so the bundle's compiled code is kept between runs.
+// Each worker thread compiles its code afresh unless it turns the cache on too.
+writeFileSync(
+  here("../dist/erg-worker.mjs"),
+  'import { enableCompileCache } from "node:module"\nenableCompileCache?.()\nawait import("./erg-worker-bundle.mjs")\n'
+)
 writeFileSync(
   here("../dist/erg.mjs"),
   '#!/usr/bin/env node\nimport { enableCompileCache } from "node:module"\nenableCompileCache?.()\nawait import("./erg-bundle.mjs")\n',

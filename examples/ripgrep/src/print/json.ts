@@ -7,7 +7,7 @@
 import type { Match } from "../regex/compile.ts"
 import type { Lines, SearchResult, Sink } from "../search/searcher.ts"
 import type { Output } from "./output.ts"
-import type { FileInfo, Printer, Totals } from "./printer.ts"
+import type { FileEnd, FileInfo, Printer, Totals } from "./printer.ts"
 
 const strict = new TextDecoder("utf-8", { fatal: true })
 
@@ -49,9 +49,6 @@ export interface JsonOptions {
  * @since 0.0.0
  */
 export const jsonPrinter = (o: JsonOptions, out: Output): Printer => {
-  let searches = 0
-  let printedTotal = 0
-  let searchesWithMatch = 0
   const file = (info: FileInfo) => {
     const path = data(encoder.encode(info.path))
     let begun = false
@@ -88,28 +85,28 @@ export const jsonPrinter = (o: JsonOptions, out: Output): Printer => {
     }
     return {
       sink,
-      end: (result: SearchResult, bytesSearched: number, nanos: number) => {
-        searches++
+      end: (result: SearchResult, bytesSearched: number, nanos: number): FileEnd => {
         const matched = result.matchedLines > 0
-        if (matched) searchesWithMatch++
+        // The summary counts what was printed before each `end` message.
+        const shown = printed
         if (begun) {
-          printedTotal += printed
           const stats = `{"elapsed":${duration(nanos, false)},"searches":1,"searches_with_match":${matched ? 1 : 0},"bytes_searched":${bytesSearched},"bytes_printed":${printed},"matched_lines":${result.matchedLines},"matches":${result.matches}}`
           emit(
             `{"type":"end","data":{"path":${path},"binary_offset":${result.binaryOffset ?? "null"},"stats":${stats}}}`
           )
         }
-        return matched
+        return { matched, printed: shown, began: begun ? "separate" : "no" }
       }
     }
   }
   return {
     allMatches: true,
+    lineNumbers: o.lineNumber,
     file,
     finish: (t: Totals) => {
       if (o.quiet) return
       const total = Number(process.hrtime.bigint() - t.startNanos)
-      const stats = `{"bytes_printed":${printedTotal},"bytes_searched":${t.bytesSearched},"elapsed":${duration(t.searchNanos, true)},"matched_lines":${t.matchedLines},"matches":${t.matches},"searches":${searches},"searches_with_match":${searchesWithMatch}}`
+      const stats = `{"bytes_printed":${t.printed},"bytes_searched":${t.bytesSearched},"elapsed":${duration(t.searchNanos, true)},"matched_lines":${t.matchedLines},"matches":${t.matches},"searches":${t.filesSearched},"searches_with_match":${t.filesWithMatches}}`
       out.text(`{"data":{"elapsed_total":${duration(total, true)},"stats":${stats}},"type":"summary"}\n`)
     }
   }

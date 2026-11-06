@@ -10,7 +10,8 @@ import * as Predicate from "effect/Predicate"
 const encoder = new TextEncoder()
 
 /**
- * A growable byte buffer flushed to a file descriptor.
+ * A growable byte buffer flushed to a file descriptor, or kept in memory
+ * when the descriptor is -1 (for a worker, which hands its output back).
  *
  * @since 0.0.0
  */
@@ -81,7 +82,28 @@ export class Output {
     this.writeAll(pending)
   }
 
+  /** In memory (`fd` -1): what has been flushed, not yet taken. */
+  private readonly chunks: Array<Uint8Array> = []
+
+  /** In memory: everything written since the last call. */
+  take(): Uint8Array<ArrayBuffer> {
+    this.flush()
+    const total = this.chunks.reduce((n, c) => n + c.length, 0)
+    const out = new Uint8Array(total)
+    let at = 0
+    for (const c of this.chunks) {
+      out.set(c, at)
+      at += c.length
+    }
+    this.chunks.length = 0
+    return out
+  }
+
   private writeAll(b: Uint8Array): void {
+    if (this.fd < 0) {
+      this.chunks.push(b.slice())
+      return
+    }
     let offset = 0
     while (offset < b.length && !this.closed) {
       try {

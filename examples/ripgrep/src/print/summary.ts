@@ -77,9 +77,10 @@ export const summaryPrinter = (o: SummaryOptions, out: Output): Printer => {
   }
   return {
     allMatches: o.mode === "countMatches" || o.stats,
+    lineNumbers: false,
     file: (info) => ({
       sink: { matched: noop, context: noop, contextBreak: noop },
-      end: (result: SearchResult) => end(info, result)
+      end: (result: SearchResult) => Printers.ended(end(info, result))
     }),
     finish: (t: Totals) => {
       if (o.stats) {

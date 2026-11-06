@@ -10,7 +10,7 @@ import type { Match } from "../regex/compile.ts"
 import type { Lines, SearchResult, Sink } from "../search/searcher.ts"
 import * as Color from "./color.ts"
 import type { Output } from "./output.ts"
-import type { FileInfo, FilePrinter, Printer, Template, Totals } from "./printer.ts"
+import type { FileEnd, FileInfo, FilePrinter, Printer, Template, Totals } from "./printer.ts"
 import * as Printers from "./printer.ts"
 import * as Arr from "effect/Array"
 
@@ -43,6 +43,24 @@ export interface StandardOptions {
   readonly invert: boolean
   readonly stats: boolean
   readonly quiet: boolean
+  /**
+   * Whether the printer writes the separators between files itself. Off
+   * when files are printed apart (in parallel) and joined by the caller,
+   * which writes {@link separator} between them.
+   */
+  readonly separateFiles: boolean
+}
+
+/**
+ * What goes between the output of two files: a blank line under
+ * `--heading`; with context, the context separator, unless the second
+ * file's output is a binary notice.
+ *
+ * @since 0.0.0
+ */
+export const separator = (o: StandardOptions, separate: boolean): string => {
+  if (o.heading) return "\n"
+  return separate && o.context && o.contextSeparator !== undefined ? `${o.contextSeparator}\n` : ""
 }
 
 type LineKind = "matching" | "context"
@@ -62,8 +80,6 @@ const isSpace = (b: number): boolean => b === 0x20 || (b >= 0x09 && b <= 0x0d)
  */
 export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
   let filesPrinted = 0
-  // With context on, ripgrep separates files' results like non-adjacent groups.
-  const contextual = o.context && o.contextSeparator !== undefined
   const lt = new Uint8Array([o.lineTerminator])
 
   const colored = (target: Color.ColorTarget, text: string | Uint8Array) => {
@@ -91,17 +107,15 @@ export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
         colored("path", info.path)
       }
     }
+    let began: FileEnd["began"] = "no"
     const begin = (separate: boolean) => {
       if (started) return
       started = true
-      if (o.heading) {
-        if (filesPrinted > 0) out.text("\n")
-        if (o.withFilename) {
-          writePath(1, 1)
-          out.text(o.nullPath ? "\0" : "\n")
-        }
-      } else if (separate && filesPrinted > 0 && contextual) {
-        out.text(`${o.contextSeparator ?? ""}\n`)
+      began = separate ? "separate" : "joined"
+      if (o.separateFiles && filesPrinted > 0) out.text(separator(o, separate))
+      if (o.heading && o.withFilename) {
+        writePath(1, 1)
+        out.text(o.nullPath ? "\0" : "\n")
       }
       filesPrinted++
     }
@@ -291,7 +305,8 @@ export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
     return {
       sink,
       end: (result: SearchResult) => {
-        if (o.quiet) return result.matchedLines > 0
+        const matched = result.matchedLines > 0
+        if (o.quiet) return Printers.ended(matched)
         if (result.binaryMatched) {
           begin(false)
           if (o.withFilename && !o.heading) {
@@ -308,12 +323,14 @@ export const standardPrinter = (o: StandardOptions, out: Output): Printer => {
             `WARNING: stopped searching binary file after match (found "\\0" byte around offset ${result.binaryOffset ?? 0})\n`
           )
         }
-        return result.matchedLines > 0
+        return { matched, printed: 0, began }
       }
     }
   }
 
   return {
+    // vimgrep and hyperlinks need them even when they are not printed.
+    lineNumbers: o.lineNumber || o.vimgrep || o.hyperlink !== undefined,
     allMatches: o.onlyMatching || o.vimgrep || o.colors !== undefined || o.replace !== undefined || o.column || o.stats,
     file,
     finish: (t: Totals) => {

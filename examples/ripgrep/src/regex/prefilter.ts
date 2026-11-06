@@ -207,6 +207,77 @@ export const firstBytes = (regex: Regex): FirstBytes => {
 }
 
 /**
+ * The ASCII bytes a part matches, when it is one byte from a small set: a
+ * one-byte literal or a small ASCII class (`[sS]` under `-i`).
+ */
+const byteSet = (regex: Regex): Uint8Array | undefined => {
+  if (regex._tag === "Literal")
+    return regex.text.length === 1 && regex.text < "\x80" ? Uint8Array.of(regex.text.charCodeAt(0)) : undefined
+  if (regex._tag !== "Class" || classSize(regex.set) > MAX_CLASS) return undefined
+  const bytes = regex.set.flatMap(([a, b]) => Array.from({ length: b - a + 1 }, (_, i) => a + i))
+  return bytes.every((c) => c < 0x80) ? Uint8Array.from(bytes) : undefined
+}
+
+/** A part split into one-byte sets, when every character of it is one (`Literal` "abc" is three). */
+const byteSets = (regex: Regex): ReadonlyArray<Uint8Array> | undefined => {
+  if (regex._tag === "Literal") {
+    const bytes = encoder.encode(regex.text)
+    return bytes.every((c) => c < 0x80) ? Array.from(bytes, (c) => Uint8Array.of(c)) : undefined
+  }
+  const one = byteSet(regex)
+  return one === undefined ? undefined : [one]
+}
+
+/** A run of one-byte sets, and the index of the part it starts at. */
+interface Run {
+  readonly sets: ReadonlyArray<Uint8Array>
+  readonly index: number
+}
+
+/** The longest run of one-byte sets in a concatenation, and where it starts (0 for a prefix). */
+const longestSequence = (parts: ReadonlyArray<Regex>): Run => {
+  let best: ReadonlyArray<Uint8Array> = []
+  let bestIndex = -1
+  let run: Array<Uint8Array> = []
+  let runIndex = 0
+  parts.forEach((part, i) => {
+    const sets = byteSets(part)
+    if (sets === undefined) {
+      run = []
+      runIndex = i + 1
+      return
+    }
+    run = [...run, ...sets]
+    if (run.length > best.length) {
+      best = run
+      bestIndex = runIndex
+    }
+  })
+  return { sets: best, index: bestIndex }
+}
+
+/**
+ * A byte-set sequence every match contains: consecutive positions, each one
+ * of a few ASCII bytes (`[sS][hH][eE]…` under `-i`). `atStart` when every
+ * match starts with it.
+ *
+ * @since 0.0.0
+ */
+export interface Sequence {
+  readonly sets: ReadonlyArray<Uint8Array>
+  readonly atStart: boolean
+}
+
+const sequenceOf = (regex: Regex): Sequence | undefined => {
+  const parts = regex._tag === "Concat" ? regex.subs : [regex]
+  const { index, sets } = longestSequence(parts)
+  if (sets.length < 2) return undefined
+  // Leading assertions do not consume input: the sequence still starts each match.
+  const atStart = parts.slice(0, index).every((p) => p._tag === "Look")
+  return { sets, atStart }
+}
+
+/**
  * What the searcher may skip by.
  *
  * @since 0.0.0
@@ -218,6 +289,8 @@ export interface Prefilter {
   readonly required: ReadonlyArray<Uint8Array> | undefined
   /** `table[b]` is 1 for each byte a match can start with; `undefined` when a match can be empty. */
   readonly firstBytes: Uint8Array | undefined
+  /** A byte-set sequence every match contains, or `undefined`. */
+  readonly sequence: Sequence | undefined
 }
 
 const bytesOf = (set: ReadonlyArray<string> | undefined): ReadonlyArray<Uint8Array> | undefined =>
@@ -243,7 +316,8 @@ export const analyze = (regex: Regex): Prefilter => {
   return {
     prefixes: bytesOf(pre),
     required: bytesOf(better(pre, req)),
-    firstBytes: nullable ? undefined : table
+    firstBytes: nullable ? undefined : table,
+    sequence: sequenceOf(regex)
   }
 }
 
