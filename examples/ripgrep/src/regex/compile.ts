@@ -78,6 +78,14 @@ export interface Matcher {
    */
   readonly find: (state: Input.State<Bytes>, from: number) => Match | undefined
   /**
+   * Outside multiline mode, where the DFA can say which lines hold a match:
+   * like {@link Matcher.find}, but the match only tells the line it is in
+   * (its start and end are a position in that line, its groups unset), so
+   * no match is looked for in a line the DFA confirmed. For searches that
+   * need the lines alone (no colors, `-o`, columns or match counts).
+   */
+  readonly findLine: ((state: Input.State<Bytes>, from: number) => Match | undefined) | undefined
+  /**
    * How the matcher finds candidates, from cheapest per byte: one literal,
    * several literals or a byte-set sequence, or the regex itself on every
    * candidate line or position.
@@ -601,7 +609,7 @@ const lineEndOf = (input: Bytes, t: number, o: number): number => {
  * the matcher.
  */
 const lineStrategy =
-  (finder: Finder, dfa: LineDfa | undefined, t: number, scan: Scan): Find =>
+  (finder: Finder, dfa: LineDfa | undefined, t: number, confirm: Confirm): Find =>
   (state, from) => {
     const input = state.input
     for (let p = from; ;) {
@@ -609,16 +617,35 @@ const lineStrategy =
       if (o < 0) return undefined
       const start = Math.max(p, lineStartOf(input, t, o))
       const end = lineEndOf(input, t, o)
-      const hit = dfa === undefined || dfa.exhausted ? start : dfa.find(input, start, end)
-      const m = hit === -1 ? undefined : scan(state, start, end)
+      const unconfirmed = dfa === undefined || dfa.exhausted
+      const hit = unconfirmed ? start : dfa.find(input, start, end)
+      const m = hit === -1 ? undefined : confirm(state, start, end, unconfirmed || hit < 0 ? -1 : hit)
       if (m !== undefined) return m
       p = end + 1
     }
   }
 
+/**
+ * What a strategy does with a line `[start, end]` that may hold a match:
+ * `hit` is where the DFA found one ends, or -1 when no DFA has looked.
+ */
+type Confirm = (state: Input.State<Bytes>, start: number, end: number, hit: number) => Match | undefined
+
+/** Finds the match in the line. */
+const searchLine =
+  (scan: Scan): Confirm =>
+  (state, start, end) =>
+    scan(state, start, end)
+
+/** Takes the DFA's word for it: a stand-in match at the hit (see {@link Matcher.findLine}). */
+const confirmLine =
+  (scan: Scan): Confirm =>
+  (state, start, end, hit) =>
+    hit < 0 ? scan(state, start, end) : { start: hit, end: hit, groups: undefined }
+
 /** Every line the DFA finds a match in, searched by the matcher. */
 const dfaStrategy =
-  (dfa: LineDfa, t: number, scan: Scan): Find =>
+  (dfa: LineDfa, t: number, scan: Scan, confirm: Confirm): Find =>
   (state, from) => {
     const input = state.input
     for (let p = from; p <= input.length;) {
@@ -633,7 +660,7 @@ const dfaStrategy =
       if (hit === -2) return scan(state, p, input.length)
       if (hit < 0) return undefined
       const end = lineEndOf(input, t, hit)
-      const m = scan(state, Math.max(p, lineStartOf(input, t, hit)), end)
+      const m = confirm(state, Math.max(p, lineStartOf(input, t, hit)), end, hit)
       if (m !== undefined) return m
       p = end + 1
     }
@@ -655,26 +682,36 @@ const strategy = (
   attempt: (state: Input.State<Bytes>, s: number) => number,
   found: (s: number, e: number) => Match,
   scan: Scan
-): Find => {
+): Strategies => {
   const startSequence = pre.sequence?.atStart === true ? pre.sequence.sets.length : 0
   const prefixLength = Math.max(shortest(pre.prefixes), startSequence)
   const requiredLength = Math.max(shortest(pre.required), pre.sequence?.sets.length ?? 0)
   if (prefixLength > 0 && (options.multiline || prefixLength >= requiredLength)) {
-    return prefixStrategy(regex, pre, options, attempt, found)
+    return { find: prefixStrategy(regex, pre, options, attempt, found), line: undefined }
   }
-  if (options.multiline) return (state, from) => scan(state, from, state.input.length)
+  const everywhere: Find = (state, from) => scan(state, from, state.input.length)
+  if (options.multiline) return { find: everywhere, line: undefined }
   const dfa = LineDfa.make(regex, lineTerminator)
+  const t = lineTerminator
   // A literal shorter than three bytes is in most lines: one DFA pass over
   // the input beats a search for it and a DFA run on each line it is in.
-  if (dfa !== undefined && requiredLength < 3) return dfaStrategy(dfa, lineTerminator, scan)
+  if (dfa !== undefined && requiredLength < 3) {
+    return { find: dfaStrategy(dfa, t, scan, searchLine(scan)), line: dfaStrategy(dfa, t, scan, confirmLine(scan)) }
+  }
   if (requiredLength > 0) {
     const finder: Finder = preferSequence(pre.required, pre.sequence)
       ? sequenceFinder(pre.sequence?.sets ?? [])
       : literalFinder(pre.required ?? [])
-    return lineStrategy(finder, dfa, lineTerminator, scan)
+    const line = dfa === undefined ? undefined : lineStrategy(finder, dfa, t, confirmLine(scan))
+    return { find: lineStrategy(finder, dfa, t, searchLine(scan)), line }
   }
-  if (dfa !== undefined) return dfaStrategy(dfa, lineTerminator, scan)
-  return (state, from) => scan(state, from, state.input.length)
+  return { find: everywhere, line: undefined }
+}
+
+/** A matcher's two searches: for matches, and for the lines that hold one (see {@link Matcher.findLine}). */
+interface Strategies {
+  readonly find: Find
+  readonly line: Find | undefined
 }
 
 /**
@@ -737,7 +774,7 @@ export const compile = (regex: Regex, groups: number, lineTerminator: number, op
     }
     return undefined
   }
-  const find = strategy(regex, first, options, lineTerminator, attempt, found, scan)
+  const { find, line } = strategy(regex, first, options, lineTerminator, attempt, found, scan)
   const takeOverflow = () => {
     const at = overflow
     overflow = undefined
@@ -745,6 +782,8 @@ export const compile = (regex: Regex, groups: number, lineTerminator: number, op
   }
   return {
     find: (state, from) => (overflow === undefined ? find(state, from) : undefined),
+    findLine:
+      line === undefined ? undefined : (state, from) => (overflow === undefined ? line(state, from) : undefined),
     matchAt: attempt,
     cost: costOf(first, options.multiline),
     takeOverflow,
