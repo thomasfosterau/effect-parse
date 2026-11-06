@@ -371,25 +371,43 @@ const compileGlobs = (globs: ReadonlyArray<string>): Result.Result<ReadonlyArray
   return Result.succeed(compiled)
 }
 
+/** The context lines a mode prints: `[before, after]`, none for the summary modes and `--passthru`. */
+const contextOf = (args: Args): readonly [number, number] => {
+  const lines = (args.mode === "standard" || args.mode === "json") && !args.passthru
+  return lines ? [args.beforeContext ?? args.context ?? 0, args.afterContext ?? args.context ?? 0] : [0, 0]
+}
+
+/** The most matching lines to look for: one when only whether a file matches counts (`--stats` needs them all). */
+const maxCountOf = (args: Args): number | undefined => {
+  const summaryStop = args.mode === "filesWithMatches" || args.mode === "filesWithoutMatch"
+  return (args.quiet || summaryStop) && !args.stats ? 1 : args.maxCount
+}
+
+/** Whether binary detection may wait for a match (see `SearchOptions.lazyBinary`). */
+const lazyBinaryOf = (args: Args): boolean =>
+  !args.invertMatch && !args.passthru && !args.stats && args.mode !== "json" && args.mode !== "filesWithoutMatch"
+
+/** How binary files are handled: with --null-data, NUL ends lines, so no file is binary. */
+const binaryOf = (args: Args, explicit: boolean): Searcher.BinaryMode =>
+  args.text || args.nullData ? "none" : explicit || args.binary ? "convert" : "quit"
+
 /** The searcher's settings for explicit (named) and implicit (walked) files. */
 const searchOptions = (args: Args, patterns: Pattern.Patterns, allMatches: boolean, lineNumbers: boolean) => {
-  const summaryStop = args.mode === "filesWithMatches" || args.mode === "filesWithoutMatch"
-  const contextLines = args.mode === "standard" || args.mode === "json"
+  const [before, after] = contextOf(args)
   const make = (explicit: boolean): Searcher.SearchOptions => ({
     matcher: patterns.matcher,
     lineTerminator: patterns.lineTerminator,
     invert: args.invertMatch,
-    // --stats needs every match, so it turns off the early exits.
-    maxCount: (args.quiet || summaryStop) && !args.stats ? 1 : args.maxCount,
-    before: contextLines && !args.passthru ? (args.beforeContext ?? args.context ?? 0) : 0,
-    after: contextLines && !args.passthru ? (args.afterContext ?? args.context ?? 0) : 0,
-    passthru: args.passthru && contextLines,
+    maxCount: maxCountOf(args),
+    before,
+    after,
+    passthru: args.passthru && (args.mode === "standard" || args.mode === "json"),
     stopOnNonmatch: args.stopOnNonmatch,
     allMatches,
     lineNumbers,
+    lazyBinary: lazyBinaryOf(args),
     multiline: args.multiline,
-    // With --null-data, NUL ends lines, so no file is binary.
-    binary: args.text || args.nullData ? "none" : explicit || args.binary ? "convert" : "quit"
+    binary: binaryOf(args, explicit)
   })
   return { explicit: make(true), implicit: make(false) }
 }

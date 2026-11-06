@@ -21,6 +21,7 @@ import type { Look, Regex } from "./ast.ts"
 import * as Ast from "./ast.ts"
 import * as CharSet from "./charset.ts"
 import type { Ranges } from "./charset.ts"
+import { LineDfa } from "./dfa.ts"
 import { LiteralFinder, SequenceFinder } from "./finder.ts"
 import * as Prefilter from "./prefilter.ts"
 
@@ -586,32 +587,60 @@ const prefixStrategy = (
   }
 }
 
-/** Candidate lines: those holding a literal (or byte-set sequence) every match contains. */
+type Scan = (state: Input.State<Bytes>, from: number, to: number) => Match | undefined
+
+const lineStartOf = (input: Bytes, t: number, o: number): number => (o === 0 ? 0 : input.lastIndexOf(t, o - 1) + 1)
+
+const lineEndOf = (input: Bytes, t: number, o: number): number => {
+  const nl = input.indexOf(t, o)
+  return nl < 0 ? input.length : nl
+}
+
+/**
+ * Candidate lines: those holding a literal (or byte-set sequence) every
+ * match contains, confirmed by the DFA when there is one, then searched by
+ * the matcher.
+ */
 const lineStrategy =
-  (
-    finder: Finder,
-    lineTerminator: number,
-    scan: (state: Input.State<Bytes>, from: number, to: number) => Match | undefined
-  ): Find =>
+  (finder: Finder, dfa: LineDfa | undefined, t: number, scan: Scan): Find =>
   (state, from) => {
     const input = state.input
     for (let p = from; ;) {
       const o = finder.find(input, p)
       if (o < 0) return undefined
-      const start = Math.max(p, o === 0 ? 0 : input.lastIndexOf(lineTerminator, o - 1) + 1)
-      const nl = input.indexOf(lineTerminator, o)
-      const end = nl < 0 ? input.length : nl
-      const m = scan(state, start, end)
+      const start = Math.max(p, lineStartOf(input, t, o))
+      const end = lineEndOf(input, t, o)
+      const hit = dfa === undefined || dfa.exhausted ? start : dfa.find(input, start, end)
+      const m = hit === -1 ? undefined : scan(state, start, end)
       if (m !== undefined) return m
       p = end + 1
     }
   }
 
+/** Every line the DFA finds a match in, searched by the matcher. */
+const dfaStrategy =
+  (dfa: LineDfa, t: number, scan: Scan): Find =>
+  (state, from) => {
+    const input = state.input
+    for (let p = from; p <= input.length;) {
+      const hit = dfa.find(input, p, input.length)
+      // Out of states: the matcher searches the rest by itself.
+      if (hit === -2) return scan(state, p, input.length)
+      if (hit < 0) return undefined
+      const end = lineEndOf(input, t, hit)
+      const m = scan(state, Math.max(p, lineStartOf(input, t, hit)), end)
+      if (m !== undefined) return m
+      p = end + 1
+    }
+    return undefined
+  }
+
 /**
  * How `find` looks for the next match: from the occurrences of what every
  * match starts with; from the lines holding what every match contains
- * (outside multiline mode, where a match lies within one line); or from
- * every position a match can start at.
+ * (outside multiline mode, where a match lies within one line), confirmed
+ * by the DFA; from the lines the DFA finds a match in; or from every
+ * position a match can start at.
  */
 const strategy = (
   regex: Regex,
@@ -620,7 +649,7 @@ const strategy = (
   lineTerminator: number,
   attempt: (state: Input.State<Bytes>, s: number) => number,
   found: (s: number, e: number) => Match,
-  scan: (state: Input.State<Bytes>, from: number, to: number) => Match | undefined
+  scan: Scan
 ): Find => {
   const startSequence = pre.sequence?.atStart === true ? pre.sequence.sets.length : 0
   const prefixLength = Math.max(shortest(pre.prefixes), startSequence)
@@ -628,12 +657,18 @@ const strategy = (
   if (prefixLength > 0 && (options.multiline || prefixLength >= requiredLength)) {
     return prefixStrategy(regex, pre, options, attempt, found)
   }
-  if (!options.multiline && requiredLength > 0) {
+  if (options.multiline) return (state, from) => scan(state, from, state.input.length)
+  const dfa = LineDfa.make(regex, lineTerminator)
+  // A literal shorter than three bytes is in most lines: one DFA pass over
+  // the input beats a search for it and a DFA run on each line it is in.
+  if (dfa !== undefined && requiredLength < 3) return dfaStrategy(dfa, lineTerminator, scan)
+  if (requiredLength > 0) {
     const finder: Finder = preferSequence(pre.required, pre.sequence)
       ? new SequenceFinder(pre.sequence?.sets ?? [])
       : new LiteralFinder(pre.required ?? [])
-    return lineStrategy(finder, lineTerminator, scan)
+    return lineStrategy(finder, dfa, lineTerminator, scan)
   }
+  if (dfa !== undefined) return dfaStrategy(dfa, lineTerminator, scan)
   return (state, from) => scan(state, from, state.input.length)
 }
 
