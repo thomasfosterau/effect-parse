@@ -536,7 +536,7 @@ On a 0.58 M-character JSON document (`vp run bench:syntax`), building the tree t
 | Module | Contents | winnow / nom equivalent |
 | --- | --- | --- |
 | `Parser` | the type, combinators, runners | `Parser` trait, `combinator` / `combinator`, `branch`, `multi`, `sequence` |
-| `Token` | `any`, `literal`, `oneOf`, `noneOf`, `take`, `takeWhile`, `takeTill`, `takeUntil`, `rest`, `range`, `codePoints` | `token` / `bytes` |
+| `Token` | `any`, `literal`, `oneOf`, `noneOf`, `take`, `takeWhile`, `takeTill`, `takeUntil`, `takeUntilAny`, `rest`, `range`, `codePoints` | `token` / `bytes` |
 | `Text` | Unicode parsers for any encoding: `string`, `utf8`, `utf16le`, `utf16be`, `latin1`, `make`; Unicode predicates | — |
 | `Encoding` | text encodings for `Text`, `sniff` | — |
 | `Ascii` | character classes, `lineEnding`, `decInt`, `decUint`, `hexUint`, `float`, `caseless`, `takeEscaped`, `escaped`, `Ascii.bytes.*` | `ascii` / `character`, `number` |

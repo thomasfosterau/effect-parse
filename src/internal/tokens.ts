@@ -414,6 +414,36 @@ export const countTokens = (state: State<Input>, start: number, end: number): nu
   return count
 }
 
+/**
+ * The first index at or after `from` of any of `needles` within
+ * `[from, state.end)`, or -1. The state remembers, under `needles`, where
+ * each one next occurs (`[from, at]` at `2 * i`), so successive searches
+ * forwards over one input search each needle once per occurrence rather
+ * than once per call (as `nextStop` does for `takeTill`).
+ */
+export const indexOfAny = (state: State<Input>, needles: ReadonlyArray<Input>, from: number): number => {
+  const searches = (state.searches ??= new Map())
+  let memo = searches.get(needles)
+  if (memo === undefined) {
+    memo = needles.flatMap(() => [-1, -1])
+    searches.set(needles, memo)
+  }
+  let best = -1
+  for (let i = 0; i < needles.length; i++) {
+    const known = memo[2 * i] ?? -1
+    let at = memo[2 * i + 1] ?? -1
+    const needle = needles[i] ?? ""
+    // Searched again when the input's end moved before a remembered occurrence
+    if (known < 0 || from < known || (at >= 0 && (at < from || at > state.end - needle.length))) {
+      at = indexOf(state, needle, from)
+      memo[2 * i] = from
+      memo[2 * i + 1] = at
+    }
+    if (at >= 0 && (best < 0 || at < best)) best = at
+  }
+  return best
+}
+
 /** Finds `needle` within `[from, state.end)`; returns -1 if absent. */
 export const indexOf = (state: State<Input>, needle: Input, from: number): number => {
   // The whole needle must lie before `state.end`, which may narrow the input

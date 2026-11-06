@@ -240,6 +240,34 @@ describe("Token", () => {
     })
   })
 
+  describe("takeUntilAny", () => {
+    it("stops at the first occurrence of any literal", () => {
+      const p = Token.takeUntilAny(["world", "lo"])
+      expect(peek(p, "Hello world")).toEqual(Result.succeed(["lo world", "Hel"]))
+      expect(peek(Token.takeUntilAny(["x", ""]), "abc")).toEqual(Result.succeed(["abc", ""]))
+      expectFailure(p, "Help")
+      expectFailure(Token.takeUntilAny([]), "abc")
+    })
+
+    it("ranges", () => {
+      expectFailure(Token.takeUntilAny(["x", "y"], { min: 1 }), "yx")
+      expectFailure(Token.takeUntilAny(["x", "y"], { max: 2 }), "abcy")
+      expect(peek(Token.takeUntilAny(["x", "y"], { max: 2 }), "aby")).toEqual(Result.succeed(["y", "ab"]))
+    })
+
+    it("bytes, searching forwards over one input", () => {
+      const p = Parser.repeat(
+        Parser.terminated(Token.takeUntilAny([bytes(0, 0), bytes(2)]), Token.anyToken<Uint8Array>())
+      )
+      expect(peek(p, bytes(1, 0, 0, 2, 3, 2, 0))).toEqual(Result.succeed([bytes(0), [bytes(1), bytes(0), bytes(3)]]))
+    })
+
+    it("partial", () => {
+      expect(partial(Token.takeUntilAny(["--", "=="]), "abc-")).toEqual(incomplete())
+      expect(partial(Token.takeUntilAny(["--", "=="]), "abc==")).toEqual(done("abc", 3))
+    })
+  })
+
   describe("rest", () => {
     it("rest / restLen", () => {
       expectSuccess(Parser.preceded(Token.literal("a"), Token.rest), "abc", "bc")

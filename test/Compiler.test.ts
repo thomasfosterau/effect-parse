@@ -881,6 +881,47 @@ describe("compiled combinators", () => {
     })
   })
 
+  it("takeUntil and takeUntilAny on bytes (SIMD in WebAssembly)", () => {
+    const bytes = (text: string) => Uint8Array.from(text, (c) => c.charCodeAt(0))
+    const sets: ReadonlyArray<ReadonlyArray<Uint8Array>> = [
+      [bytes("ab")],
+      [bytes("a")],
+      [bytes("abcab")],
+      [bytes("ba"), bytes("ccc"), bytes("a\xff")],
+      // More literals than buckets, sharing them; one of one byte
+      Array.from({ length: 11 }, (_, i) => bytes(["ab", "bc", "ca", "abc", "cab"][i % 5] + "abc"[i % 3])).concat([
+        bytes("\xff")
+      ])
+    ]
+    const grammars: ReadonlyArray<Parser.Parser<any, never, never, Uint8Array>> = [
+      ...sets.map((lits) => Parser.seq(Token.takeUntilAny(lits), Token.restOf<Uint8Array>())),
+      // Every occurrence, overlapping ones included: a prefilter's candidates
+      ...sets.map((lits) =>
+        Parser.repeat(
+          Parser.zipLeft(Parser.preceded(Token.takeUntilAny(lits), Parser.location), Token.take<Uint8Array>(1))
+        )
+      ),
+      Parser.seq(Token.takeUntil(bytes("abc")), Token.restOf<Uint8Array>()),
+      Parser.repeat(Parser.terminated(Token.takeUntil(bytes("cb")), Token.take<Uint8Array>(2)))
+    ]
+    const random = rng(21)
+    grammars.forEach((p) => {
+      Array.from({ length: 300 }).forEach(() => {
+        same(
+          p,
+          Uint8Array.from(
+            { length: Math.floor(random() * 90) },
+            () => [0x61, 0x62, 0x63, 0xff][Math.floor(random() * 4)]
+          )
+        )
+      })
+      // Searched natively, not called back into JavaScript
+      const compiled = Registry.compiled(Compiler.wasm(p), 1)
+      expect(compiled?.backend).toBe("wasm")
+      expect(compiled?.fallbacks.filter((f) => f.tag.startsWith("TakeUntil"))).toEqual([])
+    })
+  })
+
   it("Binary numbers", () => {
     const grammars: ReadonlyArray<Parser.Parser<any, any, never, Uint8Array>> = [
       Parser.repeat(Binary.beU32),
