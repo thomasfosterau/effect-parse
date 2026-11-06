@@ -81,6 +81,35 @@ const MaxWrites = 4096
 /** Bytes left after the cursor beyond which a driver's parse of the same buffer runs the JIT (see `run`). */
 const LargeRest = 4096
 
+/** The most literals a compiled `takeUntilAny` checks at each candidate; more are searched in JavaScript. */
+const MaxUntil = 64
+
+/** The most leading bytes of each literal a SIMD search tests at once. */
+const MaxPositions = 3
+
+/** Teddy's buckets: one bit each in a nibble table's bytes. */
+const Buckets = 8
+
+const Zeros: ReadonlyArray<number> = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+const LowNibbles: ReadonlyArray<number> = [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]
+
+/**
+ * Teddy's tables for the first `m` bytes of `literals`: for each position,
+ * the low- and high-nibble tables, literal `i` in bucket `i % 8`.
+ */
+const teddyTables = (literals: ReadonlyArray<Uint8Array>, m: number): Array<[Array<number>, Array<number>]> =>
+  Array.from({ length: m }, (_, j) => {
+    const lo = new Array<number>(16).fill(0)
+    const hi = new Array<number>(16).fill(0)
+    literals.forEach((lit, i) => {
+      const byte = lit[j] ?? 0
+      const bit = 1 << (i % Buckets)
+      lo[byte & 15] = (lo[byte & 15] ?? 0) | bit
+      hi[byte >> 4] = (hi[byte >> 4] ?? 0) | bit
+    })
+    return [lo, hi]
+  })
+
 /** Values of `G.mode`. */
 const Backtrack = 0
 const Cut = 1
@@ -586,6 +615,9 @@ class WasmCompiler {
       return Option.some(this.token(s, node))
     }
     if (Predicate.isTagged(node, "Escaped")) return Option.some(this.escaped(s, node))
+    if (Predicate.isTagged(node, "TakeUntil") || Predicate.isTagged(node, "TakeUntilAny")) {
+      return Option.some(this.takeUntil(s, node))
+    }
     if (Predicate.isTagged(node, "Taken")) {
       if (node.encoding !== undefined) {
         return Option.some(this.island(s.p, s.out, s.b, s.fail, "text slices are validated in JavaScript"))
@@ -1588,6 +1620,98 @@ class WasmCompiler {
     this.member(set.cs, set.negate, set.c, b)
     b.op(Op.i32Eqz).brIf(stop)
     b.get(0).get(w).op(Op.i32Add).set(0)
+  }
+
+  /**
+   * `takeUntil` and `takeUntilAny` on bytes: Teddy (as in ripgrep). Sixteen
+   * starts at a time, the first `m` bytes of every literal (up to three)
+   * are tested at once, with nibble tables: a byte belongs to bucket k at
+   * position j when bit k is set both in the low-nibble table at its low
+   * nibble and in the high-nibble table at its high nibble, and a start is
+   * a candidate when one bucket holds at every position. Each candidate is
+   * checked against the literals in full; the last starts, fewer than
+   * sixteen, are checked one at a time. Without SIMD, with a range, or on
+   * other input, the search runs in JavaScript.
+   */
+  private takeUntil(s: Site, node: NodeOf<"TakeUntil" | "TakeUntilAny">): string {
+    const literals = Predicate.isTagged(node, "TakeUntil") ? [node.literal] : node.literals
+    const bytes = literals.filter(Predicate.isUint8Array)
+    const shortest = Math.min(...bytes.map((lit) => lit.length))
+    const searchable =
+      this.kind === 1 &&
+      node.encoding === undefined &&
+      node.min === 0 &&
+      node.max === Infinity &&
+      bytes.length === literals.length &&
+      shortest > 0 &&
+      shortest !== Infinity &&
+      bytes.length <= MaxUntil &&
+      simd()
+    if (!searchable) return this.island(s.p, s.out, s.b, s.fail, "the search runs in JavaScript")
+    const { b, fail } = s
+    const m = Math.min(MaxPositions, shortest)
+    const st = b.local()
+    const c = b.local()
+    const mask = b.local()
+    const v = b.localV128()
+    b.get(0).set(st)
+    b.block((found) => {
+      b.block((tail) => {
+        b.loop((again) => {
+          // Sixteen starts need their `m` bytes inside the input
+          this.end(b)
+            .get(0)
+            .op(Op.i32Sub)
+            .i32(15 + m)
+            .op(Op.i32LtS)
+            .brIf(tail)
+          teddyTables(bytes, m).forEach(([lo, hi], j) => {
+            b.get(0)
+              .simd(Simd.v128Load, 0, Input + j)
+              .set(v)
+            b.v128(lo).get(v).v128(LowNibbles).simd(Simd.v128And).simd(Simd.i8x16Swizzle)
+            b.v128(hi).get(v).i32(4).simd(Simd.i8x16ShrU).simd(Simd.i8x16Swizzle)
+            b.simd(Simd.v128And)
+            if (j > 0) b.simd(Simd.v128And)
+          })
+          b.v128(Zeros).simd(Simd.i8x16Ne).simd(Simd.i8x16Bitmask).tee(mask).op(Op.i32Eqz)
+          b.if(() => {
+            this.advance(b, 16)
+            b.br(again)
+          })
+          b.get(0).get(mask).op(Op.i32Ctz).op(Op.i32Add).set(c)
+          this.literalAt(b, bytes, c, found)
+          b.get(c).i32(1).op(Op.i32Add).set(0)
+          b.br(again)
+        })
+      })
+      b.loop((again) => {
+        this.end(b).get(0).op(Op.i32Sub).i32(shortest).op(Op.i32LtS)
+        this.failIf(b, fail)
+        b.get(0).set(c)
+        this.literalAt(b, bytes, c, found)
+        this.advance(b, 1)
+        b.br(again)
+      })
+    })
+    return this.sliceValue(s, undefined, st, -1)
+  }
+
+  /** Moves the cursor to `c` and branches to `found` when one of `literals` starts at `c`. */
+  private literalAt(b: Body, literals: ReadonlyArray<Uint8Array>, c: number, found: Label): void {
+    for (const lit of literals) {
+      b.block((next) => {
+        this.end(b).get(c).op(Op.i32Sub).i32(lit.length).op(Op.i32LtS).brIf(next)
+        lit.forEach((byte, k) => {
+          b.get(c)
+            .mem(Op.i32Load8U, 0, Input + k)
+            .i32(byte)
+            .op(Op.i32Ne)
+            .brIf(next)
+        })
+        b.get(c).set(0).br(found)
+      })
+    }
   }
 
   /** The trace and builder code of a `takeWhile`'s slice `[st, p)`. */

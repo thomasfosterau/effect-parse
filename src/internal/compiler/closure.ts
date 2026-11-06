@@ -18,7 +18,7 @@ import { addEntry, flushEntries, fromEntries, isPlainKey } from "../entries.js"
 import { Defer, nodeOf, scansFloat } from "../node.js"
 import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from "../numbers.js"
 import { charOf, fastLimit, firstCodePoint, fold, textIn, utf16be, utf16le, utf8, utf8Text, validate } from "../text.js"
-import { countTokens, indexOf } from "../tokens.js"
+import { countTokens, indexOf, indexOfAny } from "../tokens.js"
 import type { AltPlan } from "./first.js"
 import { Key } from "../key.js"
 import * as Resume from "../resume.js"
@@ -180,14 +180,13 @@ class Compiler {
       case "Take":
       case "TakeWhile":
       case "TakeUntil":
+      case "TakeUntilAny":
       case "Rest":
         if (!this.native(node.encoding)) return this.fallback(p, node, "token parser on array input")
         return this.partialSafe(
           p,
           node.encoding === undefined ? this.token(p, node, used) : this.text(p, node, node.encoding, used),
-          Predicate.isTagged(node, "Literal") || Predicate.isTagged(node, "TakeUntil")
-            ? node.literal.length * 4
-            : Margin
+          marginOf(node)
         )
       case "TillLineEnding":
       case "Identifier":
@@ -1159,12 +1158,16 @@ class Compiler {
       }
       case "TakeWhile":
         return this.tokenTakeWhile(node, used)
-      case "TakeUntil": {
-        const { literal, max, min } = node
+      case "TakeUntil":
+      case "TakeUntilAny": {
+        const { max, min } = node
         const bounded = min > 0 || max !== Infinity
+        const search: (s: State<Input>, from: number) => number = Predicate.isTagged(node, "TakeUntil")
+          ? (s, from) => indexOf(s, node.literal, from)
+          : (s, from) => indexOfAny(s, node.literals, from)
         return (s) => {
           const start = s.pos
-          const idx = indexOf(s, literal, start)
+          const idx = search(s, start)
           if (idx < 0) return failAt(s, s.end)
           if (bounded) {
             const count = countTokens(s, start, idx)
@@ -1411,6 +1414,7 @@ class Compiler {
         return this.kind === 0 ? takeWhileString(loop, enc) : takeWhileBytes(loop, enc)
       }
       case "TakeUntil":
+      case "TakeUntilAny":
       case "Rest":
         return this.fallback(p, node, "Text parser without a compiled form")
     }
@@ -1617,7 +1621,14 @@ class Compiler {
   }
 }
 
-type TokenNode = NodeOf<"Any" | "Literal" | "OneOf" | "Take" | "TakeWhile" | "TakeUntil" | "Rest">
+/** How far past the cursor a token parser may read: its literals' length in UTF-8 at most, or `Margin`. */
+const marginOf = (node: TokenNode): number => {
+  if (Predicate.isTagged(node, "Literal") || Predicate.isTagged(node, "TakeUntil")) return node.literal.length * 4
+  if (Predicate.isTagged(node, "TakeUntilAny")) return Math.max(0, ...node.literals.map((lit) => lit.length)) * 4
+  return Margin
+}
+
+type TokenNode = NodeOf<"Any" | "Literal" | "OneOf" | "Take" | "TakeWhile" | "TakeUntil" | "TakeUntilAny" | "Rest">
 
 /**
  * Where a compiled `escaped` that ran out of input resumes: the position

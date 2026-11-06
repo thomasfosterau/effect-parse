@@ -57,6 +57,7 @@ export type Node =
   | { readonly _tag: "Take"; readonly count: number; readonly encoding: Enc }
   | ({ readonly _tag: "TakeWhile"; readonly set: unknown; readonly negate: boolean; readonly encoding: Enc } & Bounds)
   | ({ readonly _tag: "TakeUntil"; readonly literal: Input; readonly encoding: Enc } & Bounds)
+  | ({ readonly _tag: "TakeUntilAny"; readonly literals: ReadonlyArray<Input>; readonly encoding: Enc } & Bounds)
   | { readonly _tag: "Rest"; readonly encoding: Enc }
   // `Binary`'s fixed-size numbers: `read` reads `size` bytes at an offset of the state's bytes
   | {
