@@ -681,7 +681,8 @@ const strategy = (
   lineTerminator: number,
   attempt: (state: Input.State<Bytes>, s: number) => number,
   found: (s: number, e: number) => Match,
-  scan: Scan
+  scan: Scan,
+  inLine: Scan
 ): Strategies => {
   const startSequence = pre.sequence?.atStart === true ? pre.sequence.sets.length : 0
   const prefixLength = Math.max(shortest(pre.prefixes), startSequence)
@@ -691,21 +692,77 @@ const strategy = (
   }
   const everywhere: Find = (state, from) => scan(state, from, state.input.length)
   if (options.multiline) return { find: everywhere, line: undefined }
-  const dfa = LineDfa.make(regex, lineTerminator)
-  const t = lineTerminator
+  return (
+    lineStrategies(LineDfa.make(regex, lineTerminator), pre, requiredLength, lineTerminator, scan, inLine) ?? {
+      find: everywhere,
+      line: undefined
+    }
+  )
+}
+
+/**
+ * Outside multiline mode: the lines the DFA finds a match in, or the lines
+ * holding what every match contains; `undefined` when neither applies.
+ */
+const lineStrategies = (
+  dfa: LineDfa | undefined,
+  pre: Prefilter.Prefilter,
+  requiredLength: number,
+  t: number,
+  scan: Scan,
+  inLine: Scan
+): Strategies | undefined => {
   // A literal shorter than three bytes is in most lines: one DFA pass over
   // the input beats a search for it and a DFA run on each line it is in.
   if (dfa !== undefined && requiredLength < 3) {
-    return { find: dfaStrategy(dfa, t, scan, searchLine(scan)), line: dfaStrategy(dfa, t, scan, confirmLine(scan)) }
+    return { find: dfaStrategy(dfa, t, scan, searchLine(inLine)), line: dfaStrategy(dfa, t, scan, confirmLine(inLine)) }
   }
-  if (requiredLength > 0) {
-    const finder: Finder = preferSequence(pre.required, pre.sequence)
-      ? sequenceFinder(pre.sequence?.sets ?? [])
-      : literalFinder(pre.required ?? [])
-    const line = dfa === undefined ? undefined : lineStrategy(finder, dfa, t, confirmLine(scan))
-    return { find: lineStrategy(finder, dfa, t, searchLine(scan)), line }
+  if (requiredLength === 0) return undefined
+  const finder: Finder = preferSequence(pre.required, pre.sequence)
+    ? sequenceFinder(pre.sequence?.sets ?? [])
+    : literalFinder(pre.required ?? [])
+  const line = dfa === undefined ? undefined : lineStrategy(finder, dfa, t, confirmLine(inLine))
+  // A line searched from the reversed regex's starts needs no forward DFA first: no start, no match
+  const confirmed = inLine === scan ? dfa : undefined
+  return { find: lineStrategy(finder, confirmed, t, searchLine(inLine)), line }
+}
+
+/**
+ * Searches a line `[from, to]` (`to` its terminator, or the end of the
+ * input) from the starts the reversed regex's DFA finds in one backward
+ * pass: the matcher runs only where a match starts, so the first attempt
+ * succeeds. The starts are kept for the next search in the same line
+ * (after a match, with `-o` or colors); `scan` takes over when the DFA
+ * runs out of states.
+ */
+const reverseScan = (
+  reverse: LineDfa,
+  t: number,
+  attempt: (state: Input.State<Bytes>, s: number) => number,
+  found: (s: number, e: number) => Match,
+  scan: Scan
+): Scan => {
+  let input: Bytes | undefined
+  let lineEnd = -1
+  const starts: Array<number> = []
+  let ok = true
+  return (state, from, to) => {
+    if (state.input !== input || to !== lineEnd) {
+      input = state.input
+      lineEnd = to
+      starts.length = 0
+      ok = reverse.matchStarts(input, lineStartOf(input, t, from), to, starts)
+    }
+    if (!ok) return scan(state, from, to)
+    // `starts` runs from the line's last start to its first.
+    for (let i = starts.length - 1; i >= 0; i--) {
+      const s = starts[i] ?? 0
+      if (s < from) continue
+      const e = attempt(state, s)
+      if (e >= 0) return found(s, e)
+    }
+    return undefined
   }
-  return { find: everywhere, line: undefined }
 }
 
 /** A matcher's two searches: for matches, and for the lines that hold one (see {@link Matcher.findLine}). */
@@ -774,7 +831,9 @@ export const compile = (regex: Regex, groups: number, lineTerminator: number, op
     }
     return undefined
   }
-  const { find, line } = strategy(regex, first, options, lineTerminator, attempt, found, scan)
+  const reverse = options.multiline ? undefined : LineDfa.make(regex, lineTerminator, true)
+  const inLine = reverse === undefined ? scan : reverseScan(reverse, lineTerminator, attempt, found, scan)
+  const { find, line } = strategy(regex, first, options, lineTerminator, attempt, found, scan, inLine)
   const takeOverflow = () => {
     const at = overflow
     overflow = undefined

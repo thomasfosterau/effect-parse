@@ -12,7 +12,6 @@
   "scripts": {
     "bench": "node bench/compare.ts",
     "bundle": "node scripts/bundle.mjs",
-    "kernels": "node scripts/kernels.mjs",
     "unicode-tables": "node scripts/unicode-tables.mjs"
   },
   "dependencies": {
