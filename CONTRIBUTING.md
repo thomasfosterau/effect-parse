@@ -12,7 +12,7 @@ pnpm install
 
 That installs the dependencies against the lockfile, the git hooks, and patches the native `tsc` / `oxlint` with `@effect/tsgo` (the `prepare` script). Everything else runs through `vp`, from `node_modules/.bin` (`pnpm exec vp …`, or put `node_modules/.bin` on your `PATH`).
 
-Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions.
+Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions. The `Dev Container` workflow (`.github/workflows/devcontainer.yml`) builds it in CI whenever its inputs change; to try a change locally, `pnpm dlx @devcontainers/cli@0.89.0 up --workspace-folder .` (needs Docker).
 
 ## Branches
 
