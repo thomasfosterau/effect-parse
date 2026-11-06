@@ -132,6 +132,60 @@ const teddyTables = (literals: ReadonlyArray<Uint8Array>, m: number): Array<[Arr
     return [lo, hi]
   })
 
+/**
+ * The bytes of literal units (`width` bytes each, little-endian), and the
+ * 0x20 to OR into each byte of a caseless letter, which `bytes` holds in
+ * lower case.
+ */
+const unitBytes = (codes: ReadonlyArray<number>, caseless: boolean, width: number) => {
+  const bytes: Array<number> = []
+  const fold: Array<number> = []
+  for (const code of codes) {
+    const letter = caseless && isLetter(code)
+    const unit = letter ? lowerAscii(code) : code
+    for (let k = 0; k < width; k++) {
+      bytes.push((unit >> (8 * k)) & 0xff)
+      fold.push(letter && k === 0 ? 0x20 : 0)
+    }
+  }
+  return { bytes, fold }
+}
+
+/** The widest load, of 16 (with SIMD), 8, 4, 2 or 1 bytes, that `left` bytes fill. */
+const chunkSize = (left: number): number => {
+  if (left >= 16 && simd()) return 16
+  return [8, 4, 2].find((n) => left >= n) ?? 1
+}
+
+/**
+ * With an address on the stack, pushes whether the 1, 2, 4, 8 or 16 bytes
+ * at it (plus `offset`), ORed with `fold`, differ from `bytes`.
+ */
+const compareChunk = (b: Body, bytes: ReadonlyArray<number>, fold: ReadonlyArray<number>, offset: number): void => {
+  const n = bytes.length
+  const folds = fold.some((f) => f !== 0)
+  if (n === 16) {
+    b.simd(Simd.v128Load, 0, offset)
+    if (folds) b.v128(fold).simd(Simd.v128Or)
+    b.v128(bytes).simd(Simd.i8x16Eq).simd(Simd.i8x16AllTrue).op(Op.i32Eqz)
+  } else if (n === 8) {
+    b.mem(Op.i64Load, 0, offset)
+    if (folds) b.i64(littleEndian(fold, 0, 8)).op(Op.i64Or)
+    b.i64(littleEndian(bytes, 0, 8)).op(Op.i64Ne)
+  } else {
+    b.mem(n === 4 ? Op.i32Load : n === 2 ? Op.i32Load16U : Op.i32Load8U, 0, offset)
+    if (folds) b.i32(Number(littleEndian(fold, 0, n))).op(Op.i32Or)
+    b.i32(Number(BigInt.asIntN(32, littleEndian(bytes, 0, n)))).op(Op.i32Ne)
+  }
+}
+
+/** `n` bytes from `bytes[i]` as a little-endian integer (as a load reads them). */
+const littleEndian = (bytes: ReadonlyArray<number>, i: number, n: number): bigint => {
+  let v = 0n
+  for (let k = n - 1; k >= 0; k--) v = (v << 8n) | BigInt(bytes[i + k] ?? 0)
+  return BigInt.asIntN(64, v)
+}
+
 /** Values of `G.mode`. */
 const Backtrack = 0
 const Cut = 1
@@ -1903,13 +1957,7 @@ class WasmCompiler {
     if (len > 0) {
       this.end(b).get(0).op(Op.i32Sub).i32(len).op(Op.i32LtS)
       this.failIf(b, fail)
-      codes.forEach((code, i) => {
-        this.load(b, 0, i)
-        if (node.caseless && isLetter(code)) b.i32(32).op(Op.i32Or).i32(lowerAscii(code))
-        else b.i32(code)
-        b.op(Op.i32Ne)
-        this.failIf(b, fail)
-      })
+      this.compareUnits(b, codes, node.caseless, fail)
       this.advance(b, len)
     }
     if (s.out === "") return ""
@@ -1923,6 +1971,27 @@ class WasmCompiler {
    * (rather than the input it matched, as a caseless one returns), or why it
    * runs in JavaScript.
    */
+  /**
+   * Fails unless the input at the cursor holds `codes` (folding ASCII
+   * letters with `caseless`): the units' bytes compared sixteen, eight,
+   * four, two and one at a time, with `v128`, `i64` and `i32` loads, a
+   * caseless letter's byte ORed with 0x20 first.
+   */
+  private compareUnits(b: Body, codes: ReadonlyArray<number>, caseless: boolean, fail: Label): void {
+    const { bytes, fold } = unitBytes(codes, caseless, this.kind === 0 ? 2 : 1)
+    // The address of the cursor's byte, once
+    const at = b.local()
+    if (this.kind === 0) b.get(0).i32(1).op(Op.i32Shl).set(at)
+    else b.get(0).set(at)
+    for (let i = 0; i < bytes.length;) {
+      const n = chunkSize(bytes.length - i)
+      b.get(at)
+      compareChunk(b, bytes.slice(i, i + n), fold.slice(i, i + n), Input + i)
+      this.failIf(b, fail)
+      i += n
+    }
+  }
+
   private literalUnits(
     node: NodeOf<"Literal">
   ): Result.Result<{ readonly codes: ReadonlyArray<number>; readonly constant: boolean }, string> {

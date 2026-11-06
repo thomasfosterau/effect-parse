@@ -56,6 +56,7 @@ export const Op = {
   i32GeS: 0x4e,
   i32GeU: 0x4f,
   i64Eqz: 0x50,
+  i64Ne: 0x52,
   f64Eq: 0x61,
   f64Ne: 0x62,
   i32Add: 0x6a,
