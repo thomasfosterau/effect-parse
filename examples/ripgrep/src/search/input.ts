@@ -5,11 +5,14 @@
  *
  * @since 0.0.0
  */
-import * as ChildProcess from "node:child_process"
 import { Buffer } from "node:buffer"
 import * as Fs from "node:fs"
-import * as Zlib from "node:zlib"
 import * as Result from "effect/Result"
+
+// Loaded on first use: these built-ins take milliseconds to load, and most
+// runs never need them.
+const zlib = () => process.getBuiltinModule("node:zlib")
+const childProcess = () => process.getBuiltinModule("node:child_process")
 
 /**
  * The decompressors ripgrep runs for `-z`, by file extension.
@@ -34,8 +37,8 @@ const decompressors: ReadonlyArray<readonly [RegExp, string, ReadonlyArray<strin
  * @since 0.0.0
  */
 export const decompress = (path: string, bytes: Uint8Array): Result.Result<Uint8Array, string> => {
-  if (/\.(gz|tgz)$/i.test(path)) return Result.succeed(new Uint8Array(Zlib.gunzipSync(bytes)))
-  if (/\.br$/i.test(path)) return Result.succeed(new Uint8Array(Zlib.brotliDecompressSync(bytes)))
+  if (/\.(gz|tgz)$/i.test(path)) return Result.succeed(new Uint8Array(zlib().gunzipSync(bytes)))
+  if (/\.br$/i.test(path)) return Result.succeed(new Uint8Array(zlib().brotliDecompressSync(bytes)))
   const found = decompressors.find(([re]) => re.test(path))
   if (found === undefined) return Result.succeed(bytes)
   return run(found[1], found[2], bytes)
@@ -47,7 +50,7 @@ const run = (
   input: Uint8Array,
   cwd?: string
 ): Result.Result<Uint8Array, string> => {
-  const result = ChildProcess.spawnSync(command, args, { input, maxBuffer: 1 << 30, cwd })
+  const result = childProcess().spawnSync(command, args, { input, maxBuffer: 1 << 30, cwd })
   if (result.error !== undefined) return Result.fail(`${command}: ${result.error.message}`)
   if (result.status !== 0) {
     return Result.fail(`preprocessor command failed: '${command}': ${new TextDecoder().decode(result.stderr).trim()}`)

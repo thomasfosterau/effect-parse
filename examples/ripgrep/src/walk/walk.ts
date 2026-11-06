@@ -72,6 +72,7 @@ export const describeError = (error: unknown): string => {
 }
 
 const readText = (file: string): string | undefined => {
+  if (!exists(file)) return undefined
   try {
     return Fs.readFileSync(file, "utf8")
   } catch {
@@ -115,7 +116,8 @@ const isDirectory = (p: string): boolean => {
   }
 }
 
-const exists = (p: string): boolean => Fs.existsSync(p)
+/** Whether a path exists, without the cost of an exception when it does not. */
+const exists = (p: string): boolean => Fs.statSync(p, { throwIfNoEntry: false }) !== undefined
 
 const ignoreKinds: ReadonlyArray<Kind> = ["rgignore", "ignore", "gitignore", "exclude"]
 
@@ -157,21 +159,28 @@ class IgnoreRules {
     return Ignore.parseIgnoreFile(root, text, this.options.args.ignoreFileCaseInsensitive, report)
   }
 
-  private dirIgnores(dir: string): DirIgnores {
-    const isRepo = exists(Path.join(dir, ".git"))
+  /**
+   * The ignore files in `dir`. With its listing (`names`), only those it
+   * holds are read; without it (an ancestor of a root), each is looked for.
+   */
+  private dirIgnores(dir: string, names: ReadonlySet<string> | undefined): DirIgnores {
+    const present = (name: string) => (names === undefined ? exists(Path.join(dir, name)) : names.has(name))
+    const isRepo = present(".git")
+    const read = (enabled: boolean, name: string) =>
+      enabled && present(name) ? this.load(Path.join(dir, name), dir) : undefined
     return {
       dir,
-      rgignore: this.dot ? this.load(Path.join(dir, ".rgignore"), dir) : undefined,
-      ignore: this.dot ? this.load(Path.join(dir, ".ignore"), dir) : undefined,
-      gitignore: this.vcs ? this.load(Path.join(dir, ".gitignore"), dir) : undefined,
+      rgignore: read(this.dot, ".rgignore"),
+      ignore: read(this.dot, ".ignore"),
+      gitignore: read(this.vcs, ".gitignore"),
       exclude: this.exclude && isRepo ? this.load(Path.join(dir, ".git", "info", "exclude"), dir) : undefined,
       isRepo
     }
   }
 
-  /** The scope inside `dir`, below `scope`. */
-  enter(scope: Scope, dir: string): Scope {
-    const here = this.dirIgnores(dir)
+  /** The scope inside `dir`, below `scope` (`names`: the directory's listing, if read). */
+  enter(scope: Scope, dir: string, names?: ReadonlySet<string>): Scope {
+    const here = this.dirIgnores(dir, names)
     return { dirs: [here, ...scope.dirs], inRepo: scope.inRepo || here.isRepo }
   }
 
@@ -225,7 +234,7 @@ interface Resolved {
   readonly stat: Fs.Stats | undefined
 }
 
-/** Where a directory walk is: its ignore scope, depth and ancestry. */
+/** Where a directory walk is: the ignore scope above the directory, its depth and ancestry. */
 interface Place {
   readonly scope: Scope
   readonly depth: number
@@ -278,8 +287,8 @@ class Walker {
       this.emit({ path: root, absolute: abs, explicit: true, stdin: false }, stat)
       return
     }
-    const scope = this.rules.enter(this.rules.rootScope(abs), abs)
-    this.descend(abs, root, { scope, depth: 0, rootDev: stat.dev, seen: new Set([Fs.realpathSync(abs)]) })
+    const seen = new Set([Fs.realpathSync(abs)])
+    this.descend(abs, root, { scope: this.rules.rootScope(abs), depth: 0, rootDev: stat.dev, seen })
   }
 
   private entries(dir: string, display: string): ReadonlyArray<Fs.Dirent> {
@@ -341,10 +350,14 @@ class Walker {
 
   private descend(dir: string, display: string, place: Place): void {
     if (this.args.maxDepth !== undefined && place.depth >= this.args.maxDepth) return
-    for (const dirent of this.entries(dir, display)) {
+    const entries = this.entries(dir, display)
+    // The directory's own ignore files, read only if its listing has them.
+    const scope = this.rules.enter(place.scope, dir, new Set(entries.map((e) => e.name)))
+    const here = { ...place, scope }
+    for (const dirent of entries) {
       const entry = this.resolve(dirent, dir, display)
-      if (entry === undefined || !this.admitted(entry, place.scope)) continue
-      if (entry.isDir) this.directory(entry, place)
+      if (entry === undefined || !this.admitted(entry, scope)) continue
+      if (entry.isDir) this.directory(entry, here)
       else this.file(entry)
     }
   }
@@ -361,8 +374,7 @@ class Walker {
       }
       seen = new Set([...seen, real])
     }
-    const scope = this.rules.enter(place.scope, entry.abs)
-    this.descend(entry.abs, entry.shown, { scope, depth: place.depth + 1, rootDev: place.rootDev, seen })
+    this.descend(entry.abs, entry.shown, { scope: place.scope, depth: place.depth + 1, rootDev: place.rootDev, seen })
   }
 
   private file(entry: Resolved): void {

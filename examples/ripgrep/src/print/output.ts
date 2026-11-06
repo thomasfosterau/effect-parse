@@ -4,6 +4,7 @@
  *
  * @since 0.0.0
  */
+import { Buffer } from "node:buffer"
 import * as Fs from "node:fs"
 import * as Predicate from "effect/Predicate"
 
@@ -45,6 +46,33 @@ export class Output {
     }
     this.buffer.set(b, this.used)
     this.used += b.length
+  }
+
+  /** Appends one byte. */
+  byte(b: number): void {
+    if (this.closed) return
+    if (this.used >= this.buffer.length) this.flush()
+    this.buffer[this.used++] = b
+    this.written++
+  }
+
+  /** Appends a non-negative integer in decimal, without making a string. */
+  decimal(n: number): void {
+    if (n >= 10) this.decimal(Math.floor(n / 10))
+    this.byte(48 + (n % 10))
+  }
+
+  /** Appends `src[start, end)`, copying straight from a Buffer (no view per call). */
+  range(src: Uint8Array, start: number, end: number): void {
+    const n = end - start
+    if (this.closed || n <= 0) return
+    if (!Buffer.isBuffer(src) || this.used + n > this.buffer.length) {
+      this.bytes(src.subarray(start, end))
+      return
+    }
+    src.copy(this.buffer, this.used, start, end)
+    this.used += n
+    this.written += n
   }
 
   /** Appends a string as UTF-8, writing ASCII directly into the buffer. */
