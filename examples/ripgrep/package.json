@@ -1,0 +1,24 @@
+{
+  "$schema": "https://www.schemastore.org/package",
+  "name": "@thomasfosterau/effect-parse-ripgrep",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A ripgrep-compatible search tool built on effect-parse, and a benchmark harness comparing it with ripgrep and grep",
+  "license": "MIT",
+  "bin": {
+    "erg": "./bin/erg.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "bench": "node bench/compare.ts",
+    "bundle": "node scripts/bundle.mjs",
+    "unicode-tables": "node scripts/unicode-tables.mjs"
+  },
+  "dependencies": {
+    "@thomasfosterau/effect-parse": "workspace:*",
+    "effect": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

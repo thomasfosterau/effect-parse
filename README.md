@@ -536,7 +536,7 @@ On a 0.58 M-character JSON document (`vp run bench:syntax`), building the tree t
 | Module | Contents | winnow / nom equivalent |
 | --- | --- | --- |
 | `Parser` | the type, combinators, runners | `Parser` trait, `combinator` / `combinator`, `branch`, `multi`, `sequence` |
-| `Token` | `any`, `literal`, `oneOf`, `noneOf`, `take`, `takeWhile`, `takeTill`, `takeUntil`, `rest`, `range`, `codePoints` | `token` / `bytes` |
+| `Token` | `any`, `literal`, `oneOf`, `noneOf`, `take`, `takeWhile`, `takeTill`, `takeUntil`, `takeUntilAny`, `rest`, `range`, `codePoints` | `token` / `bytes` |
 | `Text` | Unicode parsers for any encoding: `string`, `utf8`, `utf16le`, `utf16be`, `latin1`, `make`; Unicode predicates | — |
 | `Encoding` | text encodings for `Text`, `sniff` | — |
 | `Ascii` | character classes, `lineEnding`, `decInt`, `decUint`, `hexUint`, `float`, `caseless`, `takeEscaped`, `escaped`, `Ascii.bytes.*` | `ascii` / `character`, `number` |
@@ -611,6 +611,8 @@ The `Nom` module provides the nom names directly, with nom's argument orders, fo
 - [`json-syntax.ts`](examples/json-syntax.ts): JSON as a syntax tree for editors, with fields, `ERROR` nodes for malformed elements, and incremental reparsing (tested in [`test/Syntax.test.ts`](test/Syntax.test.ts))
 
 `vp run bench` (from a clone) compares the JSON examples, on each encoding, with `JSON.parse`.
+
+[`examples/ripgrep`](examples/ripgrep) is a larger example, a package of its own: `erg`, a search tool with ripgrep's command line whose regex engine is built from these combinators (Rust's regex syntax parsed with effect-parse, and compiled to a backtracking matcher over UTF-8 bytes, behind ripgrep-style literal prefilters and a lazy DFA), with a harness that benchmarks it against ripgrep, grep and other search tools, and tests that compare its output with ripgrep's.
 
 ## Design
 

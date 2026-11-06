@@ -881,6 +881,114 @@ describe("compiled combinators", () => {
     })
   })
 
+  it("takeUntil and takeUntilAny on bytes (SIMD in WebAssembly)", () => {
+    const bytes = (text: string) => Uint8Array.from(text, (c) => c.charCodeAt(0))
+    const sets: ReadonlyArray<ReadonlyArray<Uint8Array>> = [
+      [bytes("ab")],
+      [bytes("a")],
+      [bytes("abcab")],
+      [bytes("ba"), bytes("ccc"), bytes("a\xff")],
+      // More literals than buckets, sharing them; one of one byte
+      Array.from({ length: 11 }, (_, i) => bytes(["ab", "bc", "ca", "abc", "cab"][i % 5] + "abc"[i % 3])).concat([
+        bytes("\xff")
+      ])
+    ]
+    const grammars: ReadonlyArray<Parser.Parser<any, never, never, Uint8Array>> = [
+      ...sets.map((lits) => Parser.seq(Token.takeUntilAny(lits), Token.restOf<Uint8Array>())),
+      // Every occurrence, overlapping ones included: a prefilter's candidates
+      ...sets.map((lits) =>
+        Parser.repeat(
+          Parser.zipLeft(Parser.preceded(Token.takeUntilAny(lits), Parser.location), Token.take<Uint8Array>(1))
+        )
+      ),
+      Parser.seq(Token.takeUntil(bytes("abc")), Token.restOf<Uint8Array>()),
+      Parser.repeat(Parser.terminated(Token.takeUntil(bytes("cb")), Token.take<Uint8Array>(2)))
+    ]
+    const random = rng(21)
+    grammars.forEach((p) => {
+      Array.from({ length: 300 }).forEach(() => {
+        same(
+          p,
+          Uint8Array.from(
+            { length: Math.floor(random() * 90) },
+            () => [0x61, 0x62, 0x63, 0xff][Math.floor(random() * 4)]
+          )
+        )
+      })
+      // Searched natively, not called back into JavaScript
+      const compiled = Registry.compiled(Compiler.wasm(p), 1)
+      expect(compiled?.backend).toBe("wasm")
+      expect(compiled?.fallbacks.filter((f) => f.tag.startsWith("TakeUntil"))).toEqual([])
+    })
+  })
+
+  it("takeWhile and takeTill over long runs (SIMD in WebAssembly)", () => {
+    const random = rng(23)
+    const alphabet = ["a", "b", " ", "0", "\\", '"', "é", "😀", "\ud800", "\u0100", "\u00ff", "\u7fff", "\u8000"]
+    const text = () =>
+      Array.from({ length: Math.floor(random() * 120) }, () =>
+        // Mostly runs of one class, so the vector steps are taken
+        random() < 0.9 ? "ab "[Math.floor(random() * 3)] : alphabet[Math.floor(random() * alphabet.length)]
+      ).join("")
+    const grammar = (T: typeof Text.string | typeof Text.utf8) =>
+      Parser.repeat(
+        Parser.alt(T.takeWhile("ab", { min: 1 }), T.takeTill('\\"0', { min: 1 }), T.takeWhile(" ", { min: 1 }), T.any)
+      )
+    ;[Text.string, Text.utf8, Text.latin1].forEach((T) => {
+      const p = grammar(T)
+      Array.from({ length: 300 }).forEach(() => {
+        const input = text()
+        if (T === Text.latin1 && beyondLatin1(input)) return
+        same(p, T.encoding.encode(input))
+      })
+    })
+    const tokens = Parser.repeat(
+      Parser.alt(Token.takeWhile("ab", { min: 1 }), Token.takeTill("\\0", { min: 1 }), Token.anyToken())
+    )
+    Array.from({ length: 300 }).forEach(() => same(tokens, text()))
+    const bytes = Parser.repeat(
+      Parser.alt(
+        Token.takeWhile<Uint8Array>([0x61, 0x62], { min: 1 }),
+        Token.takeTill<Uint8Array>([0x30, 0x80], { min: 1 }),
+        Token.anyToken<Uint8Array>()
+      )
+    )
+    Array.from({ length: 300 }).forEach(() => same(bytes, new TextEncoder().encode(text())))
+  })
+
+  it("long literals, compared many bytes at a time", () => {
+    const words = ["Sherlock Holmes, consulting detective", "null", "ab", "Baker Street, 221B"]
+    const grammar = Parser.repeat(
+      Parser.alt(
+        ...words.map((w) => Token.literal(w)),
+        ...words.map((w) => Ascii.caseless(w)),
+        Token.literal("é😀éé😀é"),
+        Token.anyToken<string>()
+      )
+    )
+    const bytes = Parser.repeat(
+      Parser.alt(
+        ...words.map((w) => Token.literal(new TextEncoder().encode(w))),
+        ...words.map((w) => Ascii.caseless(new TextEncoder().encode(w))),
+        Token.anyToken<Uint8Array>()
+      )
+    )
+    const random = rng(29)
+    // Each literal, or one with a byte changed or its case flipped, at every position
+    const variants = words.flatMap((w) =>
+      Array.from({ length: w.length + 1 }, (_, i) =>
+        i === w.length ? w : w.slice(0, i) + (random() < 0.5 ? "x" : (w[i]?.toUpperCase() ?? "")) + w.slice(i + 1)
+      )
+    )
+    Array.from({ length: 400 }).forEach(() => {
+      const input = Array.from({ length: 4 }, () => variants[Math.floor(random() * variants.length)]).join(
+        random() < 0.5 ? "" : "é"
+      )
+      same(grammar, input)
+      same(bytes, new TextEncoder().encode(input))
+    })
+  })
+
   it("Binary numbers", () => {
     const grammars: ReadonlyArray<Parser.Parser<any, any, never, Uint8Array>> = [
       Parser.repeat(Binary.beU32),

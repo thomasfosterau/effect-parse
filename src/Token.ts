@@ -30,6 +30,7 @@ import {
   describeLiteral,
   End,
   indexOf,
+  indexOfAny,
   matchLiteral,
   nextIf,
   NoMatch,
@@ -463,21 +464,40 @@ export interface TakeUntilFn {
  * @since 0.1.0
  * @category slices
  */
-export const takeUntil: TakeUntilFn = (lit: Input, r?: Range): Parser<any, never, never, any> => {
+export const takeUntil: TakeUntilFn = (lit: Input, r?: Range): Parser<any, never, never, any> =>
+  untilParser(
+    (state, from) => indexOf(state, lit, from),
+    // A string literal is up to three bytes per unit of UTF-8
+    (state) => lit.length * (Predicate.isString(lit) && state.inputKind === 1 ? 3 : 1),
+    [describeLiteral(lit)],
+    r,
+    "takeUntil",
+    { _tag: "TakeUntil", literal: lit, ...bounds(r), encoding: undefined }
+  )
+
+/**
+ * The parser of `takeUntil` and `takeUntilAny`: `search` finds the first
+ * occurrence, which is not consumed (`read` is how far past it the search
+ * read). As in winnow, the first occurrence must lie within the range.
+ */
+const untilParser = (
+  search: (state: State<Input>, from: number) => number,
+  read: (state: State<Input>) => number,
+  expected: ReadonlyArray<string>,
+  r: Range | undefined,
+  name: string,
+  node: Parameters<typeof described>[2]
+): Parser<any, never, never, any> => {
   const [min, max] = normalize(r)
-  const description = describeLiteral(lit)
-  const expected = [description]
   return described(
     (state: State<Input>) => {
       const start = state.pos
-      const idx = indexOf(state, lit, start)
+      const idx = search(state, start)
       if (idx < 0) {
         if (state.partial) return state.incomplete(0, expected)
         return state.backtrack("TakeUntil", expected, state.end)
       }
-      // The literal was read but is not consumed (a string literal is up to three bytes per unit of UTF-8)
-      state.syntax?.read(idx + lit.length * (Predicate.isString(lit) && state.inputKind === 1 ? 3 : 1))
-      // As in winnow, the first occurrence must lie within the range
+      state.syntax?.read(idx + read(state))
       if (min > 0 || max !== Infinity) {
         const count = countTokens(state, start, idx)
         if (count < min) return state.backtrack("TakeUntil", expected, idx)
@@ -486,8 +506,55 @@ export const takeUntil: TakeUntilFn = (lit: Input, r?: Range): Parser<any, never
       state.pos = idx
       return state.slice(start, idx)
     },
-    "takeUntil",
-    { _tag: "TakeUntil", literal: lit, ...bounds(r), encoding: undefined }
+    name,
+    node
+  )
+}
+
+/**
+ * The overloads of {@link takeUntilAny}.
+ *
+ * @since 0.5.0
+ * @category slices
+ */
+export interface TakeUntilAnyFn {
+  (literals: ReadonlyArray<string>, range?: Range): Parser<string, never, never, string>
+  (literals: ReadonlyArray<Uint8Array>, range?: Range): Parser<Uint8Array, never, never, Uint8Array>
+}
+
+/**
+ * Takes tokens up to (not including) the first occurrence of any of
+ * several literals: {@link takeUntil} for a set of them, the search a
+ * multi-pattern prefilter makes. No literal is consumed. `range` constrains
+ * the number of tokens taken. On bytes, `Compiler.wasm` searches with SIMD
+ * (Teddy, from ripgrep), sixteen bytes at a time.
+ *
+ * @example
+ * ```ts
+ * import { Parser, Token } from "@thomasfosterau/effect-parse"
+ * import * as Result from "effect/Result"
+ *
+ * const upTo = Parser.seq(Token.takeUntilAny(["Holmes", "Watson"]), Token.rest)
+ * console.log(Result.getOrThrow(Parser.parseSync(upTo, "Dr. Watson and Holmes")))
+ * // ["Dr. ", "Watson and Holmes"]
+ * ```
+ *
+ * @since 0.5.0
+ * @category slices
+ */
+export const takeUntilAny: TakeUntilAnyFn = (
+  literals: ReadonlyArray<Input>,
+  r?: Range
+): Parser<any, never, never, any> => {
+  const longest = Math.max(0, ...literals.map((lit) => lit.length))
+  return untilParser(
+    (state, from) => indexOfAny(state, literals, from),
+    // Every literal was read up to where it would end (a string literal is up to three bytes per unit of UTF-8)
+    (state) => longest * (state.inputKind === 1 ? 3 : 1),
+    literals.map(describeLiteral),
+    r,
+    "takeUntilAny",
+    { _tag: "TakeUntilAny", literals, ...bounds(r), encoding: undefined }
   )
 }
 

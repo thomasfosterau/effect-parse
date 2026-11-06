@@ -8,6 +8,7 @@
 export const I32 = 0x7f
 export const I64 = 0x7e
 export const F64 = 0x7c
+export const V128 = 0x7b
 const Void = 0x40
 
 /** Opcodes used by the compiler. */
@@ -55,6 +56,7 @@ export const Op = {
   i32GeS: 0x4e,
   i32GeU: 0x4f,
   i64Eqz: 0x50,
+  i64Ne: 0x52,
   f64Eq: 0x61,
   f64Ne: 0x62,
   i32Add: 0x6a,
@@ -65,6 +67,7 @@ export const Op = {
   i32Xor: 0x73,
   i32Shl: 0x74,
   i32ShrU: 0x76,
+  i32Ctz: 0x68,
   i64And: 0x83,
   i64Or: 0x84,
   i64Shl: 0x86,
@@ -108,7 +111,19 @@ export const sleb = (n: number, out: Array<number> = []): Array<number> => {
 export const Simd = {
   v128Load: 0x00,
   v128Store: 0x0b,
+  v128Const: 0x0c,
+  i8x16Swizzle: 0x0e,
+  i8x16Splat: 0x0f,
+  i8x16Eq: 0x23,
+  i8x16Ne: 0x24,
+  v128Not: 0x4d,
+  v128And: 0x4e,
+  v128Or: 0x50,
+  v128AnyTrue: 0x53,
+  i8x16AllTrue: 0x63,
   i8x16Bitmask: 0x64,
+  i8x16ShrU: 0x6d,
+  i8x16RelaxedSwizzle: 0x100,
   i16x8ExtendLowI8x16U: 0x89,
   i16x8ExtendHighI8x16U: 0x8a
 } as const
@@ -162,6 +177,12 @@ export class Body {
   /** A new local of type `i64`. */
   localI64(): number {
     this.types.push(I64)
+    return this.next++
+  }
+
+  /** A new local of type `v128`. */
+  localV128(): number {
+    this.types.push(V128)
     return this.next++
   }
 
@@ -244,6 +265,14 @@ export class Body {
   call(f: number): this {
     this.code.push(Op.call)
     uleb(f, this.code)
+    return this
+  }
+
+  /** `v128.const` of sixteen bytes. */
+  v128(bytes: ArrayLike<number>): this {
+    this.code.push(0xfd)
+    uleb(Simd.v128Const, this.code)
+    for (let i = 0; i < 16; i++) this.code.push((bytes[i] ?? 0) & 0xff)
     return this
   }
 

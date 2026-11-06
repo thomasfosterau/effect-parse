@@ -81,6 +81,111 @@ const MaxWrites = 4096
 /** Bytes left after the cursor beyond which a driver's parse of the same buffer runs the JIT (see `run`). */
 const LargeRest = 4096
 
+/** The most literals a compiled `takeUntilAny` checks at each candidate; more are searched in JavaScript. */
+const MaxUntil = 64
+
+/** The most leading bytes of each literal a SIMD search tests at once. */
+const MaxPositions = 3
+
+/** Teddy's buckets: one bit each in a nibble table's bytes. */
+const Buckets = 8
+
+/** For each low nibble, the high nibbles `from` to `from + 7` of the bytes `set` accepts, as bits from 0. */
+/** Whether `set` accepts any byte. */
+const accepts = (set: Membership): boolean =>
+  Array.from({ length: 256 }, (_, c) => (set.cs.table[c] === 1) !== set.negate).some((ok) => ok)
+
+const nibbleTable = (set: Membership, from: number): Array<number> => {
+  const table = new Array<number>(16).fill(0)
+  for (let c = from << 4; c < (from + 8) << 4; c++) {
+    if ((set.cs.table[c] === 1) !== set.negate) table[c & 15] = (table[c & 15] ?? 0) | (1 << ((c >> 4) - from))
+  }
+  return table
+}
+
+/** The most rejected bytes a vectorised `takeWhile` compares with one by one. */
+const MaxStops = 3
+
+/** For a high nibble `h` from 8 up, bit `h - 8`; none below. */
+const UpperNibbleBits: ReadonlyArray<number> = [0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 4, 8, 16, 32, 64, 128]
+
+/** For a high nibble `h`, bit `h` below 8 (ASCII), none above. */
+const HighNibbleBits: ReadonlyArray<number> = [1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0]
+
+const Zeros: ReadonlyArray<number> = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+const LowNibbles: ReadonlyArray<number> = [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]
+
+/**
+ * Teddy's tables for the first `m` bytes of `literals`: for each position,
+ * the low- and high-nibble tables, literal `i` in bucket `i % 8`.
+ */
+const teddyTables = (literals: ReadonlyArray<Uint8Array>, m: number): Array<[Array<number>, Array<number>]> =>
+  Array.from({ length: m }, (_, j) => {
+    const lo = new Array<number>(16).fill(0)
+    const hi = new Array<number>(16).fill(0)
+    literals.forEach((lit, i) => {
+      const byte = lit[j] ?? 0
+      const bit = 1 << (i % Buckets)
+      lo[byte & 15] = (lo[byte & 15] ?? 0) | bit
+      hi[byte >> 4] = (hi[byte >> 4] ?? 0) | bit
+    })
+    return [lo, hi]
+  })
+
+/**
+ * The bytes of literal units (`width` bytes each, little-endian), and the
+ * 0x20 to OR into each byte of a caseless letter, which `bytes` holds in
+ * lower case.
+ */
+const unitBytes = (codes: ReadonlyArray<number>, caseless: boolean, width: number) => {
+  const bytes: Array<number> = []
+  const fold: Array<number> = []
+  for (const code of codes) {
+    const letter = caseless && isLetter(code)
+    const unit = letter ? lowerAscii(code) : code
+    for (let k = 0; k < width; k++) {
+      bytes.push((unit >> (8 * k)) & 0xff)
+      fold.push(letter && k === 0 ? 0x20 : 0)
+    }
+  }
+  return { bytes, fold }
+}
+
+/** The widest load, of 16 (with SIMD), 8, 4, 2 or 1 bytes, that `left` bytes fill. */
+const chunkSize = (left: number): number => {
+  if (left >= 16 && simd()) return 16
+  return [8, 4, 2].find((n) => left >= n) ?? 1
+}
+
+/**
+ * With an address on the stack, pushes whether the 1, 2, 4, 8 or 16 bytes
+ * at it (plus `offset`), ORed with `fold`, differ from `bytes`.
+ */
+const compareChunk = (b: Body, bytes: ReadonlyArray<number>, fold: ReadonlyArray<number>, offset: number): void => {
+  const n = bytes.length
+  const folds = fold.some((f) => f !== 0)
+  if (n === 16) {
+    b.simd(Simd.v128Load, 0, offset)
+    if (folds) b.v128(fold).simd(Simd.v128Or)
+    b.v128(bytes).simd(Simd.i8x16Eq).simd(Simd.i8x16AllTrue).op(Op.i32Eqz)
+  } else if (n === 8) {
+    b.mem(Op.i64Load, 0, offset)
+    if (folds) b.i64(littleEndian(fold, 0, 8)).op(Op.i64Or)
+    b.i64(littleEndian(bytes, 0, 8)).op(Op.i64Ne)
+  } else {
+    b.mem(n === 4 ? Op.i32Load : n === 2 ? Op.i32Load16U : Op.i32Load8U, 0, offset)
+    if (folds) b.i32(Number(littleEndian(fold, 0, n))).op(Op.i32Or)
+    b.i32(Number(BigInt.asIntN(32, littleEndian(bytes, 0, n)))).op(Op.i32Ne)
+  }
+}
+
+/** `n` bytes from `bytes[i]` as a little-endian integer (as a load reads them). */
+const littleEndian = (bytes: ReadonlyArray<number>, i: number, n: number): bigint => {
+  let v = 0n
+  for (let k = n - 1; k >= 0; k--) v = (v << 8n) | BigInt(bytes[i + k] ?? 0)
+  return BigInt.asIntN(64, v)
+}
+
 /** Values of `G.mode`. */
 const Backtrack = 0
 const Cut = 1
@@ -196,20 +301,56 @@ let simdSupported = false
 const simd = (): boolean => {
   if (!simdChecked) {
     simdChecked = true
-    const probe = new Body(1)
-    probe.get(0).simd(Simd.v128Load, 0, 0).simd(Simd.i8x16Bitmask)
-    const bytes = encodeModule({
-      types: [{ params: [I32], results: [I32] }],
-      imports: [],
-      memoryPages: 1,
-      functions: [[0, probe]],
-      globals: [],
-      exports: [],
-      data: []
-    })
-    simdSupported = WebAssembly.validate(bytes)
+    simdSupported = validates((probe) => probe.get(0).simd(Simd.v128Load, 0, 0).simd(Simd.i8x16Bitmask))
   }
   return simdSupported
+}
+
+let relaxedChecked = false
+let relaxedSupported = false
+
+/**
+ * Whether relaxed SIMD is available (checked once): its `relaxed_swizzle`
+ * is `swizzle` without the fix-up for indices from 16 up, which the nibble
+ * lookups never pass.
+ */
+const relaxed = (): boolean => {
+  if (!relaxedChecked) {
+    relaxedChecked = true
+    relaxedSupported =
+      simd() &&
+      validates((probe) =>
+        probe
+          .get(0)
+          .simd(Simd.v128Load, 0, 0)
+          .get(0)
+          .simd(Simd.v128Load, 0, 0)
+          .simd(Simd.i8x16RelaxedSwizzle)
+          .simd(Simd.i8x16Bitmask)
+      )
+  }
+  return relaxedSupported
+}
+
+/** Pushes a swizzle of a table by nibbles (indices below 16): relaxed where it validates. */
+const nibbleSwizzle = (b: Body): void => {
+  b.simd(relaxed() ? Simd.i8x16RelaxedSwizzle : Simd.i8x16Swizzle)
+}
+
+/** Whether a module of one function `(i32) -> i32` with the body `write` writes validates. */
+const validates = (write: (probe: Body) => void): boolean => {
+  const probe = new Body(1)
+  write(probe)
+  const bytes = encodeModule({
+    types: [{ params: [I32], results: [I32] }],
+    imports: [],
+    memoryPages: 1,
+    functions: [[0, probe]],
+    globals: [],
+    exports: [],
+    data: []
+  })
+  return WebAssembly.validate(bytes)
 }
 
 /** Whether a builder is available: it is generated with `new Function`. */
@@ -586,6 +727,9 @@ class WasmCompiler {
       return Option.some(this.token(s, node))
     }
     if (Predicate.isTagged(node, "Escaped")) return Option.some(this.escaped(s, node))
+    if (Predicate.isTagged(node, "TakeUntil") || Predicate.isTagged(node, "TakeUntilAny")) {
+      return Option.some(this.takeUntil(s, node))
+    }
     if (Predicate.isTagged(node, "Taken")) {
       if (node.encoding !== undefined) {
         return Option.some(this.island(s.p, s.out, s.b, s.fail, "text slices are validated in JavaScript"))
@@ -1525,6 +1669,7 @@ class WasmCompiler {
     const wide = enc === utf8 && s.out !== "" ? b.local() : -1
     if (wide >= 0) b.i32(0).set(wide)
     b.block((stop) => {
+      if (!counted && this.vectorRun(enc, set)) this.byteRun(b, set, stop)
       b.loop((again) => {
         this.atEnd(b, 0)
         b.brIf(stop)
@@ -1540,6 +1685,104 @@ class WasmCompiler {
       this.failIf(b, s.fail)
     }
     return this.sliceValue(s, enc, st, wide)
+  }
+
+  /**
+   * The vector steps of an unbounded `takeWhile` on bytes, where every
+   * byte is a token: sixteen bytes, up to the first that is not accepted,
+   * which ends the run (most runs, tokens, end in the first sixteen); after
+   * sixteen accepted, thirty-two at a time while all are. The
+   * scalar loop takes the last fifteen bytes. Applies to `Token` and
+   * Latin-1 text on bytes, where SIMD validates. (UTF-8, whose bytes from
+   * 0x80 up are parts of code points, and strings, whose units are
+   * sixteen-bit, stay scalar: on the JSON benchmark, whose runs are short,
+   * a vector step there costs more than it saves.)
+   */
+  private byteRun(b: Body, set: Membership, stop: Label): void {
+    const x = b.localV128()
+    const y = b.localV128()
+    const accepted = this.acceptedBytes(b, set)
+    b.block((done) => {
+      b.loop((again) => {
+        this.end(b).get(0).op(Op.i32Sub).i32(16).op(Op.i32LtS).brIf(done)
+        b.get(0).simd(Simd.v128Load, 0, Input).set(x)
+        accepted(x)
+        b.tee(x).simd(Simd.i8x16AllTrue)
+        b.if(() => {
+          this.advance(b, 16)
+          // A run this long may be longer: thirty-two bytes at a time
+          b.block((short) => {
+            b.loop((more) => {
+              this.end(b).get(0).op(Op.i32Sub).i32(32).op(Op.i32LtS).brIf(short)
+              b.get(0).simd(Simd.v128Load, 0, Input).set(x)
+              b.get(0)
+                .simd(Simd.v128Load, 0, Input + 16)
+                .set(y)
+              accepted(x)
+              accepted(y)
+              b.simd(Simd.v128And).simd(Simd.i8x16AllTrue).op(Op.i32Eqz).brIf(short)
+              this.advance(b, 32)
+              b.br(more)
+            })
+          })
+          b.br(again)
+        })
+        // Up to the first byte that is not accepted: the end of the run
+        b.get(0).get(x).simd(Simd.i8x16Bitmask).i32(-1).op(Op.i32Xor).op(Op.i32Ctz).op(Op.i32Add).set(0)
+        b.br(stop)
+      })
+    })
+  }
+
+  /** Whether a `takeWhile` of `set` in `enc` has vector steps (see {@link byteRun}). */
+  private vectorRun(enc: Enc, set: Membership): boolean {
+    return this.kind === 1 && (enc === undefined || enc === latin1) && simd() && accepts(set)
+  }
+
+  /**
+   * Code that pushes, for the sixteen bytes in a local, 0xFF where the byte
+   * is accepted and 0 where not: comparisons with the rejected bytes when
+   * there are at most three of them (`takeTill` of a few stops), else two
+   * swizzles of nibble tables for each half of the byte values. Its
+   * constants are set up here, in locals.
+   */
+  private acceptedBytes(b: Body, set: Membership): (x: number) => void {
+    const rejected: Array<number> = []
+    for (let c = 0; c < 256 && rejected.length <= MaxStops; c++) {
+      if ((set.cs.table[c] === 1) === set.negate) rejected.push(c)
+    }
+    if (rejected.length <= MaxStops) {
+      const stops = rejected.map((c) => {
+        const l = b.localV128()
+        b.i32(c).simd(Simd.i8x16Splat).set(l)
+        return l
+      })
+      return (x) => {
+        b.v128(Zeros)
+        for (const l of stops) b.get(x).get(l).simd(Simd.i8x16Eq).simd(Simd.v128Or)
+        b.simd(Simd.v128Not)
+      }
+    }
+    const tables = [nibbleTable(set, 0), nibbleTable(set, 8)].map((table, k) => {
+      const lo = b.localV128()
+      const bits = b.localV128()
+      b.v128(table)
+        .set(lo)
+        .v128(k === 0 ? HighNibbleBits : UpperNibbleBits)
+        .set(bits)
+      return [lo, bits] as const
+    })
+    return (x) => {
+      tables.forEach(([lo, bits], k) => {
+        b.get(lo).get(x).v128(LowNibbles).simd(Simd.v128And)
+        nibbleSwizzle(b)
+        b.get(bits).get(x).i32(4).simd(Simd.i8x16ShrU)
+        nibbleSwizzle(b)
+        b.simd(Simd.v128And)
+        if (k > 0) b.simd(Simd.v128Or)
+      })
+      b.v128(Zeros).simd(Simd.i8x16Ne)
+    }
   }
 
   /** One code point of a `takeWhile`: advances past it, or branches to `stop`. */
@@ -1588,6 +1831,149 @@ class WasmCompiler {
     this.member(set.cs, set.negate, set.c, b)
     b.op(Op.i32Eqz).brIf(stop)
     b.get(0).get(w).op(Op.i32Add).set(0)
+  }
+
+  /**
+   * `takeUntil` and `takeUntilAny` on bytes: Teddy (as in ripgrep). Sixteen
+   * starts at a time, the first `m` bytes of every literal (up to three)
+   * are tested at once, with nibble tables: a byte belongs to bucket k at
+   * position j when bit k is set both in the low-nibble table at its low
+   * nibble and in the high-nibble table at its high nibble, and a start is
+   * a candidate when one bucket holds at every position. Each candidate is
+   * checked against the literals in full; the last starts, fewer than
+   * sixteen, are checked one at a time. Without SIMD, with a range, or on
+   * other input, the search runs in JavaScript.
+   */
+  private takeUntil(s: Site, node: NodeOf<"TakeUntil" | "TakeUntilAny">): string {
+    const literals = Predicate.isTagged(node, "TakeUntil") ? [node.literal] : node.literals
+    const bytes = literals.filter(Predicate.isUint8Array)
+    const shortest = Math.min(...bytes.map((lit) => lit.length))
+    const searchable =
+      this.kind === 1 &&
+      node.encoding === undefined &&
+      node.min === 0 &&
+      node.max === Infinity &&
+      bytes.length === literals.length &&
+      shortest > 0 &&
+      shortest !== Infinity &&
+      bytes.length <= MaxUntil &&
+      simd()
+    if (!searchable) return this.island(s.p, s.out, s.b, s.fail, "the search runs in JavaScript")
+    const { b, fail } = s
+    const m = Math.min(MaxPositions, shortest)
+    const st = b.local()
+    const c = b.local()
+    const mask = b.local()
+    const acc = b.localV128()
+    // The tables and the nibble mask, in locals for the loop
+    const position = this.teddyPosition(b, bytes, m, acc)
+    b.get(0).set(st)
+    b.block((found) => {
+      b.block((tail) => {
+        b.loop((again) => {
+          // Sixteen starts need their `m` bytes inside the input
+          this.end(b)
+            .get(0)
+            .op(Op.i32Sub)
+            .i32(15 + m)
+            .op(Op.i32LtS)
+            .brIf(tail)
+          for (let j = 0; j < m; j++) {
+            position(j)
+            if (j > 0) b.simd(Simd.v128And)
+          }
+          b.tee(acc).simd(Simd.v128AnyTrue).op(Op.i32Eqz)
+          b.if(() => {
+            this.advance(b, 16)
+            b.br(again)
+          })
+          // Each candidate of the sixteen, in order, checked in full
+          b.get(acc).v128(Zeros).simd(Simd.i8x16Ne).simd(Simd.i8x16Bitmask).set(mask)
+          b.loop((bits) => {
+            b.get(0).get(mask).op(Op.i32Ctz).op(Op.i32Add).set(c)
+            this.literalAt(b, bytes, c, found)
+            b.get(mask).get(mask).i32(1).op(Op.i32Sub).op(Op.i32And).tee(mask).brIf(bits)
+          })
+          this.advance(b, 16)
+          b.br(again)
+        })
+      })
+      b.loop((again) => {
+        this.end(b).get(0).op(Op.i32Sub).i32(shortest).op(Op.i32LtS)
+        this.failIf(b, fail)
+        b.get(0).set(c)
+        this.literalAt(b, bytes, c, found)
+        this.advance(b, 1)
+        b.br(again)
+      })
+    })
+    return this.sliceValue(s, undefined, st, -1)
+  }
+
+  /**
+   * Code that pushes, for the sixteen starts from the cursor, what position
+   * `j` of the literals says: with at most three distinct bytes there,
+   * 0xFF where the byte is one of them (`i8x16.eq`); otherwise Teddy's
+   * bucket bits, from two nibble-table swizzles. Either way a start is a
+   * candidate where the AND over the positions is not zero. The constants
+   * are set up here, in locals; `v` is a scratch local.
+   */
+  private teddyPosition(b: Body, literals: ReadonlyArray<Uint8Array>, m: number, v: number): (j: number) => void {
+    const distinct = Array.from({ length: m }, (_, j) => Arr.dedupe(literals.map((lit) => lit[j] ?? 0)))
+    if (distinct.every((bytes) => bytes.length <= MaxStops)) {
+      const splats = distinct.map((bytes) =>
+        bytes.map((byte) => {
+          const l = b.localV128()
+          b.i32(byte).simd(Simd.i8x16Splat).set(l)
+          return l
+        })
+      )
+      return (j) => {
+        b.get(0)
+          .simd(Simd.v128Load, 0, Input + j)
+          .set(v)
+        b.v128(Zeros)
+        for (const l of splats[j] ?? []) b.get(v).get(l).simd(Simd.i8x16Eq).simd(Simd.v128Or)
+      }
+    }
+    const nibbles = b.localV128()
+    b.v128(LowNibbles).set(nibbles)
+    const tables = teddyTables(literals, m).map(([lo, hi]) => {
+      const l = b.localV128()
+      const h = b.localV128()
+      b.v128(lo).set(l).v128(hi).set(h)
+      return [l, h] as const
+    })
+    return (j) => {
+      const [lo, hi] = tables[j] ?? [-1, -1]
+      b.get(0)
+        .simd(Simd.v128Load, 0, Input + j)
+        .set(v)
+      b.get(lo).get(v).get(nibbles).simd(Simd.v128And)
+      nibbleSwizzle(b)
+      b.get(hi).get(v).i32(4).simd(Simd.i8x16ShrU)
+      nibbleSwizzle(b)
+      b.simd(Simd.v128And)
+    }
+  }
+
+  /** Moves the cursor to `c` and branches to `found` when one of `literals` starts at `c`. */
+  private literalAt(b: Body, literals: ReadonlyArray<Uint8Array>, c: number, found: Label): void {
+    for (const lit of literals) {
+      b.block((next) => {
+        this.end(b).get(c).op(Op.i32Sub).i32(lit.length).op(Op.i32LtS).brIf(next)
+        // Compared as many bytes at a time as the literal fills
+        const bytes = Array.from(lit)
+        for (let i = 0; i < bytes.length;) {
+          const n = chunkSize(bytes.length - i)
+          b.get(c)
+          compareChunk(b, bytes.slice(i, i + n), [], Input + i)
+          b.brIf(next)
+          i += n
+        }
+        b.get(c).set(0).br(found)
+      })
+    }
   }
 
   /** The trace and builder code of a `takeWhile`'s slice `[st, p)`. */
@@ -1646,13 +2032,7 @@ class WasmCompiler {
     if (len > 0) {
       this.end(b).get(0).op(Op.i32Sub).i32(len).op(Op.i32LtS)
       this.failIf(b, fail)
-      codes.forEach((code, i) => {
-        this.load(b, 0, i)
-        if (node.caseless && isLetter(code)) b.i32(32).op(Op.i32Or).i32(lowerAscii(code))
-        else b.i32(code)
-        b.op(Op.i32Ne)
-        this.failIf(b, fail)
-      })
+      this.compareUnits(b, codes, node.caseless, fail)
       this.advance(b, len)
     }
     if (s.out === "") return ""
@@ -1666,6 +2046,27 @@ class WasmCompiler {
    * (rather than the input it matched, as a caseless one returns), or why it
    * runs in JavaScript.
    */
+  /**
+   * Fails unless the input at the cursor holds `codes` (folding ASCII
+   * letters with `caseless`): the units' bytes compared sixteen, eight,
+   * four, two and one at a time, with `v128`, `i64` and `i32` loads, a
+   * caseless letter's byte ORed with 0x20 first.
+   */
+  private compareUnits(b: Body, codes: ReadonlyArray<number>, caseless: boolean, fail: Label): void {
+    const { bytes, fold } = unitBytes(codes, caseless, this.kind === 0 ? 2 : 1)
+    // The address of the cursor's byte, once
+    const at = b.local()
+    if (this.kind === 0) b.get(0).i32(1).op(Op.i32Shl).set(at)
+    else b.get(0).set(at)
+    for (let i = 0; i < bytes.length;) {
+      const n = chunkSize(bytes.length - i)
+      b.get(at)
+      compareChunk(b, bytes.slice(i, i + n), fold.slice(i, i + n), Input + i)
+      this.failIf(b, fail)
+      i += n
+    }
+  }
+
   private literalUnits(
     node: NodeOf<"Literal">
   ): Result.Result<{ readonly codes: ReadonlyArray<number>; readonly constant: boolean }, string> {
