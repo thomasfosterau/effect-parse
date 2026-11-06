@@ -315,6 +315,53 @@ export default defineConfig({
           "import/namespace": "off"
         }
       },
+      // The jq benchmark races the real `jq` binary: like the other
+      // benchmarks it is a plain Node program, and it also spawns processes,
+      // writes its generated document to a temporary file and reads its
+      // settings from the environment, before and outside any timing.
+      {
+        files: ["bench/jq.bench.ts"],
+        rules: {
+          "effect/avoid-node-imports": "off",
+          "effect/use-command-executor-service": "off",
+          "effect/use-filesystem-service": "off",
+          "effect/use-temp-file-scoped": "off",
+          "effect/use-path-service": "off",
+          "effect/avoid-sync-fs": "off",
+          "effect/avoid-process-env": "off",
+          "effect/avoid-try-catch": "off",
+          "effect/prefer-option-over-null": "off"
+        }
+      },
+      // The jq example's evaluator implements jq's dynamically typed language
+      // over plain JSON values (the `json-fast.ts` parser's output), once per
+      // value: `typeof` and `Array.isArray` are jq's own type tests (`type`,
+      // `numbers`, its ordering), `null` is JSON's null, `JSON.stringify` is
+      // jq's output format, and objects are the plain objects jq's key order
+      // is read from. jq's `?`, `try` and `//` are errors that unwind through
+      // the evaluator's callbacks, and its builtins loop over arrays. The
+      // shapes the rules ask for cost per value what the measurements above
+      // record (`Match.value` 21x a `switch`, `Result.try` 12x a `try`, a
+      // callback per iteration 7x a loop), and would put Effect's cost into
+      // the benchmark that measures the parser.
+      {
+        files: ["examples/jq.ts"],
+        rules: {
+          "effect/no-runtime-typeof": "off",
+          "effect/prefer-effect-is": "off",
+          "effect/prefer-option-over-null": "off",
+          "effect/avoid-direct-json": "off",
+          "effect/avoid-native-object-helpers": "off",
+          "effect/avoid-try-catch": "off",
+          "effect/imperative-loops": "off",
+          "effect/no-length-comparison": "off",
+          "effect/prefer-arr-match": "off",
+          "effect/prefer-match-over-switch": "off",
+          "effect/avoid-direct-tag-checks": "off",
+          "effect/no-known-value-widening": "off",
+          "effect/no-unknown-parameters": "off"
+        }
+      },
       // A test body is the harness boundary the rule itself names as the
       // place to run an Effect.
       {
@@ -452,7 +499,8 @@ export default defineConfig({
       "bench:stream": bench("stream"),
       "bench:gen": bench("gen"),
       "bench:syntax": bench("syntax"),
-      "bench:drivers": bench("drivers")
+      "bench:drivers": bench("drivers"),
+      "bench:jq": bench("jq")
     }
   },
   pack: {

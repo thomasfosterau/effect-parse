@@ -15,6 +15,10 @@ catalog:
   "@changesets/changelog-github": ^1.0.1
   "@changesets/cli": ^3.0.3
   "@effect/language-service": ^0.87.5
+  # Node services (FileSystem, Path, Stdio, Terminal, ChildProcessSpawner) for
+  # the `effect/cli` jq example and its benchmark only; never a runtime
+  # dependency of the package. Moves with `effect`.
+  "@effect/platform-node-shared": 4.1.1
   # Effect Language Service as a native (TypeScript-Go) binary — the TS7 side
   # of the 6/7 split. `effect-tsgo patch` overwrites the native `tsc` binary
   # with an Effect-patched build matched by gitHead, so this pins in lockstep

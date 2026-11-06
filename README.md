@@ -607,6 +607,7 @@ The `Nom` module provides the nom names directly, with nom's argument orders, fo
 - [`ini.ts`](examples/ini.ts): INI files with a generator-style parser
 - [`http.ts`](examples/http.ts): HTTP requests over bytes, complete and streamed
 - [`sexpr.ts`](examples/sexpr.ts): s-expressions with typed evaluation errors
+- [`jq.ts`](examples/jq.ts): a subset of [jq](https://jqlang.org): its filter language with the Pratt parser and its JSON input with the compiled `json-fast.ts` grammar, behind an `effect/cli` command in [`jq-cli.ts`](examples/jq-cli.ts); `vp run bench:jq` races it against the real `jq`
 - [`json-syntax.ts`](examples/json-syntax.ts): JSON as a syntax tree for editors, with fields, `ERROR` nodes for malformed elements, and incremental reparsing (tested in [`test/Syntax.test.ts`](test/Syntax.test.ts))
 
 `vp run bench` (from a clone) compares the JSON examples, on each encoding, with `JSON.parse`.
