@@ -1828,14 +1828,7 @@ class WasmCompiler {
     const mask = b.local()
     const acc = b.localV128()
     // The tables and the nibble mask, in locals for the loop
-    const nibbles = b.localV128()
-    b.v128(LowNibbles).set(nibbles)
-    const tables = teddyTables(bytes, m).map(([lo, hi]) => {
-      const l = b.localV128()
-      const h = b.localV128()
-      b.v128(lo).set(l).v128(hi).set(h)
-      return [l, h] as const
-    })
+    const position = this.teddyPosition(b, bytes, m, acc)
     b.get(0).set(st)
     b.block((found) => {
       b.block((tail) => {
@@ -1847,15 +1840,10 @@ class WasmCompiler {
             .i32(15 + m)
             .op(Op.i32LtS)
             .brIf(tail)
-          tables.forEach(([lo, hi], j) => {
-            b.get(0)
-              .simd(Simd.v128Load, 0, Input + j)
-              .set(acc)
-            b.get(lo).get(acc).get(nibbles).simd(Simd.v128And).simd(Simd.i8x16Swizzle)
-            b.get(hi).get(acc).i32(4).simd(Simd.i8x16ShrU).simd(Simd.i8x16Swizzle)
-            b.simd(Simd.v128And)
+          for (let j = 0; j < m; j++) {
+            position(j)
             if (j > 0) b.simd(Simd.v128And)
-          })
+          }
           b.tee(acc).simd(Simd.v128AnyTrue).op(Op.i32Eqz)
           b.if(() => {
             this.advance(b, 16)
@@ -1884,18 +1872,65 @@ class WasmCompiler {
     return this.sliceValue(s, undefined, st, -1)
   }
 
+  /**
+   * Code that pushes, for the sixteen starts from the cursor, what position
+   * `j` of the literals says: with at most three distinct bytes there,
+   * 0xFF where the byte is one of them (`i8x16.eq`); otherwise Teddy's
+   * bucket bits, from two nibble-table swizzles. Either way a start is a
+   * candidate where the AND over the positions is not zero. The constants
+   * are set up here, in locals; `v` is a scratch local.
+   */
+  private teddyPosition(b: Body, literals: ReadonlyArray<Uint8Array>, m: number, v: number): (j: number) => void {
+    const distinct = Array.from({ length: m }, (_, j) => Arr.dedupe(literals.map((lit) => lit[j] ?? 0)))
+    if (distinct.every((bytes) => bytes.length <= MaxStops)) {
+      const splats = distinct.map((bytes) =>
+        bytes.map((byte) => {
+          const l = b.localV128()
+          b.i32(byte).simd(Simd.i8x16Splat).set(l)
+          return l
+        })
+      )
+      return (j) => {
+        b.get(0)
+          .simd(Simd.v128Load, 0, Input + j)
+          .set(v)
+        b.v128(Zeros)
+        for (const l of splats[j] ?? []) b.get(v).get(l).simd(Simd.i8x16Eq).simd(Simd.v128Or)
+      }
+    }
+    const nibbles = b.localV128()
+    b.v128(LowNibbles).set(nibbles)
+    const tables = teddyTables(literals, m).map(([lo, hi]) => {
+      const l = b.localV128()
+      const h = b.localV128()
+      b.v128(lo).set(l).v128(hi).set(h)
+      return [l, h] as const
+    })
+    return (j) => {
+      const [lo, hi] = tables[j] ?? [-1, -1]
+      b.get(0)
+        .simd(Simd.v128Load, 0, Input + j)
+        .set(v)
+      b.get(lo).get(v).get(nibbles).simd(Simd.v128And).simd(Simd.i8x16Swizzle)
+      b.get(hi).get(v).i32(4).simd(Simd.i8x16ShrU).simd(Simd.i8x16Swizzle)
+      b.simd(Simd.v128And)
+    }
+  }
+
   /** Moves the cursor to `c` and branches to `found` when one of `literals` starts at `c`. */
   private literalAt(b: Body, literals: ReadonlyArray<Uint8Array>, c: number, found: Label): void {
     for (const lit of literals) {
       b.block((next) => {
         this.end(b).get(c).op(Op.i32Sub).i32(lit.length).op(Op.i32LtS).brIf(next)
-        lit.forEach((byte, k) => {
+        // Compared as many bytes at a time as the literal fills
+        const bytes = Array.from(lit)
+        for (let i = 0; i < bytes.length;) {
+          const n = chunkSize(bytes.length - i)
           b.get(c)
-            .mem(Op.i32Load8U, 0, Input + k)
-            .i32(byte)
-            .op(Op.i32Ne)
-            .brIf(next)
-        })
+          compareChunk(b, bytes.slice(i, i + n), [], Input + i)
+          b.brIf(next)
+          i += n
+        }
         b.get(c).set(0).br(found)
       })
     }
