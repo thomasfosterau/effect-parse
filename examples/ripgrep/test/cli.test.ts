@@ -216,7 +216,7 @@ const cases: ReadonlyArray<ReadonlyArray<string>> = [
   ["--colors", "match", "--color", "always", "x"]
 ]
 
-describe.skipIf(!Differential.hasRipgrep())("against ripgrep", () => {
+describe.skipIf(!Differential.hasRipgrep())("against ripgrep 14.1", () => {
   it("prints exactly what ripgrep prints", () => {
     for (const c of cases) {
       const args = ["--sort", "path", ...c]
