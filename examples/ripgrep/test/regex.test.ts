@@ -360,6 +360,29 @@ describe("line DFA", () => {
     }
   })
 
+  it("finds the same matches from the reversed regex's starts as from every start", () => {
+    // Multiline mode searches without the line DFAs; with no class matching
+    // the terminator, it finds the same matches.
+    const banned = CharSet.of(0x0a)
+    const bytes = Buffer.from(`${randomLines(lines).slice(0, 200_000)}\n`)
+    const all = (matcher: Compile.Matcher) => {
+      const found: Array<string> = []
+      const state = new Input.State<Uint8Array>(bytes)
+      for (let m = matcher.find(state, 0); m !== undefined;) {
+        found.push(`${m.start}-${m.end}`)
+        m = matcher.find(state, m.end === m.start ? m.end + 1 : m.end)
+      }
+      return found
+    }
+    for (const pattern of [...patterns, "(?i)sherlock holmes", "[a-z]+_\\w+\\(", "\\d+\\.\\d+|\\w+"]) {
+      const parsed = success(Syntax.parse(`(?:${pattern})`, flags))
+      const regex = Ast.mapClasses(parsed.regex, (set) => CharSet.difference(set, banned))
+      const lined = Compile.compile(regex, 1, 0x0a, { captures: false, backend: "none", multiline: false })
+      const plain = Compile.compile(regex, 1, 0x0a, { captures: false, backend: "none", multiline: true })
+      expect(all(lined), pattern).toEqual(all(plain))
+    }
+  })
+
   it("searches several lines, from mid-line, to the end of the text", () => {
     const parsed = success(Syntax.parse("(?:b+$)", flags))
     const dfa = LineDfa.make(parsed.regex, 0x0a)

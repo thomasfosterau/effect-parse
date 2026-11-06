@@ -180,10 +180,10 @@ const trieFragment = (nfa: Nfa, trie: Trie): Fragment =>
  * Unicode class (`\w` has hundreds of ranges) shares its lead bytes and
  * every DFA state built from it stays small.
  */
-const classFragment = (nfa: Nfa, set: Ranges): Fragment => {
+const classFragment = (nfa: Nfa, set: Ranges, reverse: boolean): Fragment => {
   const seqs: Array<ReadonlyArray<readonly [number, number]>> = []
   for (const [a, b] of set) utf8Sequences(a, b, seqs)
-  return trieFragment(nfa, trieOf(seqs))
+  return trieFragment(nfa, trieOf(reverse ? seqs.map((seq) => [...seq].reverse()) : seqs))
 }
 
 /** `sub` zero or more times. */
@@ -204,44 +204,55 @@ const optional = (nfa: Nfa, sub: () => Fragment): Fragment => {
   return { start: s, holes: [s, ...body.holes] }
 }
 
-const build = (nfa: Nfa, regex: Regex): Fragment => {
+/**
+ * The NFA of `regex`, or with `reverse` of the regex read backwards (for
+ * {@link LineDfa.matchStarts}): concatenations and each character's UTF-8 bytes
+ * in reverse order, and line anchors swapped.
+ */
+const build = (nfa: Nfa, regex: Regex, reverse: boolean): Fragment => {
   switch (regex._tag) {
     case "Empty":
       return empty(nfa)
-    case "Literal":
+    case "Literal": {
+      const bytes = Array.from(new TextEncoder().encode(regex.text))
       return sequence(
         nfa,
-        Array.from(new TextEncoder().encode(regex.text), (b) => nfa.range(b, b))
+        (reverse ? bytes.reverse() : bytes).map((b) => nfa.range(b, b))
       )
+    }
     case "Class":
-      return classFragment(nfa, regex.set)
+      return classFragment(nfa, regex.set, reverse)
     case "Capture":
-      return build(nfa, regex.sub)
-    case "Concat":
-      return sequence(
-        nfa,
-        regex.subs.map((s) => build(nfa, s))
-      )
+      return build(nfa, regex.sub, reverse)
+    case "Concat": {
+      const parts = regex.subs.map((s) => build(nfa, s, reverse))
+      return sequence(nfa, reverse ? parts.reverse() : parts)
+    }
     case "Alternate":
       return choice(
         nfa,
-        regex.subs.map((s) => build(nfa, s))
+        regex.subs.map((s) => build(nfa, s, reverse))
       )
     case "Look":
-      return lookFragment(nfa, regex.look)
+      return lookFragment(nfa, regex.look, reverse)
     case "Repeat": {
       const parts: Array<Fragment> = []
-      for (let i = 0; i < regex.min; i++) parts.push(build(nfa, regex.sub))
-      if (regex.max === Infinity) parts.push(star(nfa, () => build(nfa, regex.sub)))
-      else for (let i = regex.min; i < regex.max; i++) parts.push(optional(nfa, () => build(nfa, regex.sub)))
+      for (let i = 0; i < regex.min; i++) parts.push(build(nfa, regex.sub, reverse))
+      if (regex.max === Infinity) parts.push(star(nfa, () => build(nfa, regex.sub, reverse)))
+      else for (let i = regex.min; i < regex.max; i++) parts.push(optional(nfa, () => build(nfa, regex.sub, reverse)))
       return sequence(nfa, parts)
     }
   }
 }
 
-const lookFragment = (nfa: Nfa, look: Extract<Regex, { _tag: "Look" }>["look"]): Fragment => {
+/** Read backwards, `^` holds where `$` does forwards. */
+const reversedLook = { StartLine: "EndLine", EndLine: "StartLine", StartText: "EndText", EndText: "StartText" } as const
+
+const lookFragment = (nfa: Nfa, look: Extract<Regex, { _tag: "Look" }>["look"], reverse: boolean): Fragment => {
   if (look !== "StartLine" && look !== "EndLine" && look !== "StartText" && look !== "EndText") throw new TooComplex()
-  const s = nfa.add({ _tag: "Look", look, next: -1 })
+  // Backwards, a line's search ends at its start without knowing if it is the text's.
+  if (reverse && (look === "StartText" || look === "EndText")) throw new TooComplex()
+  const s = nfa.add({ _tag: "Look", look: reverse ? reversedLook[look] : look, next: -1 })
   return { start: s, holes: [s] }
 }
 
@@ -295,6 +306,16 @@ const hitOffset = (next: number, i: number, terminator: boolean): number =>
   (next & MATCH_BEFORE) !== 0 || !terminator ? i : i + 1
 
 /**
+ * Records the starts a flagged transition of the reversed regex's DFA on
+ * the byte at `i` gives: a match ended before the byte, so (backwards) one
+ * starts after it; or one starts at it.
+ */
+const startsAt = (next: number, i: number, out: Array<number>): void => {
+  if ((next & MATCH_BEFORE) !== 0 && out.at(-1) !== i + 1) out.push(i + 1)
+  if ((next & MATCH_AFTER) !== 0) out.push(i)
+}
+
+/**
  * The first line holding a match of a regex, found with a lazy DFA.
  *
  * @since 0.0.0
@@ -343,10 +364,10 @@ export class LineDfa {
   }
 
   /** The DFA for a regex, or `undefined` for one it cannot run (word boundaries, or too large). */
-  static make(regex: Regex, lineTerminator: number): LineDfa | undefined {
+  static make(regex: Regex, lineTerminator: number, reverse = false): LineDfa | undefined {
     const nfa = new Nfa()
     try {
-      const frag = build(nfa, regex)
+      const frag = build(nfa, regex, reverse)
       const match = nfa.add({ _tag: "Match" })
       nfa.patch(frag.holes, match)
       return new LineDfa(nfa.states, frag.start, lineTerminator)
@@ -802,6 +823,35 @@ export class LineDfa {
     }
     this.pos = Math.min(e, nl + 1)
     return line
+  }
+
+  /**
+   * For a DFA made with `reverse`: every offset in the line
+   * `[lineStart, lineEnd)` (and its end) where a match of the regex starts,
+   * found in one pass from the end of the line back to its start, appended
+   * to `out` from last to first; false if the DFA ran out of states.
+   * `lineEnd` is the line's terminator, or the end of the input.
+   */
+  matchStarts(input: Uint8Array, lineStart: number, lineEnd: number, out: Array<number>): boolean {
+    const start = this.start(true, false)
+    if (start < 0) return false
+    if (this.matching[start] === true) out.push(lineEnd)
+    const classes = this.classes
+    let table = this.table
+    let at = start * this.width
+    for (let i = lineEnd - 1; i >= lineStart; i--) {
+      const b = input[i]
+      let next = table[at + classes[b]]
+      if (next < 0) {
+        next = this.transition(at, b)
+        if (next < 0) return false
+        table = this.table
+      }
+      if (next > INDEX) startsAt(next, i, out)
+      at = next & INDEX
+    }
+    if (this.matchingAtEnd[at / this.width] === true && out.at(-1) !== lineStart) out.push(lineStart)
+    return true
   }
 
   /** Runs the DFA over `input[from..last]` from the state at `row` (see {@link find}). */
