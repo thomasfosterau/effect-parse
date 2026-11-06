@@ -145,18 +145,45 @@ const choice = (nfa: Nfa, parts: ReadonlyArray<Fragment>): Fragment => {
   return acc
 }
 
+/** A trie of byte-range sequences: shared prefixes become shared NFA states. */
+interface Trie {
+  readonly children: Map<string, { readonly lo: number; readonly hi: number; readonly next: Trie }>
+}
+
+const trieOf = (seqs: ReadonlyArray<ReadonlyArray<readonly [number, number]>>): Trie => {
+  const root: Trie = { children: new Map() }
+  for (const seq of seqs) {
+    let node = root
+    for (const [lo, hi] of seq) {
+      const key = `${lo},${hi}`
+      let child = node.children.get(key)
+      if (child === undefined) {
+        child = { lo, hi, next: { children: new Map() } }
+        node.children.set(key, child)
+      }
+      node = child.next
+    }
+  }
+  return root
+}
+
+const trieFragment = (nfa: Nfa, trie: Trie): Fragment =>
+  choice(
+    nfa,
+    [...trie.children.values()].map(({ hi, lo, next }) =>
+      next.children.size === 0 ? nfa.range(lo, hi) : sequence(nfa, [nfa.range(lo, hi), trieFragment(nfa, next)])
+    )
+  )
+
+/**
+ * A class as UTF-8: its byte-range sequences merged into a trie, so a large
+ * Unicode class (`\w` has hundreds of ranges) shares its lead bytes and
+ * every DFA state built from it stays small.
+ */
 const classFragment = (nfa: Nfa, set: Ranges): Fragment => {
   const seqs: Array<ReadonlyArray<readonly [number, number]>> = []
   for (const [a, b] of set) utf8Sequences(a, b, seqs)
-  return choice(
-    nfa,
-    seqs.map((seq) =>
-      sequence(
-        nfa,
-        seq.map(([lo, hi]) => nfa.range(lo, hi))
-      )
-    )
-  )
+  return trieFragment(nfa, trieOf(seqs))
 }
 
 /** `sub` zero or more times. */
