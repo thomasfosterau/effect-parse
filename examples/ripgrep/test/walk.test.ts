@@ -171,7 +171,7 @@ describe("command line", () => {
       ["--max-filesize", "10Q"],
       ["--path-separator", "ab"]
     ]) {
-      expect(() => parse(argv), argv.join(" ")).toThrow(Cli.UsageError)
+      expect(parse(argv).error, argv.join(" ")).toBeDefined()
     }
   })
 

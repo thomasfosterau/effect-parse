@@ -442,7 +442,7 @@ export default defineConfig({
       // `node:*` are the only things that work there. The Effect preset's
       // service rules have no satisfiable fix in these files.
       {
-        files: ["vite.config.ts", "scripts/**"],
+        files: ["vite.config.ts", "scripts/**", "examples/ripgrep/scripts/**"],
         rules: {
           "effect/avoid-node-imports": "off",
           "effect/avoid-sync-fs": "off",

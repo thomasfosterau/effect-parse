@@ -22,7 +22,8 @@
     "bench/*.bench.ts",
     "examples/*.ts",
     "vite.config.ts",
-    "scripts/check-dist.mjs"
+    "scripts/check-dist.mjs",
+    "examples/ripgrep/scripts/*.mjs"
   ],
   "ignorePatterns": ["**/dist/**", "**/coverage/**"],
   "ignoreDependencies": [

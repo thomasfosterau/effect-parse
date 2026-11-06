@@ -18,7 +18,7 @@ const backends: ReadonlyArray<Compile.Backend> = ["none", "closure", "jit", "was
 /** The first match of `pattern` in `haystack` with a backend, as text and capture slots. */
 const first = (pattern: string, haystack: string, backend: Compile.Backend, extraFlags = 0) => {
   const parsed = success(Syntax.parse(pattern, flags | extraFlags))
-  const matcher = Compile.compile(parsed.regex, parsed.names.length, 0x0a, { captures: true, backend })
+  const matcher = Compile.compile(parsed.regex, parsed.names.length, 0x0a, { captures: true, backend, multiline: true })
   const bytes = encoder.encode(haystack)
   const m = matcher.find(new Input.State(bytes), 0)
   if (m === undefined) return undefined
@@ -141,7 +141,7 @@ describe("regex semantics", () => {
 describe("matcher", () => {
   it("finds successive matches from an offset", () => {
     const parsed = success(Syntax.parse("o", flags))
-    const matcher = Compile.compile(parsed.regex, 1, 0x0a, { captures: false, backend: "jit" })
+    const matcher = Compile.compile(parsed.regex, 1, 0x0a, { captures: false, backend: "jit", multiline: true })
     const state = new Input.State(encoder.encode("foo boo"))
     const starts: Array<number> = []
     for (let m = matcher.find(state, 0); m !== undefined; m = matcher.find(state, m.end)) starts.push(m.start)
@@ -152,9 +152,11 @@ describe("matcher", () => {
 
   it("reports a pattern that nests past the stack", () => {
     const parsed = success(Syntax.parse("(?:ab|cd)+e", flags))
-    const matcher = Compile.compile(parsed.regex, 1, 0x0a, { captures: false, backend: "none" })
+    const matcher = Compile.compile(parsed.regex, 1, 0x0a, { captures: false, backend: "none", multiline: true })
     const state = new Input.State(encoder.encode("ab".repeat(200_000)))
-    expect(() => matcher.find(state, 0)).toThrow(Compile.TooDeep)
+    expect(matcher.find(state, 0)).toBe(undefined)
+    expect(matcher.takeOverflow()).toBe(0)
+    expect(matcher.takeOverflow()).toBe(undefined)
   })
 })
 
@@ -201,6 +203,13 @@ describe("character sets", () => {
   it("folds case simply, as Rust does", () => {
     expect(Arr.sort(CharSet.caseVariants(0x6b), Order.Number)).toEqual([0x4b, 0x6b, 0x212a])
     expect(CharSet.has(CharSet.caseFold(CharSet.of(0xdf)), 0x1e9e)).toBe(true)
+  })
+
+  it("precomputes the Unicode tables this Node computes", () => {
+    const word = ["Alphabetic", "M", "Nd", "Pc", "Join_Control"].map((p) => CharSet.unicodeProperty(p) ?? [])
+    expect(CharSet.unicodeWord()).toEqual(CharSet.union(...word))
+    expect(CharSet.unicodeDigit()).toEqual(CharSet.unicodeProperty("Nd"))
+    expect(CharSet.unicodeSpace()).toEqual(CharSet.unicodeProperty("White_Space"))
   })
 
   it("resolves Unicode property names loosely", () => {

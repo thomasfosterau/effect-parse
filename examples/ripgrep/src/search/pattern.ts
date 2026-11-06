@@ -67,7 +67,8 @@ export const build = (
       const numbered = Ast.numberCaptures(regex)
       const matcher = Compile.compile(numbered.regex, numbered.names.length, lineTerminator, {
         captures: args.replace !== undefined,
-        backend: compiler
+        backend: compiler,
+        multiline: args.multiline
       })
       return { matcher, names: numbered.names, lineTerminator }
     })

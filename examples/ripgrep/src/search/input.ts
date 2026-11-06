@@ -8,17 +8,7 @@
 import * as ChildProcess from "node:child_process"
 import * as Fs from "node:fs"
 import * as Zlib from "node:zlib"
-import * as Schema from "effect/Schema"
-
-/**
- * A `--pre` or `-z` command that failed.
- *
- * @since 0.0.0
- */
-class PreprocessorError extends Schema.TaggedError<PreprocessorError, { readonly brand: unique symbol }>()(
-  "PreprocessorError",
-  { message: Schema.String }
-) {}
+import * as Result from "effect/Result"
 
 /**
  * The decompressors ripgrep runs for `-z`, by file extension.
@@ -42,23 +32,26 @@ const decompressors: ReadonlyArray<readonly [RegExp, string, ReadonlyArray<strin
  *
  * @since 0.0.0
  */
-export const decompress = (path: string, bytes: Uint8Array): Uint8Array => {
-  if (/\.(gz|tgz)$/i.test(path)) return new Uint8Array(Zlib.gunzipSync(bytes))
-  if (/\.br$/i.test(path)) return new Uint8Array(Zlib.brotliDecompressSync(bytes))
+export const decompress = (path: string, bytes: Uint8Array): Result.Result<Uint8Array, string> => {
+  if (/\.(gz|tgz)$/i.test(path)) return Result.succeed(new Uint8Array(Zlib.gunzipSync(bytes)))
+  if (/\.br$/i.test(path)) return Result.succeed(new Uint8Array(Zlib.brotliDecompressSync(bytes)))
   const found = decompressors.find(([re]) => re.test(path))
-  if (found === undefined) return bytes
+  if (found === undefined) return Result.succeed(bytes)
   return run(found[1], found[2], bytes)
 }
 
-const run = (command: string, args: ReadonlyArray<string>, input: Uint8Array, cwd?: string): Uint8Array => {
+const run = (
+  command: string,
+  args: ReadonlyArray<string>,
+  input: Uint8Array,
+  cwd?: string
+): Result.Result<Uint8Array, string> => {
   const result = ChildProcess.spawnSync(command, args, { input, maxBuffer: 1 << 30, cwd })
-  if (result.error !== undefined) throw result.error
+  if (result.error !== undefined) return Result.fail(`${command}: ${result.error.message}`)
   if (result.status !== 0) {
-    throw new PreprocessorError({
-      message: `preprocessor command failed: '${command}': ${new TextDecoder().decode(result.stderr).trim()}`
-    })
+    return Result.fail(`preprocessor command failed: '${command}': ${new TextDecoder().decode(result.stderr).trim()}`)
   }
-  return new Uint8Array(result.stdout)
+  return Result.succeed(new Uint8Array(result.stdout))
 }
 
 /**
@@ -67,7 +60,7 @@ const run = (command: string, args: ReadonlyArray<string>, input: Uint8Array, cw
  *
  * @since 0.0.0
  */
-export const preprocess = (command: string, path: string, cwd: string): Uint8Array =>
+export const preprocess = (command: string, path: string, cwd: string): Result.Result<Uint8Array, string> =>
   run(command, [path], Fs.readFileSync(path), cwd)
 
 /**
