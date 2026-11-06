@@ -12,6 +12,8 @@ pnpm install
 
 That installs the dependencies against the lockfile, the git hooks, and patches the native `tsc` / `oxlint` with `@effect/tsgo` (the `prepare` script). Everything else runs through `vp`, from `node_modules/.bin` (`pnpm exec vp …`, or put `node_modules/.bin` on your `PATH`).
 
+Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions.
+
 ## Branches
 
 Branch off `trunk`, rebase rather than merge, squash-merge with a conventional prefix: see [AGENTS.md](AGENTS.md#branches-and-pull-requests).
