@@ -301,20 +301,56 @@ let simdSupported = false
 const simd = (): boolean => {
   if (!simdChecked) {
     simdChecked = true
-    const probe = new Body(1)
-    probe.get(0).simd(Simd.v128Load, 0, 0).simd(Simd.i8x16Bitmask)
-    const bytes = encodeModule({
-      types: [{ params: [I32], results: [I32] }],
-      imports: [],
-      memoryPages: 1,
-      functions: [[0, probe]],
-      globals: [],
-      exports: [],
-      data: []
-    })
-    simdSupported = WebAssembly.validate(bytes)
+    simdSupported = validates((probe) => probe.get(0).simd(Simd.v128Load, 0, 0).simd(Simd.i8x16Bitmask))
   }
   return simdSupported
+}
+
+let relaxedChecked = false
+let relaxedSupported = false
+
+/**
+ * Whether relaxed SIMD is available (checked once): its `relaxed_swizzle`
+ * is `swizzle` without the fix-up for indices from 16 up, which the nibble
+ * lookups never pass.
+ */
+const relaxed = (): boolean => {
+  if (!relaxedChecked) {
+    relaxedChecked = true
+    relaxedSupported =
+      simd() &&
+      validates((probe) =>
+        probe
+          .get(0)
+          .simd(Simd.v128Load, 0, 0)
+          .get(0)
+          .simd(Simd.v128Load, 0, 0)
+          .simd(Simd.i8x16RelaxedSwizzle)
+          .simd(Simd.i8x16Bitmask)
+      )
+  }
+  return relaxedSupported
+}
+
+/** Pushes a swizzle of a table by nibbles (indices below 16): relaxed where it validates. */
+const nibbleSwizzle = (b: Body): void => {
+  b.simd(relaxed() ? Simd.i8x16RelaxedSwizzle : Simd.i8x16Swizzle)
+}
+
+/** Whether a module of one function `(i32) -> i32` with the body `write` writes validates. */
+const validates = (write: (probe: Body) => void): boolean => {
+  const probe = new Body(1)
+  write(probe)
+  const bytes = encodeModule({
+    types: [{ params: [I32], results: [I32] }],
+    imports: [],
+    memoryPages: 1,
+    functions: [[0, probe]],
+    globals: [],
+    exports: [],
+    data: []
+  })
+  return WebAssembly.validate(bytes)
 }
 
 /** Whether a builder is available: it is generated with `new Function`. */
@@ -1738,8 +1774,10 @@ class WasmCompiler {
     })
     return (x) => {
       tables.forEach(([lo, bits], k) => {
-        b.get(lo).get(x).v128(LowNibbles).simd(Simd.v128And).simd(Simd.i8x16Swizzle)
-        b.get(bits).get(x).i32(4).simd(Simd.i8x16ShrU).simd(Simd.i8x16Swizzle)
+        b.get(lo).get(x).v128(LowNibbles).simd(Simd.v128And)
+        nibbleSwizzle(b)
+        b.get(bits).get(x).i32(4).simd(Simd.i8x16ShrU)
+        nibbleSwizzle(b)
         b.simd(Simd.v128And)
         if (k > 0) b.simd(Simd.v128Or)
       })
@@ -1911,8 +1949,10 @@ class WasmCompiler {
       b.get(0)
         .simd(Simd.v128Load, 0, Input + j)
         .set(v)
-      b.get(lo).get(v).get(nibbles).simd(Simd.v128And).simd(Simd.i8x16Swizzle)
-      b.get(hi).get(v).i32(4).simd(Simd.i8x16ShrU).simd(Simd.i8x16Swizzle)
+      b.get(lo).get(v).get(nibbles).simd(Simd.v128And)
+      nibbleSwizzle(b)
+      b.get(hi).get(v).i32(4).simd(Simd.i8x16ShrU)
+      nibbleSwizzle(b)
       b.simd(Simd.v128And)
     }
   }
