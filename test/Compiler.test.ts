@@ -1347,6 +1347,17 @@ describe("compiled combinators", () => {
     })
   })
 
+  it("seq tuples of every arity, by literal up to 8 and past it (#86)", () => {
+    Array.from({ length: 11 }, (_, n) => n).forEach((n) => {
+      const p = Parser.seq(...Array.from({ length: n }, () => Parser.alt(a, b)))
+      const input = "ab".repeat(n).slice(0, n)
+      expect(Parser.parse(p, input)).toEqual(Result.succeed(input.split("")))
+      // Each position can fail, and the output can be unused
+      allStrings(["a", "b", "0"], Math.min(n + 1, 4)).forEach((x) => same(p, x))
+      allStrings(["a", "b"], Math.min(n, 3)).forEach((x) => same(Parser.taken(p), x))
+    })
+  })
+
   it("fromEntries keys", () => {
     const sym = Symbol("s")
     const key = Parser.alt(
