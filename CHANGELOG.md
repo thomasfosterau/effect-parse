@@ -1,5 +1,17 @@
 # @thomasfosterau/effect-parse
 
+## 0.5.1
+
+### Patch Changes
+
+- [#108](https://github.com/thomasfosterau/effect-parse/pull/108) [`a09a738`](https://github.com/thomasfosterau/effect-parse/commit/a09a7380412bf8efc9d281d014f92c57ac0812d3) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - Compiled `alt`s now dispatch on the first characters of a branch that starts with `not(p)`: the lookahead consumes nothing, so the branch can only start with `p`'s first characters or with those of what follows it, and is skipped on any other input without running the lookahead.
+
+- [#109](https://github.com/thomasfosterau/effect-parse/pull/109) [`82f57f0`](https://github.com/thomasfosterau/effect-parse/commit/82f57f09cf23c64b1e669e3a8ff6544b0bca74d5) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - Interpreted steps called from compiled code, such as a `Parser.make` guard, no longer allocate a `Failure` each time they backtrack or cut: a compiled run throws its failures away and the interpreter builds the error, so `State.backtrack` and `State.cut` record only the mode there.
+
+- [#110](https://github.com/thomasfosterau/effect-parse/pull/110) [`2e24b10`](https://github.com/thomasfosterau/effect-parse/commit/2e24b102296d70329c4d09e58c2d36c4bf1952a1) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - `seq` builds its tuples with an array literal per arity (up to 8) in the interpreter and the closure compiler, as the JIT already did, so V8 can allocate tuples that a parse keeps straight into the old generation instead of copying them through scavenges.
+
+- [#105](https://github.com/thomasfosterau/effect-parse/pull/105) [`62687e5`](https://github.com/thomasfosterau/effect-parse/commit/62687e5640ea3e209a93f4b61a918225ec4e3823) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - Include `CHANGELOG.md` in the published package, so the release notes can be read from `node_modules`.
+
 ## 0.5.0
 
 ### Minor Changes
