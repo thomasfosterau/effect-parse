@@ -33,10 +33,12 @@ export const runOn = <A>(
 
 /**
  * Runs a compiled step on `state`: directly when it guards against
- * call-stack overflows itself (the JIT's), else under `Stack.run`.
+ * call-stack overflows itself (the JIT's), else under `Stack.run`. While it
+ * runs, `state.compiledRun` is set, so the interpreted steps it calls skip
+ * building the failures it throws away (#82).
  */
 export const runCompiled = <A>(step: (state: State<any>) => A, guarded: boolean, state: State<any>): A | Fail =>
-  guarded ? step(state) : Stack.run(step, state)
+  Stack.runCompiled(step, guarded, state)
 
 /**
  * Runs the compiled step of `compiled` (or, if compiling failed, the

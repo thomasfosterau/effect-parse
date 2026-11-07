@@ -41,6 +41,23 @@ export const run = <S extends State<any>, A>(step: (state: S) => A, state: S): A
 }
 
 /**
+ * Runs a compiled step with `state.compiledRun` set, so that the
+ * interpreted steps it calls skip building the failures it throws away
+ * (#82): directly when the step guards against call-stack overflows itself
+ * (the JIT's), else under {@link run}. The flag is restored however the
+ * step ends, a throw included, since the state may be the caller's.
+ */
+export const runCompiled = <S extends State<any>, A>(step: (state: S) => A, guarded: boolean, state: S): A | Fail => {
+  const outer = state.compiledRun
+  state.compiledRun = true
+  try {
+    return guarded ? step(state) : run(step, state)
+  } finally {
+    state.compiledRun = outer
+  }
+}
+
+/**
  * Records the `TooDeep` failure of a call-stack overflow. The JIT's
  * generated entry catches overflows itself, with this, so that the runners
  * can call it without {@link run}.

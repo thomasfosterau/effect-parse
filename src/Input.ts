@@ -276,6 +276,18 @@ export class State<I extends Input = Input> {
     this.deepestIsLatest = false
     this.deepestFailure = failure
   }
+  /**
+   * Whether compiled code is running on this state. A compiled run that fails
+   * is thrown away (the interpreter runs again to build the error) and one
+   * that succeeds records no diagnostics, so interpreted steps called from it
+   * (an opaque `Parser.make`, a leaf near the end of a partial input) record
+   * a `Backtrack` or `Cut` failure's mode only, without building its
+   * {@link Failure} (#82). `Incomplete` failures are still built: a compiled
+   * run's `Incomplete` is reported as it stands.
+   *
+   * @internal
+   */
+  compiledRun = false
   /** When defined, `Parser.resumeAfter`/`retryAfter` record failures here. */
   recovered: Array<Failure> | undefined = undefined
   /** When defined, `Parser.trace` reports events here. */
@@ -422,6 +434,7 @@ export class State<I extends Input = Input> {
     this.hintExpected = empty
     this.deepestFailure = undefined
     this.deepestIsLatest = false
+    this.compiledRun = false
     this.recovered = undefined
     this.tracer = undefined
     this.depth = 0
@@ -503,6 +516,10 @@ export class State<I extends Input = Input> {
    * Records a recoverable failure at the current offset and returns {@link Fail}.
    */
   backtrack(kind: ErrorKind, expected: ReadonlyArray<string> = empty, offset: number = this.pos): Fail {
+    if (this.compiledRun) {
+      this.mode = "Backtrack"
+      return Fail
+    }
     return this.failWith("Backtrack", this.makeFailure(offset, kind, expected))
   }
 
@@ -510,6 +527,10 @@ export class State<I extends Input = Input> {
    * Records an unrecoverable failure at the current offset and returns {@link Fail}.
    */
   cut(kind: ErrorKind, expected: ReadonlyArray<string> = empty, offset: number = this.pos): Fail {
+    if (this.compiledRun) {
+      this.mode = "Cut"
+      return Fail
+    }
     return this.failWith("Cut", this.makeFailure(offset, kind, expected))
   }
 
