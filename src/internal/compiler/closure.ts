@@ -19,6 +19,7 @@ import { Defer, nodeOf, scansFloat } from "../node.js"
 import { floatScan, floatTexts, scanFloatBytes, scanFloatString, toFloat } from "../numbers.js"
 import { charOf, fastLimit, firstCodePoint, fold, textIn, utf16be, utf16le, utf8, utf8Text, validate } from "../text.js"
 import { countTokens, indexOf, indexOfAny } from "../tokens.js"
+import { tupleStep } from "../tuple.js"
 import type { AltPlan } from "./first.js"
 import { Key } from "../key.js"
 import * as Resume from "../resume.js"
@@ -527,17 +528,7 @@ class Compiler {
     const steps = node.parsers.map((q, i) => this.compile(q, keep(i)))
     const n = steps.length
     if (!used) return this.chain(steps)
-    if (output === "tuple") {
-      return (s) => {
-        const out = new Array(n)
-        for (let i = 0; i < n; i++) {
-          const a = steps[i](s)
-          if (a === Fail) return Fail
-          out[i] = a
-        }
-        return out
-      }
-    }
+    if (output === "tuple") return tupleStep(steps)
     if (Predicate.isNumber(output)) {
       if (n === 2) {
         const a = steps[0]

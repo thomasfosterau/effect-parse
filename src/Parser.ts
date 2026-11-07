@@ -52,6 +52,7 @@ import * as Resume from "./internal/resume.js"
 import * as Run from "./internal/run.js"
 import * as Stack from "./internal/stack.js"
 import { TiedFailures } from "./internal/ties.js"
+import { tupleStep } from "./internal/tuple.js"
 import type { Node } from "./internal/node.js"
 import { bounds, Defer as DeferSymbol, describedNode, NodeId } from "./internal/node.js"
 
@@ -1798,23 +1799,10 @@ export const seq = <const Ps extends ReadonlyArray<Parser.Any>>(
   Parser.InputOf<Ps[number]>
 > => {
   type Out = { -readonly [K in keyof Ps]: Parser.Success<Ps[K]> }
-  const steps = parsers.map((p) => p.step)
-  const n = steps.length
-  return described(
-    (state: State<any>) => {
-      const out = new Array(n)
-      for (let i = 0; i < n; i++) {
-        const a = steps[i](state)
-        if (a === Fail) return Fail
-        out[i] = a
-      }
-      // SAFETY: `out` has one slot per parser, and slot `i` holds the
-      // output of `parsers[i]`, which is `Parser.Success<Ps[i]>`
-      return out as Out
-    },
-    "seq",
-    { _tag: "Seq", parsers, output: "tuple" }
-  )
+  // SAFETY: the tuple has one slot per parser, and slot `i` holds the
+  // output of `parsers[i]`, which is `Parser.Success<Ps[i]>`
+  const step = tupleStep(parsers.map((p) => p.step)) as (state: State<any>) => Out | Fail
+  return described(step, "seq", { _tag: "Seq", parsers, output: "tuple" })
 }
 
 /**
