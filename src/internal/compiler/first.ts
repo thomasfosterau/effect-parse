@@ -173,6 +173,12 @@ export class FirstSets {
         const f = this.of(node.self)
         return node.from === "Backtrack" ? (f.mode === Unknown ? f : unknown) : f
       }
+      // `not(p)` consumes nothing. Where `p`'s first set rules a unit out, `p`
+      // backtracks there, so `not(p)` succeeds without consuming: Optional
+      // over `p`'s units. On a unit in that set it may also fail, Cut
+      // included, which Optional leaves open. So `seq(not(p), q)` starts
+      // with `p`'s units and `q`'s, and an `alt` can skip it on any other (#84)
+      case "Not":
       case "Opt":
       case "OrElseSucceed": {
         const f = this.of(node.self)

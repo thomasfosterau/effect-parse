@@ -37,6 +37,7 @@ import {
 } from "../src/index.js"
 import { State } from "../src/Input.js"
 import { Fail } from "../src/Input.js"
+import { FirstSets } from "../src/internal/compiler/first.js"
 import * as Registry from "../src/internal/compiler/registry.js"
 import { allStrings, mutations, randomJson, rng } from "./generators.js"
 import { defined, runOfAs } from "./utils.js"
@@ -405,6 +406,17 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
     )
   ],
   ["peek and not", Parser.seq(Parser.peek(a), Parser.not(ab), Token.any, Parser.opt(Parser.not(b)))],
+  // Branches that start with a lookahead: dispatched on what follows it (#84)
+  [
+    "alt of branches led by not",
+    Parser.alt(
+      Parser.preceded(Parser.seq(Parser.not(ab), Token.literal("a.")), b),
+      Parser.preceded(Parser.not(Parser.preceded(b, Parser.cut(a))), Token.literal("bb")),
+      Parser.seq(Parser.not(digit), Parser.not(Parser.opt(a)), Token.literal(".")),
+      Parser.preceded(Parser.peek(b), Token.any),
+      Parser.seq(Parser.not(Parser.eof), Token.any)
+    )
+  ],
   ["repeat", Parser.repeat(Parser.alt(a, b))],
   [
     "repeat ranges",
@@ -1383,6 +1395,18 @@ describe("compiled combinators", () => {
       Parser.preceded(Parser.not(Parser.seq(Token.literal("a"), Token.literal(":"))), Parser.cut(Token.literal("c;")))
     )
     allStrings(["x", "a", "b", "c", ":", ";"], 4).forEach((input) => same(p, input))
+  })
+
+  it("a branch led by not(p) starts with p's first units and what follows (#84)", () => {
+    const iri = Parser.seq(Token.literal("<"), Token.takeTill(">"), Token.literal(">"))
+    const arrow = Parser.preceded(Parser.seq(Parser.not(iri), Token.literal("<-")), Ascii.alpha1)
+    const first = new FirstSets(0).of(arrow)
+    expect(first.mode).toBe(0)
+    expect([...first.units.keys()].filter((u) => first.units[u] === 1)).toEqual(["<".charCodeAt(0)])
+    // A lookahead over an unknown parser leaves the branch unknown
+    expect(new FirstSets(0).of(Parser.preceded(Parser.not(Parser.make(() => undefined)), a)).mode).toBe(2)
+    const p = Parser.alt(arrow, Parser.preceded(Parser.not(Parser.preceded(iri, Parser.cut(a))), Ascii.alpha1), iri)
+    allStrings(["<", ">", "-", "a", "x"], 4).forEach((input) => same(p, input))
   })
 
   it("array inputs", () => {
