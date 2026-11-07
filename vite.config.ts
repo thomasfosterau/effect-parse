@@ -186,8 +186,9 @@ export default defineConfig({
       },
       // `Result.try` measured ~12x slower than an inline `try` on the parse
       // path (effect-parse#53): `tryMapUnknown` (per call of `f`) and
-      // `Stack.run` (per run). `provideService` / `provide` and two tests use
-      // `try`/`finally` to restore state, which `Result.try` cannot express.
+      // `Stack.run` (per run). `provideService` / `provide`, `Stack.runCompiled`
+      // (its `compiledRun` flag, #82) and two tests use `try`/`finally` to
+      // restore state, which `Result.try` cannot express.
       {
         files: ["src/Parser.ts", "src/internal/stack.ts", "test/Parser.test.ts", "test/Compiler.test.ts"],
         rules: {

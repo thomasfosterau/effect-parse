@@ -1496,6 +1496,35 @@ describe.each(backends)("Compiler.%s", (backend) => {
     ])
   })
 
+  it("an interpreted guard builds no failure inside compiled code (#82)", () => {
+    const built: Array<boolean> = []
+    const guard = Parser.make<undefined>((state) => {
+      const before = state.failureHead
+      const c = state.pos < state.end ? state.input[state.pos] : ""
+      const r = c >= "0" && c <= "9" ? undefined : state.backtrack("Token", ["a digit"])
+      built.push(state.failureHead !== before)
+      return r
+    }, "digit guard")
+    const p = Parser.separated(Parser.alt(Parser.preceded(guard, Ascii.digit1), Ascii.alpha1), Token.literal(" "))
+    const compiled = Compiler[backend](p)
+    expect(Parser.parse(compiled, "ab 12 cd")).toEqual(Result.succeed(["ab", "12", "cd"]))
+    expect(built).toEqual([false, false, false])
+    // The interpreted re-run builds the error, which is the interpreter's
+    ;["ab 12 cd!", "ab 1x", "", "ab  cd"].forEach((input) => same(p, input))
+    // A step that throws leaves a caller-owned state as it found it
+    const throwing = Compiler[backend](
+      Parser.alt(
+        Parser.make(() => {
+          throw new RangeError("boom")
+        }),
+        a
+      )
+    )
+    const state = new State("a")
+    expect(() => Parser.run(throwing, state)).toThrow("boom")
+    expect(state.compiledRun).toBe(false)
+  })
+
   it("runs a state whose end is not the input's length", () => {
     const p = Compiler[backend](Parser.repeat(a))
     Parser.parse(p, "")
