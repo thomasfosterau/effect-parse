@@ -24,7 +24,8 @@
   "files": [
     "dist",
     "src",
-    "!dist/**/*.tsbuildinfo"
+    "!dist/**/*.tsbuildinfo",
+    "CHANGELOG.md"
   ],
   "type": "module",
   "sideEffects": false,
