@@ -126,7 +126,7 @@ trap cleanup EXIT
 # which this gate treats as non-blocking, so a commit from a fresh checkout or
 # worktree went through unaudited (#89). Regenerate the map when it is missing
 # or older than a source, test or test-config file, before auditing. The
-# `test:coverage` task is cached by Vite+, so an unchanged tree restores the
+# `test:coverage` task is cached by Vite+, so an unchanged tree usually restores the
 # map instead of rerunning the suite. A failed run blocks: the suite must pass
 # before a commit (AGENTS.md, Verification), and without a map nothing would be
 # audited.
