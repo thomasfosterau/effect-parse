@@ -187,6 +187,15 @@ describe("streaming parses", () => {
       Parser.repeat(
         Parser.alt(Parser.alt(Token.literal("ab"), b, Token.literal("c")), Token.literal("+"), Ascii.digit1)
       ),
+      // Branches led by a lookahead are dispatched on what follows it (#84)
+      Parser.repeat(
+        Parser.alt(
+          Parser.preceded(Parser.not(Token.literal("ab")), Token.literal("a+")),
+          Parser.preceded(Parser.not(Parser.preceded(b, Parser.cut(Token.literal("c")))), b),
+          Parser.seq(Parser.not(Token.literal("1")), a),
+          Token.oneOf("1;")
+        )
+      ),
       Parser.repeat(Parser.permutation(Parser.alt(Token.literal("ab"), b), Parser.alt(a, Token.literal("c")))),
       Expression.make({
         operand: Parser.alt(Ascii.digit1, Token.literal("ab")),
