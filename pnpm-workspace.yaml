@@ -12,9 +12,16 @@
 # ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
 catalogMode: strict
 
-# Private, never published: examples that depend on the root package through
-# `workspace:*` (examples/ripgrep: a ripgrep-compatible CLI and benchmarks).
+# The root project is listed first so Changesets (through @manypkg) counts it
+# as a workspace package: without it, a workspace with other packages makes
+# the root the workspace root only, and `changeset version` fails with "Found
+# changeset ... for package @thomasfosterau/effect-parse which is not in the
+# workspace" (effect-xml and effect-jsonapi list "." the same way). The others
+# are private, never published: examples that depend on the root package
+# through `workspace:*` (examples/ripgrep: a ripgrep-compatible CLI and
+# benchmarks).
 packages:
+  - "."
   - examples/ripgrep
 
 catalog:
