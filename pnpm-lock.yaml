@@ -22,8 +22,8 @@ catalogs:
       specifier: 0.63.0
       version: 0.63.0
     '@enfect/oxlint':
-      specifier: ^0.9.0
-      version: 0.9.0
+      specifier: ^0.10.0
+      version: 0.10.0
     '@types/node':
       specifier: ^26.6.5
       version: 26.6.5
@@ -78,7 +78,7 @@ importers:
         version: 0.63.0
       '@enfect/oxlint':
         specifier: 'catalog:'
-        version: 0.9.0
+        version: 0.10.0
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.5
@@ -332,8 +332,8 @@ packages:
     resolution: {integrity: sha512-bRbvVj+YLE/nBmcBWGAwsul3mjEYlqqOmWMxvwSVKq/oNnJEuZYgi2OFDeUf7q49E2g3w+oMHMWyN2QayZ77RQ==}
     hasBin: true
 
-  '@enfect/oxlint@0.9.0':
-    resolution: {integrity: sha512-xOKRAj9DmtVb5DqF/EznATObYldQBEWO2nmRYg7E+FxG258dsn5PHOODhakORbR0PVcs9VZ3MfvkuU0JSTRVbA==}
+  '@enfect/oxlint@0.10.0':
+    resolution: {integrity: sha512-A5VEkq8tV8FDRnvK0/AAQePX5iszZ6FlBIwWOsnb6EJFUDURwUIxpJvv3R5sXINId2zkYk1DIjOhpP4W0YsbHg==}
 
   '@fallow-cli/darwin-arm64@3.40.0':
     resolution: {integrity: sha512-0D2Da7aUAR3//pIxr2nTV1hl11Fj4rTNL8VrOa2GBeAoMcOqZD0zQyYjKLhs/cG+Xa+zBORJH3rCcxrlKxt17g==}
@@ -1975,7 +1975,7 @@ snapshots:
       '@effect/tsgo-win32-arm64': 0.63.0
       '@effect/tsgo-win32-x64': 0.63.0
 
-  '@enfect/oxlint@0.9.0':
+  '@enfect/oxlint@0.10.0':
     dependencies:
       '@oxlint/plugins': 1.89.0
       effect: 4.1.1
