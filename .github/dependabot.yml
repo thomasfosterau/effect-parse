@@ -112,6 +112,8 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "ci"
+    assignees:
+      - thomasfosterau
   # The dev container's features (.devcontainer/devcontainer.json) and their
   # lockfile. The base image tag is not a feature: it is the catalog's
   # `vite-plus` pin, moved by hand on the toolchain PR.
@@ -128,3 +130,5 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "chore"
+    assignees:
+      - thomasfosterau
