@@ -494,6 +494,15 @@ export default defineConfig({
   },
   run: {
     tasks: {
+      // The whole gate, in order, and the only command CI runs
+      // (.github/workflows/ci.yml): the toolchain lockstep, format + lint,
+      // the type gate, the unit suite, the build with its dist guard, and the
+      // dependency audit (network). It stops at the first failure.
+      ci: {
+        command:
+          "vp run check:toolchain && vp check && vp run check && vp run test:unit && vp run check:dist && pnpm audit --audit-level high",
+        cache: false
+      },
       // The type gate: `src`, the tests, the examples and the benchmarks
       // under the native, Effect-patched `tsc`. tsconfig.json resolves the
       // package name to `src/`, so it never needs a build first.

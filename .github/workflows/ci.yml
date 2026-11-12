@@ -1,29 +1,40 @@
 name: CI
 
-# ONE required job, ONE required check: the pipeline's task graph lives in
-# vite.config.ts (`check`, `test:unit`, `build`, `check:dist`), not in GitHub
-# Actions `needs:`. Shaped like the effect-web library's. Nothing here needs a
-# database, a stage or a credential, so every PR runs the whole gate. The
-# benchmarks (`vp run bench*`) are machine-dependent and stay out of CI.
+# ONE workflow, ONE command: the whole gate is the `ci` task in vite.config.ts
+# (`vp run ci`: toolchain lockstep, format + lint, type gate, unit suite,
+# build, dist guard, dependency audit), so CI runs exactly what a contributor
+# runs. Nothing here needs a database, a stage or a credential, so every PR
+# runs it. The benchmarks (`vp run bench*`) are machine-dependent and stay out.
+#
+# It runs on the Node.js LTS and Current lines (`engines.node` is `>=22`).
+# The `ci` job at the end is the one stable check name for a ruleset to
+# require: it passes only when every matrix leg did.
 
 on:
   pull_request:
-    branches: [trunk]
     types: [opened, reopened, synchronize, ready_for_review]
   push:
     branches: [trunk]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
 
-# No permissions by default; the single job grants only read access.
+# No permissions by default; each job grants only what it reads.
 permissions: {}
 
 jobs:
-  ci:
+  test:
+    name: ci (node ${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Resolved by Vite+ (`vp env use`) from the released Node.js versions:
+        # `lts` is the newest LTS line, `latest` the newest Current release.
+        node: [lts, latest]
     permissions:
       contents: read
     env:
@@ -36,29 +47,31 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        with:
+          node-version: ${{ matrix.node }}
       - name: Restore the Vite+ task cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: node_modules/.vite/task-cache
-          key: vp-task-v1-${{ runner.os }}-${{ github.sha }}
+          key: vp-task-v2-${{ runner.os }}-node-${{ matrix.node }}-${{ github.sha }}
           restore-keys: |
-            vp-task-v1-${{ runner.os }}-
-      # Before anything that runs the toolchain: a vite-plus bump that left
-      # its lockstep catalog entries behind installs cleanly, then fails later
-      - name: Toolchain lockstep
-        run: vp run check:toolchain
-      - name: Format and lint
-        run: vp check
-      - name: Type gate (src, tests, examples, benchmarks)
-        run: vp run check
-      - name: Unit tests
-        run: vp run test:unit
-      - name: Build
-        run: vp run build
-      # Imports every `exports` entry from dist/ as a consumer does, requires
-      # every top-level call to be /*#__PURE__*/, and checks that only the
-      # Compiler module reaches the compilers.
-      - name: Dist guard
-        run: vp run check:dist
-      - name: Audit
-        run: pnpm audit --audit-level high
+            vp-task-v2-${{ runner.os }}-node-${{ matrix.node }}-
+      - name: Node.js version
+        run: node --version
+      - name: CI
+        run: vp run ci
+
+  ci:
+    name: ci
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Every matrix leg passed
+        env:
+          RESULT: ${{ needs.test.result }}
+        run: |
+          echo "test: $RESULT"
+          [ "$RESULT" = "success" ]
