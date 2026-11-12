@@ -46,6 +46,7 @@ import { codePointPredicate, compile, indexOf, matchLiteral } from "./internal/t
 import { floatText as markFloatText } from "./internal/numbers.js"
 import * as internal from "./internal/text.js"
 import type { Node } from "./internal/node.js"
+import { bounds, checkCount, controlCode } from "./internal/node.js"
 import type { ErrorKind } from "./ParseError.js"
 import type { Parser, Range } from "./Parser.js"
 import * as P from "./Parser.js"
@@ -354,9 +355,8 @@ export interface TextParsers<I extends string | Uint8Array> {
 }
 
 const normalize = (r: Range | undefined): [number, number] => {
-  if (r === undefined) return [0, Infinity]
-  if (Predicate.isNumber(r)) return [r, r]
-  return [r.min ?? 0, r.max ?? Infinity]
+  const { max, min } = bounds(r)
+  return [min, max]
 }
 
 const isAsciiDigit = /*#__PURE__*/ codePointPredicate("isAsciiDigit", (c: number): boolean => c >= 48 && c <= 57, [
@@ -547,6 +547,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
   }
 
   const take = (count: number): Parser<string, never, never, I> => {
+    checkCount(count)
     const expected = [count === 1 ? "1 character" : `${count} characters`]
     return P.described<string, never, never, I>(
       (state: State<any>) => {
@@ -719,8 +720,7 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
   )
   const floatText = markFloatText(taken(P.alt(caseless("nan"), P.seq(sign, unsignedFloat))).pipe(P.expected("number")))
 
-  const matchControl = (control: string) => {
-    const ctrl = control.codePointAt(0)
+  const matchControl = (ctrl: number) => {
     return (state: State<any>): boolean => {
       if (internal.next(enc, state) !== ctrl) return false
       state.pos += internal.width
@@ -779,17 +779,21 @@ export const make = <I extends string | Uint8Array>(encoding: Encoding<I>): Text
       P.named("hexUint")
     ),
     float: floatText.pipe(P.map(toFloat), P.named("float")),
-    takeEscaped: (normal, control, escapable) =>
-      takeEscapedImpl(
+    takeEscaped: (normal, control, escapable) => {
+      const ctrl = controlCode(control, internal.firstCodePoint)
+      return takeEscapedImpl(
         normal,
-        matchControl(control),
+        matchControl(ctrl),
         escapable,
         (state, start) => internal.textIn(enc, state, start, state.pos),
-        internal.firstCodePoint(control),
+        ctrl,
         enc
-      ),
-    escaped: (normal, control, escape) =>
-      escapedImpl(normal, matchControl(control), escape, internal.firstCodePoint(control), enc)
+      )
+    },
+    escaped: (normal, control, escape) => {
+      const ctrl = controlCode(control, internal.firstCodePoint)
+      return escapedImpl(normal, matchControl(ctrl), escape, ctrl, enc)
+    }
   }
 }
 

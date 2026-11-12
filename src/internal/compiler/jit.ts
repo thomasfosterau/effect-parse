@@ -257,6 +257,18 @@ class Emitter {
     return enc === utf8 ? `(p-${start}>${ShortText}?R.utf8Text($S,${start},p):${text})` : text
   }
 
+  /**
+   * A count or bound as source text. Every number a description contributes
+   * to the generated source is written here, so nothing but a non-negative
+   * integer can reach it: a bound is a `number` only in the types, and a
+   * string written as given would run as code (#121).
+   */
+  num(n: number): string {
+    if (!Number.isSafeInteger(n) || n < 0)
+      throw new TypeError("effect-parse: a compiled bound must be a non-negative integer")
+    return String(n)
+  }
+
   /** A JavaScript literal for simple values, otherwise a constant. */
   lit(value: unknown): string {
     if (value === undefined) return "void 0"
@@ -401,16 +413,16 @@ class Emitter {
 
   private arrayOneOf(node: NodeOf<"OneOf">, out: string | null, fail: string): string {
     const m = this.const(compileAny(node.set).forCode.token)
-    return `if(p>=E||${m}(I[p])===${node.negate}){${BT}${fail}}${out === null ? "" : `${out}=I[p];`}p++;`
+    return `if(p>=E||${m}(I[p])===${node.negate === true}){${BT}${fail}}${out === null ? "" : `${out}=I[p];`}p++;`
   }
 
   private arrayTakeWhile(node: NodeOf<"TakeWhile">, out: string | null, fail: string, fn: Fn): string {
     const m = this.const(compileAny(node.set).forCode.token)
     const st = this.v(fn)
-    const max = node.max === Infinity ? "" : `&&p-${st}<${node.max}`
+    const max = node.max === Infinity ? "" : `&&p-${st}<${this.num(node.max)}`
     return (
-      `${st}=p;while(p<E${max}&&${m}(I[p])!==${node.negate})p++;` +
-      (node.min > 0 ? `if(p-${st}<${node.min}){${BT}${fail}}` : "") +
+      `${st}=p;while(p<E${max}&&${m}(I[p])!==${node.negate === true})p++;` +
+      (node.min > 0 ? `if(p-${st}<${this.num(node.min)}){${BT}${fail}}` : "") +
       (out === null ? "" : `${out}=I.slice(${st},p);`)
     )
   }
@@ -654,7 +666,7 @@ class Emitter {
         // On bytes, read inline; at the end of the input, the step reports it
         if (this.kind !== 1) return this.delegate(p, used, out, fail, fn)
         const read = used ? `${out ?? this.v(fn)}=${this.const(node.read)}(I,p,$S);` : ""
-        return `if(E-p>=${node.size}){${read}p+=${node.size}}else{${this.delegate(p, used, out, fail, fn)}}`
+        return `if(E-p>=${this.num(node.size)}){${read}p+=${this.num(node.size)}}else{${this.delegate(p, used, out, fail, fn)}}`
       }
       default:
         return this.delegate(p, used, out, fail, fn)
@@ -892,7 +904,7 @@ class Emitter {
       }
     }
     const check = max === Infinity ? `if(p===${st}){$S.mode="Cut";${fail}}` : ""
-    const bound = max === Infinity ? "" : `${n}<${max}`
+    const bound = max === Infinity ? "" : `${n}<${this.num(max)}`
     const r = this.resumable ? this.resumePoint(fn) : undefined
     // A checkpoint holds the result so far: the accumulator, or what `collect` builds
     const held = collect?.value ?? acc
@@ -906,11 +918,13 @@ class Emitter {
         ? `${this.gen(node.self, tracked, x, `break ${bad};`, fn, d)}${check}${add}`
         : collect.element(`break ${bad};`, check)
     const stop =
-      cond === undefined ? "" : `if(${min > 0 ? `${n}>=${min}&&` : ""}!${this.const(cond)}(${acc}))break ${loop};`
+      cond === undefined
+        ? ""
+        : `if(${min > 0 ? `${n}>=${this.num(min)}&&` : ""}!${this.const(cond)}(${acc}))break ${loop};`
     const body =
       `${loop}:for(;${bound};${n}++){${stop}${st}=p;` +
       `${bad}:{${element}continue ${loop};}` +
-      `${save}if($S.mode!=="Backtrack"${min > 0 ? `||${n}<${min}` : ""}){${fail}}p=${st};break ${loop};}`
+      `${save}if($S.mode!=="Backtrack"${min > 0 ? `||${n}<${this.num(min)}` : ""}){${fail}}p=${st};break ${loop};}`
     if (r === undefined) return `${init}${n}=0;${body}${collect?.finish ?? ""}`
     return r.wrap(
       held,
@@ -985,10 +999,10 @@ class Emitter {
       `${collect?.init ?? (keep ? `${acc}=[];` : "")}${n}=0;${st}=p;` +
       attempt(self, `${push}${n}++;`, min > 0 ? "||true" : "", "")
     const rest =
-      `${loop}:while(${max === Infinity ? "true" : `${n}<${max}`}){${st}=p;` +
-      attempt(sep, "", `||${n}<${min}`, save) +
+      `${loop}:while(${max === Infinity ? "true" : `${n}<${this.num(max)}`}){${st}=p;` +
+      attempt(sep, "", `||${n}<${this.num(min)}`, save) +
       check +
-      attempt(self, `${push}${n}++;continue ${loop};`, `||${n}<${min}`, save) +
+      attempt(self, `${push}${n}++;continue ${loop};`, `||${n}<${this.num(min)}`, save) +
       `}`
     if (r === undefined) return `${done}:{${first}${rest}}${collect?.finish ?? ""}`
     // `done` ends the repetition; the checkpoint wrapper records the result after it
@@ -1233,10 +1247,11 @@ class Emitter {
     const loop = this.label()
     const counted = max !== Infinity || min > 1
     const count = counted ? `${n}++;` : ""
-    const bound = max !== Infinity ? `&&${n}<${max}` : ""
+    const bound = max !== Infinity ? `&&${n}<${this.num(max)}` : ""
     const slice = enc !== undefined ? this.text(enc, st) : kind === 0 ? `I.slice(${st},p)` : `I.subarray(${st},p)`
     const finish =
-      (min > 0 ? `if(${counted ? n : `p-${st}`}<${min}){${BT}${fail}}` : "") + (out === null ? "" : `${out}=${slice};`)
+      (min > 0 ? `if(${counted ? n : `p-${st}`}<${this.num(min)}){${BT}${fail}}` : "") +
+      (out === null ? "" : `${out}=${slice};`)
     const head = `${st}=p;${counted ? `${n}=0;` : ""}${loop}:while(p<E${bound}){${c}=${this.unit("p")};`
     const member = this.member(accept, c)
     if (kind === 1 && (enc === undefined || fastLimit(enc) >= TableSize)) {
@@ -1338,7 +1353,9 @@ class Emitter {
       : `if(p!==${b}){${acc}+=${x};continue ${loop}}`
     const slice = enc !== undefined ? this.text(enc, st) : this.kind === 0 ? `I.slice(${st},p)` : `I.subarray(${st},p)`
     const ctrlTest =
-      rd === undefined ? `p<E&&${this.unit("p")}===${ctrl}` : `${rd.guard("p")}&&${rd.unit("p")}===${ctrl}`
+      rd === undefined
+        ? `p<E&&${this.unit("p")}===${this.num(ctrl)}`
+        : `${rd.guard("p")}&&${rd.unit("p")}===${this.num(ctrl)}`
     // In a resumable build, running out of a partial input (not stopping
     // before a non-control character) leaves the text incomplete
     const stop = r === undefined ? loop : this.label()

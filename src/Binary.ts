@@ -334,6 +334,18 @@ export const f64: (endian: Endianness) => Parser<number, never, never, Uint8Arra
   leF64
 )
 
+const MaxCount = /*#__PURE__*/ BigInt(Number.MAX_SAFE_INTEGER)
+
+/**
+ * Whether a length read from the input is a count: a non-negative integer
+ * of at most `Number.MAX_SAFE_INTEGER`. A signed, fractional or `NaN`
+ * length is the input's to choose, so it fails the parse where it was read
+ * (as `Parser.filter` does) and never reaches `Token.take` or
+ * `Parser.repeat`, which throw on one.
+ */
+const isCount = (n: number | bigint): boolean =>
+  Predicate.isBigInt(n) ? n >= 0n && n <= MaxCount : Number.isSafeInteger(n) && n >= 0
+
 const toCount = (n: number | bigint): number => (Predicate.isBigInt(n) ? Number(n) : n)
 
 /** How many counts {@link byCount} keeps the parsers of. */
@@ -359,7 +371,9 @@ const byCount = <A>(build: (n: number) => A): ((n: number | bigint) => A) => {
 
 /**
  * Parses a length with `count`, then takes that many tokens (winnow's
- * `length_take`, nom's `length_data`).
+ * `length_take`, nom's `length_data`). A length that is not a non-negative
+ * integer (a negative `i8`, a fractional float) fails the parse at the
+ * length.
  *
  * @since 0.1.0
  * @category length-prefixed
@@ -373,9 +387,15 @@ export const lengthTake = <E, R, I extends Input = Uint8Array>(
     [count],
     ([countStep]) =>
       (state: State<I>) => {
+        const start = state.pos
         // SAFETY: the count parser's step, interpreted or compiled, returns its output (a number or bigint) or `Fail`
         const n = countStep(state) as number | bigint | Fail
         if (n === Fail) return Fail
+        // As `Parser.filter` fails: at the length, backtracking
+        if (!isCount(n)) {
+          state.rewind(start)
+          return state.backtrack("Verify")
+        }
         return take(n)(state)
       },
     "lengthTake"
@@ -384,7 +404,8 @@ export const lengthTake = <E, R, I extends Input = Uint8Array>(
 
 /**
  * Parses a length with `count`, then applies `parser` that many times
- * (winnow's `length_repeat`, nom's `length_count`).
+ * (winnow's `length_repeat`, nom's `length_count`). A length that is not a
+ * non-negative integer fails the parse at the length.
  *
  * @since 0.1.0
  * @category length-prefixed
@@ -394,7 +415,7 @@ export const lengthRepeat = <E, R, I extends Input, A, E2, R2, I2 extends Input>
   parser: Parser<A, E2, R2, I2>
 ): Parser<Array<A>, E | E2, R | R2, I & I2> =>
   P.flatMap(
-    count,
+    P.filter(count, isCount),
     byCount((n) => P.repeat(parser, n))
   )
 
