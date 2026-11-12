@@ -10,15 +10,21 @@ name: Release
 # - `version` opens/updates the "chore: version packages" PR. It holds a
 #   write-scoped token but no `id-token`, so it cannot publish, and runs outside
 #   the `release` environment, so it needs no approval.
+# - `build` runs when a version is ready to publish. With a read-only token
+#   and no `id-token`, it installs, builds, runs the dist guard and packs the
+#   tarball, then uploads it. All dependency code runs here.
 # - `publish` is the only job in the protected `release` environment and the
-#   only one with `id-token: write`: it publishes to npm via OIDC trusted
-#   publishing and tags the release, after the owner approves it (once per
-#   release). See PUBLISHING.md.
+#   only one with `id-token: write`. After the owner approves it (once per
+#   release) it downloads that tarball, checks its SHA-256, publishes it to npm
+#   via OIDC trusted publishing and creates the `v<version>` tag and GitHub
+#   release through the API. It checks out nothing and installs nothing. See
+#   PUBLISHING.md.
 #
-# changesets/action's README recommends its sub-actions over the combined
-# action for trusted publishing, "to tighten publish permissions"; they need
-# Changesets CLI v3. The version and publish sub-actions push through the
-# GitHub API, so no checkout keeps git credentials.
+# changesets/action's sub-actions (which need Changesets CLI v3) select the
+# mode and maintain the version PR, pushing through the GitHub API, so no
+# checkout keeps git credentials. Publishing does not go through Changesets:
+# its `publish` sub-action runs a project script, and with it the project's
+# dependencies, in the job that holds the OIDC token (#118).
 
 on:
   push:
@@ -38,6 +44,14 @@ jobs:
       contents: read
     outputs:
       mode: ${{ steps.mode.outputs.mode }}
+    # pnpm 11 defaults `verify-deps-before-run` to `install`: before any
+    # `pnpm run` / `pnpm exec` it compares node_modules with the manifests and,
+    # if a manifest looks newer than the last install, re-installs WITH
+    # lifecycle scripts, ignoring the `--ignore-scripts` of the install step.
+    # It triggers whenever a manifest's mtime moves after the install step, e.g.
+    # when the Changesets action checks out `changeset-release/trunk` and resets
+    # it before `pnpm run version`. pnpm 11 reads only the `pnpm_config_*`
+    # spelling. Shared by every job that installs.
     env: &id001
       pnpm_config_verify_deps_before_run: "false"
     steps:
@@ -95,16 +109,95 @@ jobs:
           commit-message: "chore: version packages"
           pr-title: "chore: version packages"
 
+  # Builds, checks and packs what `publish` will publish, with NO publishing
+  # rights: no `id-token`, a read-only token, outside the `release`
+  # environment. Everything that executes dependency code (the install, `vp
+  # pack` and the dev dependencies vite.config.ts imports, `pnpm pack`) runs
+  # here, so a compromised dev dependency has no OIDC token to ask for (#118).
+  build:
+    name: Build the release tarball
+    needs: select
+    if: needs.select.outputs.mode == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      name: ${{ steps.pack.outputs.name }}
+      version: ${{ steps.pack.outputs.version }}
+      tarball: ${{ steps.pack.outputs.tarball }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    env: *id001
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Vite+ with a pinned Node.js major (the `engines` floor) and the pnpm
+      # that `packageManager` pins. No dependency cache.
+      - name: Setup Vite+ (vp, Node.js, pnpm)
+        uses: voidzero-dev/setup-vp@v1.22.0
+        with:
+          node-version: "22"
+          run-install: false
+
+      # No install scripts here either: nothing below needs them (`vp pack`
+      # does not need this package's `prepare`), and the tarball should come
+      # from the locked sources alone.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # The same guard CI runs, on the build that is published: every
+      # `exports` entry imports as a consumer's would, each top-level call is
+      # /*#__PURE__*/, only `Compiler` reaches the compilers. It builds first.
+      - name: Build and check dist
+        run: pnpm exec vp run check:dist
+
+      # `pnpm pack` rewrites `catalog:peers` to the published range and runs
+      # no lifecycle script (it has no `--ignore-scripts` flag, so the setting
+      # is passed as config). The tarball's SHA-256 travels as a job output,
+      # which `publish` checks before it publishes; the notes are this
+      # version's section of CHANGELOG.md, for the GitHub release.
+      - name: Pack
+        id: pack
+        run: |
+          set -euo pipefail
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          mkdir -p release-artifact
+          pnpm pack --config.ignore-scripts=true --pack-destination release-artifact
+          tarball="$(cd release-artifact && ls ./*.tgz)"
+          tarball="${tarball#./}"
+          awk -v v="## $version" '$0 == v { on = 1; next } on && /^## / { exit } on { print }' CHANGELOG.md > release-artifact/notes.md
+          {
+            echo "name=$name"
+            echo "version=$version"
+            echo "tarball=$tarball"
+            echo "sha256=$(sha256sum "release-artifact/$tarball" | cut -d' ' -f1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload the tarball
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: release-artifact/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The only job in the protected `release` environment and the only one with
+  # `id-token: write`. It runs no dependency code at all: no checkout, no
+  # install, no `vp`, no cache. It downloads the tarball `build` packed,
+  # checks it, and hands it to npm.
   publish:
     name: Publish to npm
     # Never runs on forks (they have neither the environment nor the trusted
     # publisher binding, so a fork cannot publish on your behalf), and never
     # as Dependabot: the trigger is push-to-trunk only, so a Dependabot branch
     # cannot reach it, and the actor guard keeps it that way if a trigger is
-    # ever added.
-    # That guard is on `select` now: this job needs it, so it is skipped with it.
-    needs: select
-    if: needs.select.outputs.mode == 'publish'
+    # ever added. That guard is on `select`: this job needs it (through
+    # `build`), so it is skipped with it.
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # One publish at a time; never cancel one that has started.
@@ -114,69 +207,54 @@ jobs:
     # Protected environment: publishing waits for a required reviewer.
     environment: release
     permissions:
-      contents: write # push the release tags and create the GitHub releases
+      contents: write # create the release tag and the GitHub release
       id-token: write # OIDC: prove this workflow's identity to npm
     env:
-      # pnpm 11 defaults `verify-deps-before-run` to `install`: before any
-      # `pnpm run` / `pnpm exec` it compares node_modules with the manifests
-      # and, if a manifest looks newer than the last install, re-installs WITH
-      # lifecycle scripts, ignoring the `--ignore-scripts` of the install step
-      # below. That re-install would run the root `prepare` (`vp config` +
-      # `effect-tsgo patch`) and every `allowBuilds` dependency's build script
-      # inside this job, which holds `id-token: write`. It triggers whenever a
-      # manifest's mtime moves after the install step, e.g. when the Changesets
-      # action checks out `changeset-release/trunk` and resets it before
-      # `pnpm run version`. pnpm 11 reads only the `pnpm_config_*` spelling.
-      pnpm_config_verify_deps_before_run: "false"
+      NAME: ${{ needs.build.outputs.name }}
+      VERSION: ${{ needs.build.outputs.version }}
+      TARBALL: ${{ needs.build.outputs.tarball }}
+      SHA256: ${{ needs.build.outputs.sha256 }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download the tarball
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          persist-credentials: false
-          fetch-depth: 0
+          name: release
+          path: release-artifact
 
-      # Vite+ with a pinned Node.js major (the `engines` floor: publish on a
-      # stable Node) and the pnpm that `packageManager` pins. No dependency
-      # cache: the job that holds `id-token: write` never restores what
-      # another run saved (#118).
-      - name: Setup Vite+ (vp, Node.js, pnpm)
-        uses: voidzero-dev/setup-vp@v1.22.0
-        with:
-          node-version: "22"
-          run-install: false
-          registry-url: https://registry.npmjs.org
+      - name: Check the tarball is the one that was built
+        run: echo "$SHA256  release-artifact/$TARBALL" | sha256sum --check --strict
 
-      # --ignore-scripts stops a compromised dependency from running install
-      # scripts in the privileged publish job. It also skips this package's
-      # own `prepare` (git hooks + the tsc/oxlint patch), neither of which the
-      # `vp pack` build needs. It only holds because
-      # `pnpm_config_verify_deps_before_run` is off for this job (see `env`).
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      # npm >= 11.5.1 performs the OIDC exchange for `npm publish` of the
-      # tarball scripts/release.sh packs. Pinned exactly, so this job runs a
-      # reviewed version; bump it by hand.
+      # npm >= 11.5.1 performs the OIDC exchange for `npm publish`. Pinned
+      # exactly, so this job runs a reviewed version (bump it by hand), and
+      # installed without scripts, on the runner image's own Node.js.
       - name: Upgrade npm (OIDC trusted publishing)
-        run: npm install -g npm@11.20.0 # zizmor: ignore[adhoc-packages] pinned exactly; npm itself, not a project dependency
+        run: npm install -g npm@11.20.0 --ignore-scripts # zizmor: ignore[adhoc-packages] pinned exactly; npm itself, not a project dependency
 
-      - name: Build
-        run: pnpm exec vp run build
+      # A tarball spec runs no lifecycle script under `npm publish`. No
+      # `--provenance`: npm attaches it by itself under trusted publishing
+      # once the repository is public, and an explicit request from a private
+      # repository fails the publish. Idempotent: a version already on npm is
+      # skipped, so a re-run after a partial failure carries on to the release.
+      - name: Publish to npm
+        run: |
+          set -euo pipefail
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "skip: $NAME@$VERSION is already published"
+          else
+            npm publish "release-artifact/$TARBALL" --access public
+          fi
 
-      # While changesets are pending this opens/updates the version PR (via
-      # `pnpm run version`). Once that PR has merged it runs `pnpm run
-      # release` (scripts/release.sh): `pnpm pack` (which rewrites
-      # `catalog:peers` to the published range) and `npm publish` of the
-      # tarball, which runs no lifecycle script; then `changeset tag`, whose
-      # "New tag:" lines the action uses to push the tag and create the
-      # GitHub release. No `--provenance`: npm attaches it by itself under
-      # trusted publishing once the repository is public, and an explicit
-      # request from a private repository fails the publish.
-      #
-      # v2 of the action pairs with Changesets CLI v3.
-      - name: Create version PR or publish to npm
-        uses: changesets/action/publish@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
-        with:
-          script: pnpm run release
+      # The tag and the GitHub release, through the API (`gh` is on the
+      # runner): no `changeset tag`, which would be dependency code. The tag
+      # is `v<version>`, as Changesets named them for this single package.
+      - name: Tag and create the GitHub release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "skip: the release v$VERSION already exists"
+          else
+            gh release create "v$VERSION" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file release-artifact/notes.md
+          fi
