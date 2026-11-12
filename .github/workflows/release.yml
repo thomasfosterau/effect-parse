@@ -45,13 +45,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Setup pnpm
-        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      # Vite+ with the Node.js major below and the pnpm that `packageManager`
+      # pins. No dependency cache: this job never restores what another run saved.
+      - name: Setup Vite+ (vp, Node.js, pnpm)
+        uses: voidzero-dev/setup-vp@v1.22.0
         with:
-          node-version: 22.x
-          cache: pnpm
+          node-version: "22"
+          run-install: false
           registry-url: https://registry.npmjs.org
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -78,13 +78,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Setup pnpm
-        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      # Vite+ with the Node.js major below and the pnpm that `packageManager`
+      # pins. No dependency cache: this job never restores what another run saved.
+      - name: Setup Vite+ (vp, Node.js, pnpm)
+        uses: voidzero-dev/setup-vp@v1.22.0
         with:
-          node-version: 22.x
-          cache: pnpm
+          node-version: "22"
+          run-install: false
           registry-url: https://registry.npmjs.org
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -135,18 +135,15 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      # Installs the pnpm version pinned by package.json's `packageManager`.
-      # Must run before setup-node so its pnpm cache can find the store.
-      - name: Setup pnpm
-        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      # Vite+ with a pinned Node.js major (the `engines` floor: publish on a
+      # stable Node) and the pnpm that `packageManager` pins. No dependency
+      # cache: the job that holds `id-token: write` never restores what
+      # another run saved (#118).
+      - name: Setup Vite+ (vp, Node.js, pnpm)
+        uses: voidzero-dev/setup-vp@v1.22.0
         with:
-          # A pinned major (the `engines` floor), never `latest`, which
-          # setup-node resolves to pre-releases too: publish on a stable Node.
-          node-version: 22.x
-          cache: pnpm
+          node-version: "22"
+          run-install: false
           registry-url: https://registry.npmjs.org
 
       # --ignore-scripts stops a compromised dependency from running install

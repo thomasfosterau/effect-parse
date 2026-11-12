@@ -119,9 +119,6 @@ overrides:
   # checkout, so every resolution of the name is the workspace root.
   "@thomasfosterau/effect-parse": "workspace:*"
 nodeLinker: hoisted
-allowBuilds:
-  esbuild: true
-  fallow: true
 peerDependencyRules:
   allowAny:
     - vite
