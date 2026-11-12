@@ -7,6 +7,7 @@
  */
 import { Buffer } from "node:buffer"
 import * as Fs from "node:fs"
+import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 
 // Loaded on first use: these built-ins take milliseconds to load, and most
@@ -31,26 +32,53 @@ const decompressors: ReadonlyArray<readonly [RegExp, string, ReadonlyArray<strin
 ]
 
 /**
- * Decompresses `bytes` if `path` has a compressed file's extension; gzip
- * and brotli in-process, the rest with the command ripgrep uses.
+ * The most a compressed file may expand to: 1 GiB, in-process and through a
+ * spawned decompressor alike. A few kilobytes of gzip expand to gigabytes,
+ * and a searched tree is not always the user's own.
  *
  * @since 0.0.0
  */
-export const decompress = (path: string, bytes: Uint8Array): Result.Result<Uint8Array, string> => {
-  if (/\.(gz|tgz)$/i.test(path)) return Result.succeed(new Uint8Array(zlib().gunzipSync(bytes)))
-  if (/\.br$/i.test(path)) return Result.succeed(new Uint8Array(zlib().brotliDecompressSync(bytes)))
+export const MaxDecompressed = 1 << 30
+
+/**
+ * Decompresses `bytes` if `path` has a compressed file's extension; gzip
+ * and brotli in-process, the rest with the command ripgrep uses. A file
+ * that expands past `limit` bytes, or is not valid compressed data, is a
+ * failure (the caller reports it and skips the file), never an exception
+ * or an unbounded allocation.
+ *
+ * @since 0.0.0
+ */
+export const decompress = (
+  path: string,
+  bytes: Uint8Array,
+  limit: number = MaxDecompressed
+): Result.Result<Uint8Array, string> => {
+  if (/\.(gz|tgz)$/i.test(path)) return inflate("gzip", () => zlib().gunzipSync(bytes, { maxOutputLength: limit }))
+  if (/\.br$/i.test(path)) {
+    return inflate("brotli", () => zlib().brotliDecompressSync(bytes, { maxOutputLength: limit }))
+  }
   const found = decompressors.find(([re]) => re.test(path))
   if (found === undefined) return Result.succeed(bytes)
-  return run(found[1], found[2], bytes)
+  return run(found[1], found[2], bytes, undefined, limit)
 }
+
+/** An in-process decompression: what zlib throws (output over the limit, corrupt data) becomes the failure. */
+const inflate = (format: string, decode: () => Uint8Array): Result.Result<Uint8Array, string> =>
+  Result.try({
+    try: () => new Uint8Array(decode()),
+    catch: (cause) =>
+      `${format}: ${Predicate.hasProperty(cause, "message") && Predicate.isString(cause.message) ? cause.message : String(cause)}`
+  })
 
 const run = (
   command: string,
   args: ReadonlyArray<string>,
   input: Uint8Array,
-  cwd?: string
+  cwd?: string,
+  maxBuffer: number = MaxDecompressed
 ): Result.Result<Uint8Array, string> => {
-  const result = childProcess().spawnSync(command, args, { input, maxBuffer: 1 << 30, cwd })
+  const result = childProcess().spawnSync(command, args, { input, maxBuffer, cwd })
   if (result.error !== undefined) return Result.fail(`${command}: ${result.error.message}`)
   if (result.status !== 0) {
     return Result.fail(`preprocessor command failed: '${command}': ${new TextDecoder().decode(result.stderr).trim()}`)
