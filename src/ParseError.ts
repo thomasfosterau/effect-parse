@@ -79,37 +79,140 @@ export type ErrorKind =
  */
 export const TypeId = "~effect-parse/ParseError" as const
 
+/** What a {@link ParseError} is built from. */
+interface Fields<E> {
+  /** The input that was being parsed. */
+  readonly input: Input
+  /** The offset of the failure in the input. */
+  readonly offset: number
+  /** The kind of parser that failed. */
+  readonly kind: ErrorKind
+  /** How the error propagated before parsing stopped. */
+  readonly mode: ErrMode
+  /** Descriptions of what was expected at `offset`. */
+  readonly expected: ReadonlyArray<string>
+  /** Context labels (`Parser.context`), innermost first. */
+  readonly context: ReadonlyArray<string>
+  /** The user supplied cause, if any. */
+  readonly cause: E | undefined
+  /** An optional free-form description. */
+  readonly description: string | undefined
+  /**
+   * For byte inputs parsed by `Text` parsers, the text encoding. Errors
+   * then show the input as text, with line and column numbers.
+   */
+  readonly encoding?: Encoding<Uint8Array> | undefined
+}
+
+/**
+ * What a {@link ParseError} serialises as (`toJSON`): everything but the
+ * input it was parsing and the encoding it was read in.
+ *
+ * @since 0.6.0
+ * @category models
+ */
+export interface ParseErrorJson<out E = never> {
+  readonly _tag: "ParseError"
+  /** The offset of the failure in the input. */
+  readonly offset: number
+  /** The 1-based line and column of the failure. */
+  readonly position: LineColumn
+  readonly kind: ErrorKind
+  readonly mode: ErrMode
+  readonly expected: ReadonlyArray<string>
+  readonly context: ReadonlyArray<string>
+  readonly cause: E | undefined
+  readonly description: string | undefined
+  /** The rendered message, which shows a bounded window of the input around the failure. */
+  readonly message: string
+}
+
 /**
  * An error produced by running a parser.
+ *
+ * The error keeps the whole input alive for as long as it is retained
+ * (`input`), but does not serialise it: `input` and `encoding` are
+ * accessors, not own properties, `toJSON` (which `JSON.stringify`,
+ * Effect's `Cause` rendering and Node's `inspect` use) leaves them out, and
+ * `message` shows a bounded window around the failure, never a whole line.
  *
  * @since 0.1.0
  * @category models
  */
 export class ParseError<out E = never>
-  extends /*#__PURE__*/ Data.TaggedError("ParseError")<{
-    /** The input that was being parsed. */
-    readonly input: Input
-    /** The offset of the failure in the input. */
-    readonly offset: number
-    /** The kind of parser that failed. */
-    readonly kind: ErrorKind
-    /** How the error propagated before parsing stopped. */
-    readonly mode: ErrMode
-    /** Descriptions of what was expected at `offset`. */
-    readonly expected: ReadonlyArray<string>
-    /** Context labels (`Parser.context`), innermost first. */
-    readonly context: ReadonlyArray<string>
-    /** The user supplied cause, if any. */
-    readonly cause: E | undefined
-    /** An optional free-form description. */
-    readonly description: string | undefined
-    /**
-     * For byte inputs parsed by `Text` parsers, the text encoding. Errors
-     * then show the input as text, with line and column numbers.
-     */
-    readonly encoding?: Encoding<Uint8Array> | undefined
-  }>
+  extends /*#__PURE__*/ Data.TaggedError("ParseError")<Omit<Fields<unknown>, "input" | "encoding">>
 {
+  /** The user supplied cause, if any. */
+  declare readonly cause: E | undefined
+
+  // Private fields, not properties: nothing that walks the error (its own
+  // keys, enumerable or not, or the arguments `Data.TaggedError` keeps for
+  // `toJSON` and structural equality) can reach the input (#117)
+  readonly #input: Input
+  readonly #encoding: Encoding<Uint8Array> | undefined
+  // Both are functions of the fields above, which never change, and both
+  // scan the input up to the failure: computed on first use, then kept
+  #position: LineColumn | undefined
+  #message: string | undefined
+
+  constructor(fields: Fields<E>) {
+    super({
+      offset: fields.offset,
+      kind: fields.kind,
+      mode: fields.mode,
+      expected: fields.expected,
+      context: fields.context,
+      cause: fields.cause,
+      description: fields.description
+    })
+    this.#input = fields.input
+    this.#encoding = fields.encoding
+  }
+
+  /**
+   * The input that was being parsed. The error holds it (for
+   * {@link ParseError.position} and the message) and keeps it alive, but it
+   * is not one of the error's own properties, so `JSON.stringify`, object
+   * spread, `Object.keys`, `toJSON` and loggers do not see it.
+   *
+   * @since 0.1.0
+   */
+  get input(): Input {
+    return this.#input
+  }
+
+  /**
+   * For byte inputs parsed by `Text` parsers, the text encoding. Errors
+   * then show the input as text, with line and column numbers. Like
+   * `input`, it is not an own property.
+   *
+   * @since 0.1.0
+   */
+  get encoding(): Encoding<Uint8Array> | undefined {
+    return this.#encoding
+  }
+
+  /**
+   * The error without its `input` and `encoding`: what `JSON.stringify`,
+   * Effect's `Cause` rendering and Node's `inspect` show.
+   *
+   * @since 0.6.0
+   */
+  override toJSON(): ParseErrorJson<E> {
+    return {
+      _tag: this._tag,
+      offset: this.offset,
+      position: this.position,
+      kind: this.kind,
+      mode: this.mode,
+      expected: this.expected,
+      context: this.context,
+      cause: this.cause,
+      description: this.description,
+      message: this.message
+    }
+  }
+
   /**
    * @since 0.1.0
    */
@@ -122,7 +225,7 @@ export class ParseError<out E = never>
    * @since 0.1.0
    */
   get position(): LineColumn {
-    return lineColumn(this.input, this.offset, this.encoding)
+    return (this.#position ??= lineColumn(this.#input, this.offset, this.#encoding))
   }
 
   /**
@@ -131,7 +234,7 @@ export class ParseError<out E = never>
    * @since 0.1.0
    */
   override get message(): string {
-    return render(this)
+    return (this.#message ??= render(this))
   }
 
   /**
@@ -303,43 +406,94 @@ const causeMessage = (cause: unknown): string | undefined => {
   return inspectToken(cause)
 }
 
-const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | undefined): Array<string> => {
+/**
+ * How many characters of the failing line a message shows on each side of
+ * the failure. A line has no length limit (minified JSON is one line), and
+ * the input's sender chooses its length, so the message shows a window
+ * and marks what it left out with `…`.
+ */
+const SnippetWindow = 60
+
+const Ellipsis = "…"
+
+/** The two lines of a text snippet: the window of the line, and a caret under the failure. */
+const snippetLines = (line: number, window: string, before: number, cutStart: boolean, cutEnd: boolean) => {
+  const gutter = String(line)
+  const pad = " ".repeat(gutter.length)
+  const shown = window.endsWith("\r") && !cutEnd ? window.slice(0, -1) : window
+  return [
+    `${gutter} | ${cutStart ? Ellipsis : ""}${shown}${cutEnd ? Ellipsis : ""}`,
+    `${pad} | ${" ".repeat(before + (cutStart ? 1 : 0))}^`
+  ]
+}
+
+const isHighSurrogate = (c: number): boolean => c >= 0xd800 && c <= 0xdbff
+const isLowSurrogate = (c: number): boolean => c >= 0xdc00 && c <= 0xdfff
+
+const renderSnippet = (
+  input: Input,
+  offset: number,
+  encoding: Encoding<any> | undefined,
+  line: number
+): Array<string> => {
   if (encoding !== undefined && input instanceof Uint8Array) {
-    // Find the line containing `offset`, then decode it
+    // The window is found in one walk: where the last `SnippetWindow`
+    // characters before the failure start (a ring of their offsets), and
+    // where the line or the window ends after it
+    const ring = new Array<number>(SnippetWindow)
+    let before = 0
     let lineStart = 0
+    let after = 0
     let end = input.length
-    let column = 1
+    let cutEnd = false
     text.walk(encoding, input, 0, input.length, (cp, i, w) => {
-      if (i >= offset && cp === 10) {
+      if (i < offset) {
+        if (cp === 10) {
+          before = 0
+          lineStart = i + w
+        } else {
+          ring[before % SnippetWindow] = i
+          before++
+        }
+        return
+      }
+      if (cp === 10) {
         end = i
         return false
       }
-      if (i < offset) {
-        if (cp === 10) {
-          lineStart = i + w
-          column = 1
-        } else {
-          column++
-        }
+      if (after === SnippetWindow) {
+        end = i
+        cutEnd = true
+        return false
       }
+      after++
     })
-    let line = text.lenientText(encoding, input, lineStart, end)
-    if (line.endsWith("\r")) line = line.slice(0, -1)
-    const gutter = String(lineColumn(input, offset, encoding).line)
-    const pad = " ".repeat(gutter.length)
-    return [`${gutter} | ${line}`, `${pad} | ${" ".repeat(column - 1)}^`]
+    const cutStart = before > SnippetWindow
+    const start = cutStart ? ring[before % SnippetWindow] : lineStart
+    const shown = Math.min(before, SnippetWindow)
+    return snippetLines(line, text.lenientText(encoding, input, start, end), shown, cutStart, cutEnd)
   }
   if (Predicate.isString(input)) {
-    const { column, line } = lineColumn(input, offset)
-    let start = offset
-    while (start > 0 && input.charCodeAt(start - 1) !== 10) start--
-    let end = offset
-    while (end < input.length && input.charCodeAt(end) !== 10) end++
-    let text = input.slice(start, end)
-    if (text.endsWith("\r")) text = text.slice(0, -1)
-    const gutter = String(line)
-    const pad = " ".repeat(gutter.length)
-    return [`${gutter} | ${text}`, `${pad} | ${" ".repeat(column - 1)}^`]
+    const at = Math.min(offset, input.length)
+    let start = at
+    let before = 0
+    while (start > 0 && input.charCodeAt(start - 1) !== 10 && before < SnippetWindow) {
+      start--
+      // A surrogate pair is one character of the window, and is never split
+      if (start > 0 && isLowSurrogate(input.charCodeAt(start)) && isHighSurrogate(input.charCodeAt(start - 1))) start--
+      before++
+    }
+    const cutStart = start > 0 && input.charCodeAt(start - 1) !== 10
+    let end = at
+    let after = 0
+    while (end < input.length && input.charCodeAt(end) !== 10 && after < SnippetWindow) {
+      if (isHighSurrogate(input.charCodeAt(end)) && end + 1 < input.length && isLowSurrogate(input.charCodeAt(end + 1)))
+        end++
+      end++
+      after++
+    }
+    const cutEnd = end < input.length && input.charCodeAt(end) !== 10
+    return snippetLines(line, input.slice(start, end), before, cutStart, cutEnd)
   }
   if (input instanceof Uint8Array) {
     const start = Math.max(0, offset - 8)
@@ -356,15 +510,15 @@ const render = (error: ParseError<unknown>): string => {
   const { encoding, input, offset } = error
   const lines: Array<string> = []
   if (Predicate.isString(input)) {
-    const { column, line } = lineColumn(input, offset)
+    const { column, line } = error.position
     lines.push(`Parse error at line ${line}, column ${column}:`)
   } else if (encoding !== undefined) {
-    const { column, line } = lineColumn(input, offset, encoding)
+    const { column, line } = error.position
     lines.push(`Parse error at line ${line}, column ${column} (byte ${offset}):`)
   } else {
     lines.push(`Parse error at offset ${offset}:`)
   }
-  lines.push(...renderSnippet(input, offset, encoding))
+  lines.push(...renderSnippet(input, offset, encoding, error.position.line))
   for (let i = error.context.length - 1; i >= 0; i--) {
     lines.push(`while parsing ${error.context[i]}`)
   }

@@ -265,4 +265,14 @@ it("Syntax examples behave as documented", () => {
   expect(Syntax.reparse(Syntax.parse(n, "12"), "123", [{ start: 2, oldEnd: 2, newEnd: 3 }]).root.value).toBe(123)
   const comma = Syntax.token(Token.literal(","))
   expect(Syntax.parse(comma, ",").root.child(0)?.kind).toBe(",")
+  // "Untrusted streams": a stream over `maxBufferSize` fails with its own tagged error
+  const unterminated = Parser.terminated(Token.takeTill("\n"), Token.literal("\n"))
+  const tooLarge = Stream.make("no newline, ", "ever").pipe(
+    ParserStream.parseMany(unterminated, { maxBufferSize: 8 }),
+    Stream.runCollect,
+    Effect.catchTag("BufferLimitError", (e) => Effect.fail(`payload too large: ${e.size} > ${e.limit} bytes`)),
+    Effect.flip
+  )
+  expect(Effect.runSync(tooLarge)).toBe("payload too large: 12 > 8 bytes")
+  expect(ParserStream.defaultMaxBufferSize).toBe(64 * 1024 * 1024)
 })

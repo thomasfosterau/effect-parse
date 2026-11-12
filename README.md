@@ -321,6 +321,8 @@ while parsing array
 expected value, found ","
 ```
 
+An error is safe to log. It keeps the input (`error.input`, which `position` and `message` read, and which stays alive as long as the error does), but not as one of its own properties, and `toJSON` leaves it out: `JSON.stringify(error)`, Effect's `Cause` rendering and structured loggers write the offset, position, kind, expectations and message, not what was being parsed. The message shows at most 60 characters on each side of the failure (`…` marks the rest), so a failure in a 5 MB line of minified JSON is still a four-line message.
+
 effect-parse tries hard to produce good messages without annotations:
 
 - `alt` merges the expectations of failed branches: `expected "true", "false" or "null"`.
@@ -384,6 +386,21 @@ const value = await Effect.runPromise(ParserStream.parseResponse(await fetch(url
 ```
 
 The result, and any error, is the same as parsing the whole body at once. Compiled parsers stream compiled. With the JSON example on a 2 MB document, `parseResponse` returns about 1 ms after the last byte at 10 MB/s, and keeps pace with `Response.json()` at 25 MB/s; on faster connections the native parser is quicker (`vp run bench:stream`).
+
+### Untrusted streams
+
+Every stream runner bounds what it buffers. `maxBufferSize` (in tokens: UTF-16 code units, bytes or array elements) defaults to 64 MiB (`ParserStream.defaultMaxBufferSize`) on `parseMany`, `parseAll`, `parseReadable` and `parseResponse`; a stream that exceeds it fails with a `ParserStream.BufferLimitError` (`limit`, `size`), a different tagged error from `ParseError`, so "too large" and "malformed" can be answered differently:
+
+```ts
+import { Effect } from "effect"
+import { ParserStream } from "@thomasfosterau/effect-parse"
+
+const body = ParserStream.parseResponse(await fetch(url), json, { maxBufferSize: 8 * 1024 * 1024 }).pipe(
+  Effect.catchTag("BufferLimitError", (e) => Effect.fail(`payload too large: ${e.size} > ${e.limit} bytes`))
+)
+```
+
+`parseMany` counts the input it has not consumed yet (one unfinished value, so a missing delimiter is caught); the other three hold the whole input and count all of it, and `parseResponse` fails before reading the body when `Content-Length` is already over the limit. Pass `Infinity` to turn the limit off for input you trust.
 
 ## Services
 

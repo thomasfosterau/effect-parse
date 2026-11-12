@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`CLAUDE.md` is a symlink to this file. Project conventions live here; personal style preferences live in user memory.
+Project conventions live here, for every coding agent and for people; personal style preferences live in user memory. Claude Code starts from [.claude/CLAUDE.md](.claude/CLAUDE.md), which imports this file and adds only what is specific to Claude Code.
 
 This repo publishes one package, `@thomasfosterau/effect-parse`: parser combinators for Effect, ported from Rust's nom and winnow. It covers text, bytes, bits and token streams, streaming input, compiled parsers (a JIT and a closure compiler), syntax trees with incremental reparsing, and Schema integration. Other libraries depend on its public API (effect-robots in effect-web, effect-wikimedia), so the exported surface changes only on purpose and with a changeset.
 
@@ -78,9 +78,8 @@ Never guess at an Effect API. Read the installed package: `node_modules/effect/d
 
 ## Agent sessions
 
-- The SessionStart hook (`.claude/hooks/session-start.sh`) installs the global Vite+ CLI at the catalog's `vite-plus` pin with the official installer (npm-provenance and SHA-512 checked; it needs `vite.plus` and `viteplus.dev` on the environment's network allowlist), links `vp` and `vpx` into `~/.local/bin` (the CLI lives under `$VP_HOME` when set, as in the Vite+ container image, else `~/.local/share/vite-plus`), and runs `vp install --frozen-lockfile`. The global `vp` delegates to each checkout's own `vite-plus` (worktrees included), and everything else goes through it: `vp exec fallow …` for fallow, `vpx <file>.ts` for a TypeScript script. Nothing else is put on PATH. If the installer can't run, `vp` falls back to this checkout's `node_modules` copy. It hydrates no secrets; none are needed, and nothing here can publish.
-- A PreToolUse hook (`.claude/hooks/fallow-gate.sh`) blocks `git commit` / `git push` when `fallow audit --base origin/trunk` (run as `vp exec fallow`) fails; it audits only this checkout and its `.claude/worktrees/*`, skipping any other tree with a notice, and regenerates the coverage map (`vp run test:coverage`, cached when nothing changed) when it is missing or older than `src/`, `test/` or the test config, blocking the commit if that run fails. A PostToolUse hook runs `vp fmt` on every source, JSON, CSS or Markdown file you write or edit.
-- Every gate in [Verification](#verification) runs in an agent session; `pnpm audit` needs the network.
+- Every gate in [Verification](#verification) runs in an agent session; `pnpm audit` needs the network. Everything goes through `vp`: `vp exec fallow …` for fallow, `vpx <file>.ts` for a TypeScript script.
+- Session provisioning and the commit gate for Claude Code (the hooks under `.claude/hooks/`) are described in [.claude/CLAUDE.md](.claude/CLAUDE.md), which imports this file.
 
 ## Documentation surfaces
 
