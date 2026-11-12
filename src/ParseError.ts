@@ -150,6 +150,10 @@ export class ParseError<out E = never>
   // `toJSON` and structural equality) can reach the input (#117)
   readonly #input: Input
   readonly #encoding: Encoding<Uint8Array> | undefined
+  // Both are functions of the fields above, which never change, and both
+  // scan the input up to the failure: computed on first use, then kept
+  #position: LineColumn | undefined
+  #message: string | undefined
 
   constructor(fields: Fields<E>) {
     super({
@@ -221,7 +225,7 @@ export class ParseError<out E = never>
    * @since 0.1.0
    */
   get position(): LineColumn {
-    return lineColumn(this.input, this.offset, this.encoding)
+    return (this.#position ??= lineColumn(this.#input, this.offset, this.#encoding))
   }
 
   /**
@@ -230,7 +234,7 @@ export class ParseError<out E = never>
    * @since 0.1.0
    */
   override get message(): string {
-    return render(this)
+    return (this.#message ??= render(this))
   }
 
   /**
@@ -426,13 +430,17 @@ const snippetLines = (line: number, window: string, before: number, cutStart: bo
 const isHighSurrogate = (c: number): boolean => c >= 0xd800 && c <= 0xdbff
 const isLowSurrogate = (c: number): boolean => c >= 0xdc00 && c <= 0xdfff
 
-const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | undefined): Array<string> => {
+const renderSnippet = (
+  input: Input,
+  offset: number,
+  encoding: Encoding<any> | undefined,
+  line: number
+): Array<string> => {
   if (encoding !== undefined && input instanceof Uint8Array) {
-    // The window is found in one walk: the line number, where the last
-    // `SnippetWindow` characters before the failure start (a ring of their
-    // offsets), and where the line or the window ends after it
+    // The window is found in one walk: where the last `SnippetWindow`
+    // characters before the failure start (a ring of their offsets), and
+    // where the line or the window ends after it
     const ring = new Array<number>(SnippetWindow)
-    let line = 1
     let before = 0
     let lineStart = 0
     let after = 0
@@ -441,7 +449,6 @@ const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | u
     text.walk(encoding, input, 0, input.length, (cp, i, w) => {
       if (i < offset) {
         if (cp === 10) {
-          line++
           before = 0
           lineStart = i + w
         } else {
@@ -467,7 +474,6 @@ const renderSnippet = (input: Input, offset: number, encoding: Encoding<any> | u
     return snippetLines(line, text.lenientText(encoding, input, start, end), shown, cutStart, cutEnd)
   }
   if (Predicate.isString(input)) {
-    const { line } = lineColumn(input, offset)
     const at = Math.min(offset, input.length)
     let start = at
     let before = 0
@@ -504,15 +510,15 @@ const render = (error: ParseError<unknown>): string => {
   const { encoding, input, offset } = error
   const lines: Array<string> = []
   if (Predicate.isString(input)) {
-    const { column, line } = lineColumn(input, offset)
+    const { column, line } = error.position
     lines.push(`Parse error at line ${line}, column ${column}:`)
   } else if (encoding !== undefined) {
-    const { column, line } = lineColumn(input, offset, encoding)
+    const { column, line } = error.position
     lines.push(`Parse error at line ${line}, column ${column} (byte ${offset}):`)
   } else {
     lines.push(`Parse error at offset ${offset}:`)
   }
-  lines.push(...renderSnippet(input, offset, encoding))
+  lines.push(...renderSnippet(input, offset, encoding, error.position.line))
   for (let i = error.context.length - 1; i >= 0; i--) {
     lines.push(`while parsing ${error.context[i]}`)
   }
