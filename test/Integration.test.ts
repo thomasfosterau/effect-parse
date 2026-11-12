@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -5,7 +6,7 @@ import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { describe, expect, it } from "vite-plus/test"
+import { assert, describe, expect, it } from "vite-plus/test"
 import { Ascii, Binary, Expression, Nom, Parser, ParserSchema, ParserStream, Token } from "../src/index.js"
 import { eagerExpression } from "./eager.js"
 import { allStrings } from "./generators.js"
@@ -177,7 +178,7 @@ describe("ParserStream", () => {
     const exit = Effect.runSyncExit(program)
     expect(Exit.isFailure(exit)).toBe(true)
     const error = Effect.runSync(Effect.flip(program))
-    expect(error._tag).toBe("ParseError")
+    assert(Predicate.isTagged(error, "ParseError"))
     expect(error.expected).toContain("digit")
   })
 
@@ -193,6 +194,7 @@ describe("ParserStream", () => {
   it("parseMany requires progress", () => {
     const program = Stream.make("abc").pipe(ParserStream.parseMany(Parser.succeed(1)), Stream.runCollect)
     const error = Effect.runSync(Effect.flip(program))
+    assert(Predicate.isTagged(error, "ParseError"))
     expect(error.kind).toBe("Assert")
   })
 
