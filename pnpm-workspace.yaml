@@ -43,7 +43,7 @@ catalog:
   # on any other component version, failing `pnpm install` itself. Read the
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
   # before bumping any of the three.
-  "@effect/tsgo": 0.63.0
+  "@effect/tsgo": 0.67.7
   # The libraries built on this package, for the downstream benchmarks only
   # (`bench/downstream.bench.ts`, `bench/zero-copy.bench.ts`, and the
   # `examples/json-tape.ts` they time): never a runtime dependency. Each is
@@ -89,7 +89,7 @@ catalog:
   # forces every resolution to the catalog singleton. Dependabot moves
   # neither (see .github/dependabot.yml): after bumping vite-plus, run
   # `node scripts/check-toolchain.mjs --fix`, which CI's lockstep step checks.
-  vite-plus: 1.4.0
+  vite-plus: 1.6.0
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
   vitest: 5.0.5
 
