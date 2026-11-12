@@ -1,11 +1,13 @@
+import * as Arr from "effect/Array"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Record from "effect/Record"
 
 import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
-import { describe, expect, it } from "vite-plus/test"
-import { Ascii, Binary, Input, Parser, ParseError, ParserStream, Text, Token } from "../src/index.js"
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test"
+import { Ascii, Binary, Compiler, Input, Parser, ParseError, ParserStream, Text, Token } from "../src/index.js"
 
 const encode = (s: string) => new TextEncoder().encode(s)
 
@@ -188,5 +190,74 @@ describe("State.reset", () => {
         Result.succeed([input.slice(state.pos), expected])
       )
     })
+  })
+})
+
+describe("State.reset keeps what the state learnt about its input (#126)", () => {
+  const text = () => Parser.terminated(Token.takeTill("<&", { min: 1 }), Token.literal("<"))
+  /** The tokens of `input`, one run per token, on one state reset before each or on a new state each time. */
+  const lex = (p: Parser.Parser<string>, input: string, reuse: boolean) => {
+    const state = new Input.State(input)
+    return Arr.unfold(0, (pos) => {
+      if (pos >= input.length) return Option.none()
+      const s = reuse ? state.reset(pos) : new Input.State(input, { offset: pos })
+      const a = Parser.run(p, s)
+      return a === Input.Fail ? Option.none() : Option.some([a, s.pos] as const)
+    })
+  }
+  const line = `${"ordinary text, long enough that the compiled takeTill searches with indexOf".padEnd(90, ".")}<`
+
+  it("searches for a stop character that never occurs once, not once per token", () => {
+    const input = line.repeat(2000)
+    const compiled = Compiler.jit(text())
+    // Warm: compiled, and the expected tokens known
+    const expected = lex(compiled, input, false)
+    expect(expected).toHaveLength(2000)
+    const indexOf = vi.spyOn(String.prototype, "indexOf")
+    onTestFinished(() => indexOf.mockRestore())
+    const before = indexOf.mock.calls.length
+    const tokens = lex(compiled, input, true)
+    const searches = indexOf.mock.calls.length - before
+    indexOf.mockRestore()
+    expect(tokens).toEqual(expected)
+    // One search per `<` found, and one for `&`: it was two per token, each `&` search running to the end
+    expect(searches).toBeLessThanOrEqual(2010)
+    expect(searches).toBeGreaterThanOrEqual(2000)
+  })
+
+  it.each(["closure", "jit", "wasm"] as const)("gives the tokens of a new state per run (%s)", (backend) => {
+    const inputs = [
+      line.repeat(50),
+      `${line.repeat(3)}a &amp; b long enough to search past the head of the run.....<${line.repeat(3)}`,
+      `${"x".repeat(40)}<${"y".repeat(40)}&${"z".repeat(40)}<tail without an end`,
+      `&${line}`,
+      ""
+    ]
+    const compiled = Compiler[backend](text())
+    inputs.forEach((input) => {
+      expect(lex(compiled, input, true), input.slice(0, 30)).toEqual(lex(text(), input, false))
+      // Backwards too: a memo from a later offset must not answer for an earlier one
+      const state = new Input.State(input)
+      const offsets = Array.from({ length: Math.min(input.length, 300) }, (_, i) => (i * 7919) % (input.length || 1))
+      offsets.forEach((offset) => {
+        const a = Parser.run(compiled, state.reset(offset))
+        const fresh = new Input.State(input, { offset })
+        expect([a, state.pos], `offset ${offset}`).toEqual([Parser.run(text(), fresh), fresh.pos])
+      })
+    })
+  })
+
+  it("still resets everything that belongs to a run", () => {
+    const state = new Input.State("abc<", { partial: true })
+    expect(Parser.run(Compiler.jit(text()), state)).toBe("abc")
+    state.reset(1)
+    expect([state.pos, state.end, state.partial, state.mode, state.resume, state.encoding]).toEqual([
+      1,
+      4,
+      false,
+      "Backtrack",
+      undefined,
+      undefined
+    ])
   })
 })

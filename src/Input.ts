@@ -316,8 +316,8 @@ export class State<I extends Input = Input> {
   /**
    * Where the stop characters of compiled `takeTill`s next occur in this
    * state's input, by search site; created on first use. It lives as long
-   * as the state (whose input never changes), and `reset` clears it with
-   * the other per-run fields.
+   * as the state (whose input never changes), across `reset`s too: the
+   * positions are absolute, so they hold wherever the next run starts.
    *
    * @internal
    */
@@ -395,7 +395,9 @@ export class State<I extends Input = Input> {
    *
    * Every per-run field is reset: the cursor and end, the latest failure,
    * hints and furthest failure, recorded recoveries, the tracer and tracing
-   * depth, the recorded encoding and streaming checkpoints. Like the
+   * depth, the recorded encoding and streaming checkpoints. What the state
+   * has learnt about its input (where the stop characters of `takeTill`
+   * searches occur) is kept, as it does not depend on the run. Like the
    * constructor, `partial` defaults to `false` and `context` to the empty
    * context, so pass them again on every reset.
    *
@@ -440,7 +442,10 @@ export class State<I extends Input = Input> {
     this.depth = 0
     this.encoding = undefined
     this.resume = undefined
-    this.searches = undefined
+    // `searches` is kept: it remembers where stop characters occur in
+    // `input` by absolute position, and a state's input never changes, so it
+    // holds at any offset. A lexer that resets before each token otherwise
+    // searched to the end of the buffer again for every token (#126)
     this.asciiRun = undefined
     return this
   }
