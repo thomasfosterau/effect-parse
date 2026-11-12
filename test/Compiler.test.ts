@@ -41,6 +41,7 @@ import { State } from "../src/Input.js"
 import { Fail } from "../src/Input.js"
 import { FirstSets } from "../src/internal/compiler/first.js"
 import * as Registry from "../src/internal/compiler/registry.js"
+import * as Wasm from "../src/internal/compiler/wasm.js"
 import { allStrings, mutations, randomJson, rng } from "./generators.js"
 import { defined, expectFailure, runOfAs } from "./utils.js"
 
@@ -2251,6 +2252,52 @@ describe("hostile counts and bounds (#114, #121)", () => {
   })
 })
 
+describe("generated code stays proportional to the grammar (#122)", () => {
+  const leaf: Parser.Parser.Any = Parser.map(a, (x) => x)
+  /** `p` used twice by its parent, `levels` times over: 2^levels uses of the innermost parser. */
+  const doubled = (levels: number): Parser.Parser.Any =>
+    Arr.reduce(Arr.range(1, levels), leaf, (p): Parser.Parser.Any => Parser.seq(p, p))
+
+  it.each(["jit", "wasm"] as const)("a parser used twice by one parent is generated once (%s)", (backend) => {
+    const p = doubled(20)
+    const compiled = Compiler[backend](p)
+    const started = performance.now()
+    // The first parse compiles: it took 22 s and 160 MB of source on the JIT, and ran wasm out of memory
+    expect(Result.isFailure(runners.parse(compiled, "b"))).toBe(true)
+    expect(performance.now() - started).toBeLessThan(2000)
+    const built = defined(Registry.compiled(compiled, 0))
+    expect(built.backend).toBe(backend)
+    expect(defined(built.source).length).toBeLessThan(100_000)
+    expect(outcome(runners.parse(compiled, "b"))).toEqual(outcome(runners.parse(p, "b")))
+  })
+
+  it("agrees with the interpreter on a doubled grammar, on every backend", () => {
+    const p = doubled(4)
+    ;["a".repeat(16), "a".repeat(15), `${"a".repeat(16)}a`, `${"a".repeat(7)}b`, ""].forEach((input) => same(p, input))
+  })
+
+  it("gives up generating code for a grammar of a hundred thousand distinct parsers", () => {
+    /** A tree of distinct parsers: nothing is shared, so nothing can be made a rule. */
+    const tree = (levels: number): Parser.Parser.Any =>
+      levels === 0 ? Parser.map(Token.literal("a"), (x) => x) : Parser.seq(tree(levels - 1), tree(levels - 1))
+    const p = tree(16)
+    const input = "a".repeat(2 ** 16)
+    const expected = runners.parse(p, input)
+    expect(Result.isSuccess(expected)).toBe(true)
+    ;(["jit", "wasm"] as const).forEach((backend) => {
+      const compiled = Compiler[backend](p)
+      const started = performance.now()
+      expect(Result.isSuccess(runners.parse(compiled, input)), backend).toBe(true)
+      expect(performance.now() - started, backend).toBeLessThan(10_000)
+      const built = defined(Registry.compiled(compiled, 0))
+      // The closure compiler takes over, and says why
+      expect(built.backend, backend).toBe("closure")
+      expect(String(built.jitError), backend).toContain("too large to generate code for")
+    })
+    expect(Result.isSuccess(runners.parse(Compiler.closure(p), input))).toBe(true)
+  })
+})
+
 describe("the WebAssembly compiler", () => {
   /** A JSON document of `n` records, pretty-printed. */
   const records = (n: number) =>
@@ -2268,6 +2315,217 @@ describe("the WebAssembly compiler", () => {
     const doc = records(40000)
     sameAsInterpreted(JsonFast.json, doc)
     sameAsInterpreted(JsonFast.jsonGrammar(Text.utf8), new TextEncoder().encode(doc))
+  })
+
+  describe("limits (#123)", () => {
+    /** Watches `WebAssembly.Memory.grow`; once `refuse` is called, it throws as an engine out of memory does. */
+    const watchGrowth = () => {
+      const spy = vi.spyOn(WebAssembly.Memory.prototype, "grow")
+      onTestFinished(() => spy.mockRestore())
+      const refuse = () =>
+        spy.mockImplementation(() => {
+          throw new RangeError("WebAssembly.Memory.grow(): Unable to grow instance memory")
+        })
+      return { calls: () => spy.mock.calls.length, refuse }
+    }
+
+    it("parses on the JIT when the memory cannot grow to hold the input", () => {
+      const { calls, refuse } = watchGrowth()
+      refuse()
+      const zeros = Compiler.wasm(Token.takeWhile<Uint8Array>([0]))
+      const bytes = new Uint8Array(1 << 20)
+      // Used to throw `RangeError: WebAssembly.Memory.grow()` out of `Parser.parse`
+      expect(Parser.parse(zeros, bytes)).toEqual(Result.succeed(bytes))
+      const letters = Compiler.wasm(Parser.repeat(Token.oneOf("ab")))
+      const text = "ab".repeat(200_000)
+      expect(Parser.parse(letters, text)).toEqual(Parser.parse(Parser.repeat(Token.oneOf("ab")), text))
+      expect(Result.isFailure(Parser.parse(letters, `${text}!`))).toBe(true)
+      expect(calls()).toBeGreaterThan(0)
+      // The parser is still the WebAssembly build: only that parse left it
+      expect(Registry.compiled(letters, 0)?.backend).toBe("wasm")
+    })
+
+    it("starts again on the JIT when the trace cannot grow mid-parse", () => {
+      // The growth that holds the input goes through; the first token then turns the engine "out of
+      // memory", so the trace's own growth, part-way through the scan, is refused
+      const { calls, refuse } = watchGrowth()
+      const rest = Parser.repeat(Token.oneOf<Uint8Array>([97, 98]))
+      // A `filter` callback runs during the scan, when its token has been read
+      const first = Parser.filter(Token.oneOf<Uint8Array>([97]), () => {
+        refuse()
+        return true
+      })
+      const compiled = Compiler.wasm(Parser.preceded(first, rest))
+      const bytes = new TextEncoder().encode("ab".repeat(300_000))
+      const expected = Parser.parse(Parser.preceded(Token.oneOf<Uint8Array>([97]), rest), bytes)
+      expect(Result.isSuccess(expected)).toBe(true)
+      expect(Parser.parse(compiled, bytes)).toEqual(expected)
+      expect(calls()).toBeGreaterThanOrEqual(2)
+      expect(Parser.parse(compiled, bytes.subarray(0, 5))).toEqual(Result.succeed([98, 97, 98, 97]))
+      expect(Registry.compiled(compiled, 1)?.backend).toBe("wasm")
+    })
+
+    it("gives back the memory of a large parse", () => {
+      const created = vi.spyOn(WebAssembly, "Memory")
+      onTestFinished(() => created.mockRestore())
+      const zeros = Compiler.wasm(Token.takeWhile<Uint8Array>([0]))
+      expect(Parser.parse(zeros, new Uint8Array(1024))).toEqual(Result.succeed(new Uint8Array(1024)))
+      const before = created.mock.calls.length
+      // 28 MB of input reserves five times as much: past the 128 MiB above which a memory is replaced
+      const large = new Uint8Array(28 * 1024 * 1024)
+      const parsed = Parser.parse(zeros, large)
+      expect(Result.isSuccess(parsed) && parsed.success.length).toBe(large.length)
+      expect(created.mock.calls.length).toBe(before + 1)
+      // The new instance has its tables and parses as the old one did
+      expect(Parser.parse(zeros, new Uint8Array([0, 0, 1]))).toEqual(
+        Parser.parse(Token.takeWhile<Uint8Array>([0]), new Uint8Array([0, 0, 1]))
+      )
+      expect(created.mock.calls.length).toBe(before + 1)
+      expect(Registry.compiled(zeros, 1)?.backend).toBe("wasm")
+    })
+
+    describe("at the memory cap", () => {
+      const Page = 65536
+      /** Lowers the cap for one test: the real one is 2 GiB. */
+      const cap = (bytes: number) => {
+        const real = Wasm.limits.maxMemory
+        Wasm.limits.maxMemory = bytes
+        onTestFinished(() => {
+          Wasm.limits.maxMemory = real
+        })
+      }
+
+      it("pagesToGrow never asks for more than the cap, and does not wrap at 2 GiB", () => {
+        const max = 2 ** 31
+        expect(Wasm.pagesToGrow(2 * Page, 2 * Page, max)).toBe(0)
+        expect(Wasm.pagesToGrow(2 * Page, Page, max)).toBe(0)
+        // Doubling, when that is more than was asked for
+        expect(Wasm.pagesToGrow(4 * Page, 4 * Page + 1, max)).toBe(4)
+        expect(Wasm.pagesToGrow(4 * Page, 20 * Page, max)).toBe(16)
+        // One byte under the cap, at it, and one over
+        expect(Wasm.pagesToGrow(2 * Page, max - 1, max)).toBe(max / Page - 2)
+        expect(Wasm.pagesToGrow(2 * Page, max, max)).toBe(max / Page - 2)
+        expect(Wasm.pagesToGrow(2 * Page, max + 1, max)).toBe(-1)
+        // Doubling is clamped to the cap; a full memory cannot grow
+        expect(Wasm.pagesToGrow(2 ** 30 + Page, 2 ** 30 + 2 * Page, max)).toBe((2 ** 30 - Page) / Page)
+        expect(Wasm.pagesToGrow(max, max, max)).toBe(0)
+        expect(Wasm.pagesToGrow(max, max + Page, max)).toBe(-1)
+        expect(Wasm.pagesToGrow(2 * Page, 2 ** 32 + 5, max)).toBe(-1)
+        expect(Wasm.pagesToGrow(2 * Page, 2 ** 40, max)).toBe(-1)
+      })
+
+      it("layout places the trace after the input without wrapping near 2^31 bytes", () => {
+        // As the bitwise form did for small inputs: after the input, aligned to 16
+        expect(Wasm.layout(10, 1).traceStart).toBe((131072 + 10 + 15) & -16)
+        expect(Wasm.layout(16, 1).traceStart).toBe(131072 + 16)
+        expect(Wasm.layout(10, 0).traceStart).toBe((131072 + 20 + 15) & -16)
+        // `(Input + bytes + 15) & -16` is negative from here on, and a negative reservation "fits"
+        ;[2 ** 31 - 131072 - 16, 2 ** 31 - 1, 2 ** 31, 2 ** 31 + 1, 2 ** 32].forEach((units) => {
+          const bytes = Wasm.layout(units, 1)
+          expect(bytes.traceStart, String(units)).toBeGreaterThanOrEqual(131072 + units)
+          expect(bytes.traceStart % 16, String(units)).toBe(0)
+          expect(bytes.reserve, String(units)).toBeGreaterThan(2 ** 31)
+          expect(Wasm.pagesToGrow(2 * Page, bytes.reserve, 2 ** 31), String(units)).toBe(-1)
+        })
+        // A string takes two bytes a unit: 2^30 units are 2^31 bytes
+        expect(Wasm.layout(2 ** 30, 0).traceStart).toBeGreaterThanOrEqual(131072 + 2 ** 31)
+        expect(Wasm.layout(2 ** 30, 0).reserve).toBeGreaterThan(2 ** 31)
+      })
+
+      it.each([
+        ["one step under the cap", 183_472, true],
+        ["the largest input whose reservation fits the cap", 183_488, true],
+        ["one step over the cap", 183_504, false]
+      ] as const)("an input of %s runs on WebAssembly exactly when its reservation fits", (_, length, fits) => {
+        // 16 pages: a parse of n bytes reserves 131 072 + 5n (in steps of 16 bytes of input)
+        cap(16 * Page)
+        expect(Wasm.layout(length, 1).reserve <= 16 * Page).toBe(fits)
+        const grow = vi.spyOn(WebAssembly.Memory.prototype, "grow")
+        onTestFinished(() => grow.mockRestore())
+        const zeros = Compiler.wasm(Token.takeWhile<Uint8Array>([0]))
+        const bytes = new Uint8Array(length)
+        expect(Parser.parse(zeros, bytes)).toEqual(Result.succeed(bytes))
+        // Over the cap the memory is never asked to grow: the JIT parses the input in place
+        expect(Arr.isReadonlyArrayNonEmpty(grow.mock.calls)).toBe(fits)
+        expect(Registry.compiled(zeros, 1)?.backend).toBe("wasm")
+      })
+
+      it("a trace that reaches the cap mid-scan hands the parse to the JIT, with the interpreter's result", () => {
+        // 48 pages hold the reservation of 600 000 bytes (3 131 072) and nothing more: the trace cannot grow
+        cap(48 * Page)
+        const grow = vi.spyOn(WebAssembly.Memory.prototype, "grow")
+        onTestFinished(() => grow.mockRestore())
+        const semicolon = new Uint8Array([59])
+        const make = () =>
+          Parser.terminated(Parser.repeat(Token.oneOf<Uint8Array>([97, 98]), { min: 1 }), Token.literal(semicolon))
+        const compiled = Compiler.wasm(make())
+        const good = new TextEncoder().encode(`${"ab".repeat(300_000)};`)
+        expect(outcome(Parser.parse(compiled, good))).toEqual(outcome(Parser.parse(make(), good)))
+        // One growth, for the input; the trace's is refused without asking the engine
+        expect(grow.mock.calls).toHaveLength(1)
+        // A failing parse reports what the interpreter does: the same offset, expectations and message
+        const bad = new TextEncoder().encode(`${"ab".repeat(300_000)}!`)
+        const failed = outcome(Parser.parse(compiled, bad))
+        expect(failed).toEqual(outcome(Parser.parse(make(), bad)))
+        expect(failed).toMatchObject({ ok: false, error: { offset: 600_000 } })
+        const peeked = outcome(Parser.parsePeek(compiled, bad))
+        expect(peeked).toEqual(outcome(Parser.parsePeek(make(), bad)))
+        // A state the caller owns is left as the interpreter leaves it
+        const mine = new State(bad)
+        const theirs = new State(bad)
+        expect(Parser.run(compiled, mine)).toBe(Parser.run(make(), theirs))
+        expect([mine.pos, mine.mode, mine.hintOffset, mine.hintExpected]).toEqual([
+          theirs.pos,
+          theirs.mode,
+          theirs.hintOffset,
+          theirs.hintExpected
+        ])
+        expect(Registry.compiled(compiled, 1)?.backend).toBe("wasm")
+      })
+
+      it("an input too large to reserve fails as the interpreter does, through the JIT", () => {
+        cap(4 * Page)
+        const semicolon = new Uint8Array([59])
+        const make = () =>
+          Parser.terminated(Token.takeWhile<Uint8Array>([97, 98], { min: 1 }), Token.literal(semicolon))
+        const compiled = Compiler.wasm(make())
+        const bad = new TextEncoder().encode(`${"ab".repeat(100_000)}!`)
+        expect(outcome(Parser.parse(compiled, bad))).toEqual(outcome(Parser.parse(make(), bad)))
+        expect(outcome(Parser.parse(compiled, bad.subarray(0, 200_000)))).toEqual(
+          outcome(Parser.parse(make(), bad.subarray(0, 200_000)))
+        )
+      })
+    })
+
+    const huge: ReadonlyArray<[name: string, p: Parser.Parser.Any]> = [
+      ["repeat(a, { min: 2 ** 32 })", Parser.repeat(a, { min: 2 ** 32 })],
+      ["repeat(a, { max: 2 ** 32 })", Parser.repeat(a, { max: 2 ** 32 })],
+      ["repeat(a, { min: 1, max: 2 ** 32 + 1 })", Parser.repeat(a, { min: 1, max: 2 ** 32 + 1 })],
+      ["repeat(a, { max: 2 ** 31 })", Parser.repeat(a, { max: 2 ** 31 })],
+      ["repeat(a, { min: 2 ** 31 })", Parser.repeat(a, { min: 2 ** 31 })],
+      ["separated(a, ',', { min: 2 ** 32 })", Parser.separated(a, Token.literal(","), { min: 2 ** 32 })],
+      ["separated(a, ',', { max: 2 ** 32 })", Parser.separated(a, Token.literal(","), { max: 2 ** 32 })],
+      [
+        "fold(a, { max: 2 ** 40 })",
+        Parser.fold(a, { range: { max: 2 ** 40 }, init: () => 0, f: (n: number) => n + 1 })
+      ],
+      ["takeWhile(a, { min: 2 ** 32 })", Token.takeWhile("a", { min: 2 ** 32 })],
+      ["takeWhile(a, { max: 2 ** 32 })", Token.takeWhile("a", { max: 2 ** 32 })],
+      ["takeWhile(a, { min: 2, max: 2 ** 32 + 2 })", Token.takeWhile("a", { min: 2, max: 2 ** 32 + 2 })],
+      ["Text.string.takeWhile(a, { max: 2 ** 32 })", Text.string.takeWhile("a", { max: 2 ** 32 })],
+      ["repeat(a, { max: 2 ** 32 - 1 })", Parser.repeat(a, { max: 2 ** 32 - 1 })],
+      ["repeat(a, { max: 2 ** 32 - 2 })", Parser.repeat(a, { max: 2 ** 32 - 2 })],
+      ["repeat(a, { min: 2 ** 32 - 1 })", Parser.repeat(a, { min: 2 ** 32 - 1 })],
+      ["repeat(a, { min: 2 ** 32 - 2 })", Parser.repeat(a, { min: 2 ** 32 - 2 })],
+      ["repeat(a, { min: 2, max: 2 ** 32 - 1 })", Parser.repeat(a, { min: 2, max: 2 ** 32 - 1 })],
+      ["takeWhile(a, { max: 2 ** 32 - 1 })", Token.takeWhile("a", { max: 2 ** 32 - 1 })],
+      ["takeWhile(a, { min: 2 ** 32 - 2 })", Token.takeWhile("a", { min: 2 ** 32 - 2 })],
+      ["takeWhile(a, { min: 1, max: 2 ** 32 - 2 })", Token.takeWhile("a", { min: 1, max: 2 ** 32 - 2 })]
+    ]
+
+    it.each(huge)("%s: a bound past 32 bits is not truncated", (_, p) => {
+      ;["", "a", "aa", "aaa", "a,a", "a,a,a", "aab"].forEach((input) => same(p, input))
+    })
   })
 
   it("parses again after a callback threw", () => {
