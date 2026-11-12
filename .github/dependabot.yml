@@ -51,8 +51,8 @@
 #
 # The `github-actions` entry also scans the local composite action under
 # .github/actions/, whose `uses:` pins it would otherwise never see. Every
-# action is pinned to a full commit SHA with a `# vX.Y.Z` comment, which
-# Dependabot keeps current.
+# action is referenced by an exact `@vX.Y.Z` tag and locked to its commit in
+# .github/workflows/actions.lock; Dependabot keeps the tags current.
 version: 2
 updates:
   - package-ecosystem: "npm"

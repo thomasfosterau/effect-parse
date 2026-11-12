@@ -7,7 +7,3 @@ rules:
   dependabot-cooldown:
     config:
       days: 1
-  # `./.github/actions/setup` is the documented local-action form; the `$/`
-  # spelling zizmor suggests is not yet something the owner's other repos use.
-  self-repository:
-    disable: true
