@@ -58,7 +58,7 @@ Before you report work as done, run the gates below in order and quote each comm
 8. `pnpm audit --audit-level high` (network)
 9. `vp run test:coverage`, then `vp exec fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` (the fallow gate below; not a CI step).
 
-Steps 2–8 are the `ci` task (`vp run ci` runs them in this order and stops at the first failure), which is the only command CI runs: [ci.yml](.github/workflows/ci.yml) runs it on the Node.js LTS and Current lines (`ci (node lts)`, `ci (node latest)`), and the required check `ci` passes when both did. A change to a hot path also reports `vp run bench`, `vp run bench:downstream` (and the benchmark for the area touched) before and after. `CONTRIBUTING.md` and the PR template link here rather than restating the list.
+Steps 2–8 are the `ci` task (`vp run ci` runs them in this order and stops at the first failure), which is the only command CI runs: [ci.yml](.github/workflows/ci.yml) runs it on the Node.js LTS and Current lines (the required checks `ci (node lts)` and `ci (node latest)`). A change to a hot path also reports `vp run bench`, `vp run bench:downstream` (and the benchmark for the area touched) before and after. `CONTRIBUTING.md` and the PR template link here rather than restating the list.
 
 ## Branches and pull requests
 

@@ -24,4 +24,4 @@ Never version or publish by hand.
 2. **Allow Actions to open the version PR.** **Settings → Actions → General → Workflow permissions** → enable **Allow GitHub Actions to create and approve pull requests**.
 3. **The `release` environment.** **Settings → Environments → `release`**: a **required reviewer** (yourself), deployments restricted to `trunk`.
 4. **The trusted publisher.** On npmjs.com, the package → **Settings → Trusted publishing** → **GitHub Actions**: organization or user `thomasfosterau`, repository `effect-parse`, workflow filename `release.yml`, environment `release`. Under **Publishing access**, choose **Require two-factor authentication and disallow tokens**.
-5. **Protect `trunk`.** Require pull requests and the `CI` check before merging, so a release can only come from merging the reviewed version PR.
+5. **Protect `trunk`.** Require pull requests and the `ci (node lts)` and `ci (node latest)` checks before merging, so a release can only come from merging the reviewed version PR.
