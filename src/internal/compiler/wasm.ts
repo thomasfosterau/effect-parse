@@ -1305,7 +1305,7 @@ class WasmCompiler {
           b,
           (bad) => {
             elementCode = element(b, bad, bf)
-            if (max === Infinity) this.progress(b, fail, saved[0])
+            this.progress(b, fail, saved[0])
             this.nextElement(b, n, again)
           },
           () => this.stop(b, fail, n, min, () => this.restore(b, saved), done)
@@ -1373,7 +1373,7 @@ class WasmCompiler {
           (bad) => this.gen(node.separator, "", b, bad, bf, d),
           () => this.stop(b, fail, n, min, back, done)
         )
-        if (max === Infinity) this.progress(b, fail, st)
+        this.progress(b, fail, st)
         this.attempt(
           b,
           (bad) => {

@@ -97,6 +97,8 @@ updates:
         exclude-patterns:
           - "@effect/tsgo"
         update-types: ["major", "minor", "patch"]
+    assignees:
+      - thomasfosterau
   - package-ecosystem: "github-actions"
     directories:
       - "/"
