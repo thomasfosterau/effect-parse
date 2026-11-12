@@ -99,6 +99,31 @@ report(`lexer, ${source.length / 1000} K characters, one token per run`, {
 })
 
 // -----------------------------------------------------------------------------
+// A lexer whose stop character never occurs (#126)
+// -----------------------------------------------------------------------------
+
+// Text tokens of an XML-like lexer: each run of text ends at `<` or `&`, and
+// ordinary text has no `&`. The search for it runs to the end of the buffer;
+// remembered across `State.reset`, it runs once, not once per token.
+const textToken = Compiler.jit(Parser.terminated(Token.takeTill("<&", { min: 1 }), Token.literal("<")))
+const markup = `${"some ordinary text, long enough to be searched for with indexOf".padEnd(79, ".")}<`.repeat(50_000)
+const markupState = new Input.State(markup)
+const textTokens = (): number => {
+  let n = 0
+  for (let pos = 0; pos < markup.length; n++) {
+    if (Parser.run(textToken, markupState.reset(pos)) === Input.Fail) break
+    pos = markupState.pos
+  }
+  return n
+}
+
+report(
+  `text tokens, ${markup.length / 1e6} M characters, one per line, a stop character that never occurs`,
+  { "Parser.run + State.reset (compiled)": textTokens },
+  5
+)
+
+// -----------------------------------------------------------------------------
 // A scanner: most runs fail, and why doesn't matter
 // -----------------------------------------------------------------------------
 
