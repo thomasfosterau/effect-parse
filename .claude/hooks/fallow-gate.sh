@@ -27,7 +27,10 @@ fi
 INPUT="$(cat)"
 CMD="$(jq -r '.tool_input.command // empty' <<<"$INPUT")"
 
-if ! printf '%s\n' "$CMD" | grep -Eq '(^|[[:space:];|&()])git[[:space:]]+(commit|push)([[:space:]]|$)'; then
+# `git`, then any global options (`-C <dir>`, `-c <key>=<value>`, `--no-pager`,
+# …: a dash word, optionally followed by one argument), then the subcommand.
+# Without the options part, `git -C . commit` was not gated (#119).
+if ! printf '%s\n' "$CMD" | grep -Eq '(^|[[:space:];|&()])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+(commit|push)([[:space:]]|$)'; then
   exit 0
 fi
 
