@@ -35,7 +35,7 @@ import { charOf, fastLimit, latin1, string, utf16be, utf16le, utf8 } from "../te
 import type { Fallback, Step } from "./closure.js"
 import { backend as jitBackend, jitSupported } from "./jit.js"
 import { buildsEntries, isDiagnostic, pairOf } from "./entries.js"
-import { countRefs, isLeaf, isLetter, isSmall, lowerAscii, selectorOf } from "./graph.js"
+import { countInlined, countRefs, isLeaf, isLetter, isSmall, lowerAscii, selectorOf } from "./graph.js"
 import type { Backend, Compiled } from "./registry.js"
 import type { CharSet } from "./sets.js"
 import { kindOfEncoding, TableSize, textSet, tokenSet } from "./sets.js"
@@ -398,6 +398,8 @@ class WasmCompiler {
   private readonly rules = [new WeakMap<ParserLike, number>(), new WeakMap<ParserLike, number>()]
   private readonly pending: Array<readonly [ParserLike, boolean, number]> = []
   private refs = new WeakMap<ParserLike, number>()
+  /** How many parsers have been inlined (see `countInlined`). */
+  private inlined = 0
   private readonly decoders = new WeakMap<Encoding<any>, number>()
   private readonly floatScanners = new WeakMap<Encoding<any>, number>()
   /** The float scanner of `Token` / `Ascii` text, which has no encoding. */
@@ -688,6 +690,7 @@ class WasmCompiler {
   }
 
   inline(p: ParserLike, out: string, b: Body, fail: Label, bf: Vars, depth: number): string {
+    this.inlined = countInlined(this.inlined)
     const node = nodeOf(p)
     const s: Site = { p, out, b, fail, bf, d: depth + 1 }
     const families: ReadonlyArray<(node: Node, s: Site) => Option.Option<string>> = [
