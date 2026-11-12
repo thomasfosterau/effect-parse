@@ -316,8 +316,10 @@ export class State<I extends Input = Input> {
   /**
    * Where the stop characters of compiled `takeTill`s next occur in this
    * state's input, by search site; created on first use. It lives as long
-   * as the state (whose input never changes), and `reset` clears it with
-   * the other per-run fields.
+   * as the state. `reset` keeps it for string input (a string never
+   * changes, and the positions are absolute, so they hold wherever the next
+   * run starts) and drops it for bytes and arrays, which a caller may
+   * refill in place between runs.
    *
    * @internal
    */
@@ -395,7 +397,11 @@ export class State<I extends Input = Input> {
    *
    * Every per-run field is reset: the cursor and end, the latest failure,
    * hints and furthest failure, recorded recoveries, the tracer and tracing
-   * depth, the recorded encoding and streaming checkpoints. Like the
+   * depth, the recorded encoding and streaming checkpoints. For string
+   * input, what the state has learnt about the string (where the stop
+   * characters of `takeTill` and the literals of `takeUntilAny` occur) is
+   * kept, as a string cannot change; for bytes and arrays it is dropped, so
+   * a buffer refilled in place between runs is searched afresh. Like the
    * constructor, `partial` defaults to `false` and `context` to the empty
    * context, so pass them again on every reset.
    *
@@ -440,7 +446,13 @@ export class State<I extends Input = Input> {
     this.depth = 0
     this.encoding = undefined
     this.resume = undefined
-    this.searches = undefined
+    // For a string, `searches` is kept: it remembers where stop characters
+    // and literals occur by absolute position, and a string never changes,
+    // so it holds at any offset. A lexer that resets before each token
+    // otherwise searched to the end of the buffer again for every token
+    // (#126). Bytes and arrays can be refilled in place between runs (a
+    // `Uint8Array` source is viewed, not copied), so theirs is dropped.
+    if (this.inputKind !== 0) this.searches = undefined
     this.asciiRun = undefined
     return this
   }
