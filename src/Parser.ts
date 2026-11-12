@@ -167,6 +167,12 @@ export declare namespace Parser {
  * - `{ min, max }`: between `min` and `max` times (inclusive); `min`
  *   defaults to 0 and `max` to unbounded.
  *
+ * A count and both bounds must be non-negative integers (`max` may be
+ * `Infinity`) with `min <= max`. Every combinator that takes a range
+ * throws a `RangeError` otherwise, when the parser is built: a range that
+ * comes from data (a config file, a query parameter) is checked there,
+ * whatever its static type says.
+ *
  * @since 0.1.0
  * @category models
  */
@@ -2459,11 +2465,7 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
 // -----------------------------------------------------------------------------
 
 const normalizeRange = (range: Range | undefined): [min: number, max: number] => {
-  if (range === undefined) return [0, Infinity]
-  if (Predicate.isNumber(range)) return [range, range]
-  const min = range.min ?? 0
-  const max = range.max ?? Infinity
-  if (min > max) throw new RangeError(`invalid range: min (${min}) > max (${max})`)
+  const { max, min } = bounds(range)
   return [min, max]
 }
 

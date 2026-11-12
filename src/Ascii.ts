@@ -31,6 +31,7 @@ import type { Parser } from "./Parser.js"
 import * as P from "./Parser.js"
 import * as numbers from "./internal/numbers.js"
 import { Key } from "./internal/key.js"
+import { controlCode } from "./internal/node.js"
 import * as Resume from "./internal/resume.js"
 import { codePointPredicate } from "./internal/tokens.js"
 import { literalImpl, range, takeWhileImpl } from "./Token.js"
@@ -533,7 +534,8 @@ export const caseless: CaselessFn = (lit: string | Uint8Array): any => literalIm
 // Escapes
 // -----------------------------------------------------------------------------
 
-const controlCode = (c: string | number): number => (Predicate.isNumber(c) ? c : c.charCodeAt(0))
+/** The first UTF-16 unit of a control character: what `atControl` compares with a string's units. */
+const firstUnit = (s: string): number => s.charCodeAt(0)
 
 const atControl = (state: State<Input>, control: number): boolean => {
   if (state.pos >= state.end) return false
@@ -567,7 +569,7 @@ export const takeEscaped = <A, E, R, I extends Input, B, E2, R2, I2 extends Inpu
   control: string | number,
   escapable: Parser<B, E2, R2, I2>
 ): Parser<Slice<I & I2>, E | E2, R | R2, I & I2> => {
-  const ctrl = controlCode(control)
+  const ctrl = controlCode(control, firstUnit)
   return takeEscapedImpl(
     normal,
     (state) => {
@@ -684,7 +686,7 @@ export const escaped = <E, R, I extends Input, E2, R2, I2 extends Input>(
   control: string | number,
   escape: Parser<string, E2, R2, I2>
 ): Parser<string, E | E2, R | R2, I & I2> => {
-  const ctrl = controlCode(control)
+  const ctrl = controlCode(control, firstUnit)
   return escapedImpl(
     normal,
     (state) => {

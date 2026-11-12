@@ -25,6 +25,7 @@ import * as Sexpr from "../examples/sexpr.js"
 import {
   Ascii,
   Binary,
+  Bits,
   Compiler,
   Encoding,
   Expression,
@@ -2017,6 +2018,167 @@ describe("the JIT", () => {
     const q = Compiler.jit(Parser.repeat(a))
     Parser.parse(q, "a")
     expect(Registry.compiled(q, 0)?.backend).toBe("jit")
+  })
+})
+
+describe("hostile counts and bounds (#114, #121)", () => {
+  /** A bound that is a number only in the types, as one read from JSON or a query string is. */
+  const payload = "64&&(globalThis.effectParseHit=(globalThis.effectParseHit||0)+1,64)"
+  // SAFETY: deliberately ill-typed, as `JSON.parse(text).max` is for a grammar that trusts its config: a string
+  // where a `number` is declared
+  const hostile: number = payload as never
+  const hit = () => "effectParseHit" in globalThis
+
+  const constructors: ReadonlyArray<[name: string, build: (n: number) => Parser.Parser.Any]> = [
+    ["Token.take", (n) => Token.take(n)],
+    ["Token.takeWhile max", (n) => Token.takeWhile("abc", { min: 1, max: n })],
+    ["Token.takeWhile min", (n) => Token.takeWhile("abc", { min: n })],
+    ["Token.takeWhile on arrays", (n) => Token.takeWhile<ReadonlyArray<number>>([1, 2], { max: n })],
+    ["Token.takeTill", (n) => Token.takeTill("abc", n)],
+    ["Token.takeUntil", (n) => Token.takeUntil("abc", { max: n })],
+    ["Token.takeUntilAny", (n) => Token.takeUntilAny(["a", "b"], { min: n })],
+    ["Text.utf8.take", (n) => Text.utf8.take(n)],
+    ["Text.utf8.takeWhile", (n) => Text.utf8.takeWhile("abc", { max: n })],
+    ["Text.utf8.takeUntil", (n) => Text.utf8.takeUntil("abc", { max: n })],
+    ["Parser.repeat count", (n) => Parser.repeat(a, n)],
+    ["Parser.repeat max", (n) => Parser.repeat(a, { max: n })],
+    ["Parser.fold", (n) => Parser.fold(a, { range: { max: n }, init: () => 0, f: (acc: number) => acc + 1 })],
+    ["Parser.repeatTill", (n) => Parser.repeatTill(a, Token.literal("b"), { min: n })],
+    ["Parser.separated min", (n) => Parser.separated(a, Token.literal(","), { min: n })],
+    ["Parser.separated max", (n) => Parser.separated(a, Token.literal(","), { max: n })],
+    ["Bits.take", (n) => Bits.take(n)],
+    ["Bits.takeBig", (n) => Bits.takeBig(n)],
+    ["Bits.pattern", (n) => Bits.pattern(1, n)]
+  ]
+
+  it.each(constructors)("%s rejects a count that is not a non-negative integer", (_, build) => {
+    ;[hostile, -1, 1.5, Number.NaN, -Infinity, 2 ** 53].forEach((n) => {
+      expect(() => build(n), String(n)).toThrow(RangeError)
+    })
+    expect(hit()).toBe(false)
+  })
+
+  it("accepts the counts that are", () => {
+    expect(() => constructors.forEach(([, build]) => [1, 7].forEach(build))).not.toThrow()
+    expect(Parser.parsePeek(Token.take(0), "abc")).toEqual(Result.succeed(["abc", ""]))
+    expect(Parser.parse(Parser.repeat(a, { min: 0, max: Infinity }), "aa")).toEqual(Result.succeed(["a", "a"]))
+  })
+
+  it("a range names its bad bound without printing it", () => {
+    expect(() => Parser.repeat(a, { max: hostile })).toThrow(
+      "invalid range: max: expected a non-negative integer, got a string"
+    )
+    expect(() => Token.take(-1)).toThrow("invalid count: expected a non-negative integer, got -1")
+    expect(() => Token.takeWhile("a", { min: 3, max: 2 })).toThrow("invalid range: min (3) > max (2)")
+  })
+
+  it("rejects a control character that is not a character or its code", () => {
+    const control = { charCodeAt: () => payload, codePointAt: () => payload }
+    // SAFETY: deliberately ill-typed: an object answering `charCodeAt`, whose answer the JIT used to write into its source
+    const hostileControl: string = control as never
+    const escape = Token.literal("n")
+    expect(() => Ascii.escaped(Token.takeTill("\\", { min: 1 }), hostileControl, escape)).toThrow(RangeError)
+    expect(() => Ascii.takeEscaped(Token.takeTill("\\", { min: 1 }), hostileControl, escape)).toThrow(RangeError)
+    expect(() =>
+      Text.utf8.escaped(Text.utf8.takeTill("\\", { min: 1 }), hostileControl, Text.utf8.literal("n"))
+    ).toThrow(RangeError)
+    expect(() => Ascii.escaped(Token.takeTill("\\", { min: 1 }), "", escape)).toThrow(RangeError)
+    expect(() => Ascii.escaped(Token.takeTill("\\", { min: 1 }), -1, escape)).toThrow(RangeError)
+    expect(hit()).toBe(false)
+  })
+
+  it("the JIT writes no bound into its source that is not a number", () => {
+    // A description built by hand, past the constructors' checks: the emitter refuses it on its own
+    const descriptions: ReadonlyArray<Parser.Parser<unknown, never, never, string>> = [
+      Parser.described(Parser.repeat(a).step, "repeat", { _tag: "Repeat", self: a, min: 0, max: hostile }),
+      Parser.described(Parser.repeat(a).step, "repeat", { _tag: "Repeat", self: a, min: hostile, max: Infinity }),
+      Parser.described(Token.takeWhile("a").step, "takeWhile", {
+        _tag: "TakeWhile",
+        set: "a",
+        negate: false,
+        min: 1,
+        max: hostile,
+        encoding: undefined
+      }),
+      Parser.described(Parser.separated(a, Token.literal(",")).step, "separated", {
+        _tag: "Separated",
+        self: a,
+        separator: Token.literal(","),
+        min: hostile,
+        max: hostile
+      })
+    ]
+    const builds = descriptions.map((description) => {
+      const p = Compiler.jit(Parser.preceded(Token.literal("x"), description))
+      Parser.parse(p, "xaaa")
+      const compiled = defined(Registry.compiled(p, 0))
+      return { backend: compiled.backend, refused: compiled.jitError instanceof TypeError }
+    })
+    // Where the emitter would have written the bound, it gives up and the closure compiler takes over
+    expect(builds.filter((build) => build.backend !== "jit")).toEqual(
+      builds.filter((build) => build.refused).map(() => ({ backend: "closure", refused: true }))
+    )
+    expect(builds.some((build) => build.refused)).toBe(true)
+    expect(hit()).toBe(false)
+  })
+
+  describe("a count read from the input", () => {
+    const b = (...xs: ReadonlyArray<number>) => new Uint8Array(xs)
+    const float = Parser.map(Binary.beF32, (n) => n)
+    const grammars: ReadonlyArray<[name: string, p: Parser.Parser.Any]> = [
+      ["lengthTake(i8)", Binary.lengthTake(Binary.i8)],
+      ["lengthTake(beI64)", Binary.lengthTake(Binary.beI64)],
+      ["lengthTake(beU64)", Binary.lengthTake(Binary.beU64)],
+      ["lengthTake(beF32)", Binary.lengthTake(float)],
+      ["seq(lengthTake(i8), u8, u8)", Parser.seq(Binary.lengthTake(Binary.i8), Binary.u8, Binary.u8)],
+      ["repeat(lengthTake(i8))", Parser.repeat(Binary.lengthTake(Binary.i8))],
+      ["lengthRepeat(i8, u8)", Binary.lengthRepeat(Binary.i8, Binary.u8)],
+      ["repeat(lengthRepeat(i8, u8))", Parser.repeat(Binary.lengthRepeat(Binary.i8, Binary.u8))],
+      ["lengthAndThen(i8, rest)", Binary.lengthAndThen(Binary.i8, Token.restOf<Uint8Array>())]
+    ]
+    const inputs = [
+      b(0xfe),
+      b(0xfe, 1, 2, 3),
+      b(0xff),
+      b(0x80, 0, 0, 0, 0, 0, 0, 0, 1),
+      b(0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff),
+      // 1.5 and NaN as big-endian floats
+      b(0x3f, 0xc0, 0, 0, 1, 2),
+      b(0x7f, 0xc0, 0, 0, 1, 2),
+      b(2, 1, 2),
+      b(0),
+      b(1, 0xfe, 0xfe)
+    ]
+
+    it.each(grammars)("%s: every backend agrees", (_, p) => {
+      inputs.forEach((input) => same(p, input))
+    })
+
+    it("a negative length fails at the length, and the cursor never moves back", () => {
+      const negative = Parser.parsePeek(
+        Parser.seq(Binary.lengthTake(Binary.i8), Binary.u8, Binary.u8),
+        b(0xfe, 1, 2, 3)
+      )
+      assert(Result.isFailure(negative))
+      expect(negative.failure.offset).toBe(0)
+      expect(negative.failure.kind).toBe("Verify")
+      // Used to alternate between -1 and 0 until the heap ran out
+      expect(Parser.parsePeek(Parser.repeat(Binary.lengthTake(Binary.i8)), b(0xfe))).toEqual(
+        Result.succeed([b(0xfe), []])
+      )
+      expect(Result.isFailure(Parser.parse(Binary.lengthRepeat(Binary.i8, Binary.u8), b(0xff)))).toBe(true)
+      expect(Result.isFailure(Parser.parse(Binary.lengthTake(float), b(0x3f, 0xc0, 0, 0, 1, 2)))).toBe(true)
+      expect(
+        Result.isFailure(
+          Parser.parse(Binary.lengthTake(Binary.beU64), b(0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff))
+        )
+      ).toBe(true)
+    })
+
+    it("a text protocol's signed length throws where the grammar builds the parser", () => {
+      const netstring = Parser.flatMap(Ascii.decInt, (n) => Token.take(n))
+      expect(() => Parser.parse(netstring, "-3:abc")).toThrow(RangeError)
+    })
   })
 })
 
