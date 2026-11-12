@@ -52,7 +52,8 @@
 # The `github-actions` entry also scans the local composite action under
 # .github/actions/, whose `uses:` pins it would otherwise never see. Every
 # action is pinned to a full commit SHA with a `# vX.Y.Z` comment, which
-# Dependabot keeps current.
+# Dependabot keeps current; voidzero-dev/setup-vp is pinned to its exact
+# release tag instead (its tags are immutable, and the moving `v1` is frozen).
 version: 2
 updates:
   - package-ecosystem: "npm"
