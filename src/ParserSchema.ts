@@ -120,8 +120,7 @@ const decodeWith = <T extends Schema.Top>(
           if (encode === undefined) {
             return Effect.fail(new SchemaIssue.Forbidden({ message: "Encoding is not supported" }, value, parseOptions))
           }
-          const result = encode(value)
-          return Result.isSuccess(result) ? Effect.succeed(result.success) : Effect.fail(result.failure)
+          return Effect.fromResult(encode(value))
         }
       })
     )
