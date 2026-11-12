@@ -89,6 +89,44 @@ const LargeRest = 4096
  */
 const MaxMemory = 2 ** 31
 /**
+ * The limits a module's memory is held to. A record, not constants, so the
+ * tests can lower them: the paths at the 2 GiB cap are otherwise reachable
+ * only by allocating gigabytes.
+ */
+export const limits = { maxMemory: MaxMemory }
+
+/**
+ * How many pages to grow a memory of `have` bytes by so that it holds at
+ * least `bytes`, doubling it when that is more (so growth is amortized) but
+ * never past `max`: 0 when it already does, -1 when `bytes` is more than
+ * `max`. Plain arithmetic on doubles: none of it wraps at 2^31.
+ */
+export const pagesToGrow = (have: number, bytes: number, max: number): number => {
+  if (have >= bytes) return 0
+  if (bytes > max) return -1
+  return Math.ceil((Math.min(Math.max(bytes, have * 2), max) - have) / PageSize)
+}
+
+/** Where a parse's trace starts, and the memory the parse reserves before it starts (see {@link layout}). */
+export interface Layout {
+  readonly traceStart: number
+  readonly reserve: number
+}
+
+/**
+ * Where a parse's trace starts, after the input's bytes (2 per unit of a
+ * string), aligned to 16, and how much memory the parse reserves before it
+ * starts: the trace's first allocation, or for a string the staging area
+ * its UTF-8 and widening list need (3 + 4 bytes per unit at most). Computed
+ * without bitwise operators, which would wrap an input near 2^31 bytes to a
+ * negative offset that "fits".
+ */
+export const layout = (units: number, kind: 0 | 1): Layout => {
+  const inputBytes = kind === 0 ? 2 * units : units
+  const traceStart = Math.ceil((Input + inputBytes) / 16) * 16
+  return { traceStart, reserve: traceStart + Math.max(Slack * 4, inputBytes * 4, kind === 0 ? 7 * units + 16 : 0) }
+}
+/**
  * Above this much linear memory after a parse (128 MiB), the module is
  * given a new memory: `WebAssembly.Memory` never shrinks, so one large
  * input would otherwise hold five to ten times its size for the life of
@@ -3070,10 +3108,8 @@ const run = (
    * more than {@link MaxMemory}, or more than the engine will give.
    */
   const reserve = (bytes: number): boolean => {
-    const have = size
-    if (have >= bytes) return true
-    if (bytes > MaxMemory) return false
-    const pages = Math.ceil((Math.min(Math.max(bytes, have * 2), MaxMemory) - have) / PageSize)
+    const pages = pagesToGrow(size, bytes, limits.maxMemory)
+    if (pages <= 0) return pages === 0
     // `grow` throws a `RangeError` when the engine cannot allocate the pages
     const grown = Result.try(() => memory.grow(pages))
     if (Result.isFailure(grown)) return false
@@ -3098,7 +3134,7 @@ const run = (
     },
     // Doubles the memory, returning the new limit of the trace
     grow: (): number => {
-      if (size >= MaxMemory || !reserve(Math.min(size * 2, MaxMemory))) throw new MemoryExhausted()
+      if (size >= limits.maxMemory || !reserve(Math.min(size * 2, limits.maxMemory))) throw new MemoryExhausted()
       // The views changed
       build.bind(i32, f64, state.input, state.end, values, state)
       return size - Slack
@@ -3170,12 +3206,9 @@ const run = (
   const parse = (s: State<any>): Value => {
     const input: string | Uint8Array = s.input
     const n = input.length
-    const inputBytes = kind === 0 ? 2 * n : n
-    const traceStart = (Input + inputBytes + 15) & -16
-    // Strings are staged where the trace goes: 3 bytes of UTF-8 and 4 of list at most per unit
-    if (!reserve(traceStart + Math.max(Slack * 4, inputBytes * 4, kind === 0 ? 7 * n + 16 : 0))) {
-      throw new MemoryExhausted()
-    }
+    // Strings are staged where the trace goes (see `layout`)
+    const { reserve: needed, traceStart } = layout(n, kind)
+    if (!reserve(needed)) throw new MemoryExhausted()
     if (Predicate.isString(input)) {
       // Strings never change: one already in memory (parsed again, or from another offset) stays there
       if (input !== copied) {
@@ -3235,6 +3268,9 @@ const run = (
     // Whatever happens (a callback may throw), the next parse starts afresh
     pending = s
     const from = s.pos
+    const mode = s.mode
+    const hintOffset = s.hintOffset
+    const hintExpected = s.hintExpected
     const result = Result.try(parsePending)
     build.unbind()
     state = idle
@@ -3245,7 +3281,14 @@ const run = (
     if (Result.isFailure(result)) {
       // The input, or its trace, needs more memory than there is: the JIT parses it in place
       if (result.failure instanceof MemoryExhausted) {
-        s.pos = from
+        // The state goes back to what it was when this run started, so the JIT's run is the only one
+        // it shows. A compiled run records no failures or checkpoints (`state.compiledRun`) and is never
+        // used with a tracer, recovery or a syntax builder; what an island's step can have written is
+        // the cursor, the mode and a hint
+        s.rewind(from)
+        s.mode = mode
+        s.hintOffset = hintOffset
+        s.hintExpected = hintExpected
         return fallback(s)
       }
       throw result.failure
