@@ -321,6 +321,8 @@ while parsing array
 expected value, found ","
 ```
 
+An error is safe to log. It keeps the input (`error.input`, which `position` and `message` read, and which stays alive as long as the error does), but not as one of its own properties, and `toJSON` leaves it out: `JSON.stringify(error)`, Effect's `Cause` rendering and structured loggers write the offset, position, kind, expectations and message, not what was being parsed. The message shows at most 60 characters on each side of the failure (`…` marks the rest), so a failure in a 5 MB line of minified JSON is still a four-line message.
+
 effect-parse tries hard to produce good messages without annotations:
 
 - `alt` merges the expectations of failed branches: `expected "true", "false" or "null"`.
