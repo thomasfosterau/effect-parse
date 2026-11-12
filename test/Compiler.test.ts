@@ -2251,6 +2251,52 @@ describe("hostile counts and bounds (#114, #121)", () => {
   })
 })
 
+describe("generated code stays proportional to the grammar (#122)", () => {
+  const leaf: Parser.Parser.Any = Parser.map(a, (x) => x)
+  /** `p` used twice by its parent, `levels` times over: 2^levels uses of the innermost parser. */
+  const doubled = (levels: number): Parser.Parser.Any =>
+    Arr.reduce(Arr.range(1, levels), leaf, (p): Parser.Parser.Any => Parser.seq(p, p))
+
+  it.each(["jit", "wasm"] as const)("a parser used twice by one parent is generated once (%s)", (backend) => {
+    const p = doubled(20)
+    const compiled = Compiler[backend](p)
+    const started = performance.now()
+    // The first parse compiles: it took 22 s and 160 MB of source on the JIT, and ran wasm out of memory
+    expect(Result.isFailure(runners.parse(compiled, "b"))).toBe(true)
+    expect(performance.now() - started).toBeLessThan(2000)
+    const built = defined(Registry.compiled(compiled, 0))
+    expect(built.backend).toBe(backend)
+    expect(defined(built.source).length).toBeLessThan(100_000)
+    expect(outcome(runners.parse(compiled, "b"))).toEqual(outcome(runners.parse(p, "b")))
+  })
+
+  it("agrees with the interpreter on a doubled grammar, on every backend", () => {
+    const p = doubled(4)
+    ;["a".repeat(16), "a".repeat(15), `${"a".repeat(16)}a`, `${"a".repeat(7)}b`, ""].forEach((input) => same(p, input))
+  })
+
+  it("gives up generating code for a grammar of a hundred thousand distinct parsers", () => {
+    /** A tree of distinct parsers: nothing is shared, so nothing can be made a rule. */
+    const tree = (levels: number): Parser.Parser.Any =>
+      levels === 0 ? Parser.map(Token.literal("a"), (x) => x) : Parser.seq(tree(levels - 1), tree(levels - 1))
+    const p = tree(16)
+    const input = "a".repeat(2 ** 16)
+    const expected = runners.parse(p, input)
+    expect(Result.isSuccess(expected)).toBe(true)
+    ;(["jit", "wasm"] as const).forEach((backend) => {
+      const compiled = Compiler[backend](p)
+      const started = performance.now()
+      expect(Result.isSuccess(runners.parse(compiled, input)), backend).toBe(true)
+      expect(performance.now() - started, backend).toBeLessThan(10_000)
+      const built = defined(Registry.compiled(compiled, 0))
+      // The closure compiler takes over, and says why
+      expect(built.backend, backend).toBe("closure")
+      expect(String(built.jitError), backend).toContain("too large to generate code for")
+    })
+    expect(Result.isSuccess(runners.parse(Compiler.closure(p), input))).toBe(true)
+  })
+})
+
 describe("the WebAssembly compiler", () => {
   /** A JSON document of `n` records, pretty-printed. */
   const records = (n: number) =>
