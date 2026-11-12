@@ -603,6 +603,7 @@ The `Nom` module provides the nom names directly, with nom's argument orders, fo
 - [`json.ts`](examples/json.ts): JSON with `dispatch`, `cut` and escapes
 - [`json-text.ts`](examples/json-text.ts): the same grammar written once against `Text.TextParsers`, for strings, UTF-8 and UTF-16
 - [`json-fast.ts`](examples/json-fast.ts): the same grammar written for compiled parsers, with `Parser.fromEntries`
+- [`json-tape.ts`](examples/json-tape.ts): the same grammar building no values at all: it appends 16-byte records to memory from [effect-ext](https://github.com/thomasfosterau/effect-ext)'s `Allocator`, and strings are read as views of the input's bytes. On UTF-8 input it parses about 1.4 times as fast as `TextDecoder` and `JSON.parse`, and leaves no garbage ([DESIGN.md](docs/DESIGN.md#zero-copy-output))
 - [`arithmetic.ts`](examples/arithmetic.ts): direct evaluation, an AST via the Pratt parser, and a lexer plus a parser over the token array
 - [`ini.ts`](examples/ini.ts): INI files with a generator-style parser
 - [`http.ts`](examples/http.ts): HTTP requests over bytes, complete and streamed
@@ -630,7 +631,7 @@ vp run check:dist    # check dist/ as a consumer imports it
 vp run bench         # JSON example: interpreted vs compiled, per encoding
 ```
 
-The other benchmarks (`bench:native`, `bench:stream`, `bench:gen`, `bench:syntax`) and single checks are listed in [CONTRIBUTING.md](CONTRIBUTING.md). Repository conventions are in [AGENTS.md](AGENTS.md), the release pipeline in [PUBLISHING.md](PUBLISHING.md) and the vulnerability-reporting policy in [SECURITY.md](SECURITY.md).
+The other benchmarks (`bench:native`, `bench:stream`, `bench:gen`, `bench:syntax`, `bench:downstream`, which times the libraries built on this package, and `bench:zero-copy`) and single checks are listed in [CONTRIBUTING.md](CONTRIBUTING.md). Repository conventions are in [AGENTS.md](AGENTS.md), the release pipeline in [PUBLISHING.md](PUBLISHING.md) and the vulnerability-reporting policy in [SECURITY.md](SECURITY.md).
 
 ## License
 

@@ -38,7 +38,7 @@ This repo publishes one package, `@thomasfosterau/effect-parse`: parser combinat
 - `vp run build` — `vp pack` → `dist/`.
 - `vp run check:dist` — the dist guard (builds first).
 - `vp run test:coverage` — the suite under Istanbul with the coverage floor, writing `coverage/coverage-final.json` for `fallow audit`.
-- `vp run bench`, `bench:native`, `bench:stream`, `bench:gen`, `bench:syntax` — benchmarks over the built `dist/` (they build first). Never in CI; numbers depend on the machine.
+- `vp run bench`, `bench:native`, `bench:stream`, `bench:gen`, `bench:syntax`, `bench:downstream`, `bench:zero-copy` — benchmarks over the built `dist/` (they build first). Never in CI; numbers depend on the machine. `bench:downstream` runs the published releases of the libraries built on this package (effect-bib, effect-ical, effect-rdf, effect-xml, effect-ext; dev dependencies pinned exact in the catalog) on this checkout's build: the `@thomasfosterau/effect-parse` override and the root's `workspace:*` dev dependency on itself are what point them here, so keep both.
 - `pnpm changeset` — add a changeset.
 
 Invoke everything through `vp` (`vp exec` for a binary, `vp run <task>` for a task). The sanctioned non-`vp` invocations are `pnpm install`, `pnpm changeset`, and `pnpm pack` / `npm publish` inside the Release workflow. Single-check variants are in [CONTRIBUTING.md](CONTRIBUTING.md#running-individual-checks).
@@ -57,7 +57,7 @@ Before you report work as done, run the gates below in order and quote each comm
 8. `pnpm audit --audit-level high` (network)
 9. `vp run test:coverage`, then `vp exec fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` (the fallow gate below; not a CI step).
 
-Steps 2–8 are CI's required `ci` job, in its order ([ci.yml](.github/workflows/ci.yml)). A change to a hot path also reports `vp run bench` (and the benchmark for the area touched) before and after. `CONTRIBUTING.md` and the PR template link here rather than restating the list.
+Steps 2–8 are CI's required `ci` job, in its order ([ci.yml](.github/workflows/ci.yml)). A change to a hot path also reports `vp run bench`, `vp run bench:downstream` (and the benchmark for the area touched) before and after. `CONTRIBUTING.md` and the PR template link here rather than restating the list.
 
 ## Branches and pull requests
 

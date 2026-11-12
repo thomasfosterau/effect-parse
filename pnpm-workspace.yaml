@@ -44,6 +44,18 @@ catalog:
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
   # before bumping any of the three.
   "@effect/tsgo": 0.63.0
+  # The libraries built on this package, for the downstream benchmarks only
+  # (`bench/downstream.bench.ts`, `bench/zero-copy.bench.ts`, and the
+  # `examples/json-tape.ts` they time): never a runtime dependency. Each is
+  # pinned exact, so a benchmark's figures are for a known grammar, and moved
+  # by hand; the `@thomasfosterau/effect-parse` override below makes them run
+  # on this checkout's build rather than the release they were published
+  # against.
+  "@thomasfosterau/effect-bib": 0.1.0
+  "@thomasfosterau/effect-ext": 0.2.0
+  "@thomasfosterau/effect-ical": 0.1.0
+  "@thomasfosterau/effect-rdf": 0.2.0
+  "@thomasfosterau/effect-xml": 0.1.0
   "@types/node": ^26.6.5
   # Must equal the vitest that vite-plus bundles (see `vitest` below); vite-plus
   # refuses to run coverage on a mismatch.
@@ -102,6 +114,10 @@ overrides:
   # `effect` MUST be a singleton: two copies break Context / Schema identity at
   # runtime. Force every resolution to the catalog version.
   effect: "catalog:"
+  # The downstream libraries above depend or peer on a published effect-parse
+  # (effect-bib 0.1.0 pins 0.4.1 exactly); the benchmarks measure them on this
+  # checkout, so every resolution of the name is the workspace root.
+  "@thomasfosterau/effect-parse": "workspace:*"
 nodeLinker: hoisted
 allowBuilds:
   esbuild: true

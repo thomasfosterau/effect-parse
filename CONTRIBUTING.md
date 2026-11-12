@@ -54,4 +54,6 @@ vp run bench:stream                  # parsing a fetch body as it downloads vs R
 vp run bench:gen                     # parsers built inside a Parser.gen body vs hoisted
 vp run bench:syntax                  # building a syntax tree, and reparsing after edits
 vp run bench:jq                      # the jq example (examples/jq.ts) vs the real jq; needs jq on the PATH
+vp run bench:downstream              # the libraries built on effect-parse (effect-bib, -ical, -rdf, -xml, -ext) on their own formats
+vp run bench:zero-copy               # the tape example (examples/json-tape.ts) vs parsers that build values
 ```
