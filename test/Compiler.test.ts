@@ -30,6 +30,7 @@ import {
   Encoding,
   Expression,
   Input,
+  Nom,
   Parser,
   ParserSchema,
   ParserStream,
@@ -41,7 +42,7 @@ import { Fail } from "../src/Input.js"
 import { FirstSets } from "../src/internal/compiler/first.js"
 import * as Registry from "../src/internal/compiler/registry.js"
 import { allStrings, mutations, randomJson, rng } from "./generators.js"
-import { defined, runOfAs } from "./utils.js"
+import { defined, expectFailure, runOfAs } from "./utils.js"
 
 const backends = ["closure", "jit", "wasm"] as const
 type Backend = (typeof backends)[number]
@@ -2018,6 +2019,73 @@ describe("the JIT", () => {
     const q = Compiler.jit(Parser.repeat(a))
     Parser.parse(q, "a")
     expect(Registry.compiled(q, 0)?.backend).toBe("jit")
+  })
+})
+
+describe("a bounded repetition checks progress (#115)", () => {
+  const b = (...xs: ReadonlyArray<number>) => new Uint8Array(xs)
+  const optA = Parser.opt(a)
+  const comma = Token.literal(",")
+  const text: ReadonlyArray<[name: string, p: Parser.Parser.Any]> = [
+    ["repeat(opt(a), 3)", Parser.repeat(optA, 3)],
+    ["repeat(opt(a), { min: 1, max: 4 })", Parser.repeat(optA, { min: 1, max: 4 })],
+    ["repeat(succeed(0), 2)", Parser.repeat(Parser.succeed(0), 2)],
+    ["repeat(takeWhile(a), { max: 2 })", Parser.repeat(Token.takeWhile("a"), { max: 2 })],
+    ["repeat(a, 3)", Parser.repeat(a, 3)],
+    ["repeat(a, { max: 2 }) then rest", Parser.seq(Parser.repeat(a, { max: 2 }), Token.rest)],
+    ["fold(opt(a), { max: 3 })", Parser.fold(optA, { range: { max: 3 }, init: () => 0, f: (n: number) => n + 1 })],
+    ["separated(a, opt(comma), { max: 3 })", Parser.separated(a, Parser.opt(comma), { max: 3 })],
+    ["separated(opt(a), comma, 2)", Parser.separated(optA, comma, 2)],
+    ["separated(a, comma, { max: 2 })", Parser.separated(a, comma, { max: 2 })],
+    ["repeatTill(opt(a), b, { max: 3 })", Parser.repeatTill(optA, Token.literal("b"), { max: 3 })],
+    ["repeat(struct of optionals, 2)", Parser.repeat(Parser.struct({ x: optA, y: Parser.opt(comma) }), 2)],
+    ["Nom.count(opt(a), 2)", Nom.count(optA, 2)]
+  ]
+  const strings = ["", "a", "aa", "aaa", "aaaa", "a,a", "a,a,a", "aab", "b", "ab", ",", "a,", "x"]
+
+  it.each(text)("%s: every backend agrees", (_, p) => {
+    strings.forEach((input) => same(p, input))
+  })
+
+  const counted: ReadonlyArray<[name: string, p: Parser.Parser.Any]> = [
+    ["lengthRepeat(u8, succeed(0))", Binary.lengthRepeat(Binary.u8, Parser.succeed(0))],
+    ["lengthRepeat(u8, opt(u8))", Binary.lengthRepeat(Binary.u8, Parser.opt(Binary.u8))],
+    ["lengthRepeat(u8, take(0))", Binary.lengthRepeat(Binary.u8, Token.take<Uint8Array>(0))],
+    ["lengthRepeat(u8, u8)", Binary.lengthRepeat(Binary.u8, Binary.u8)]
+  ]
+  const bytes = [b(), b(0), b(1), b(1, 7), b(2, 7), b(2, 7, 8), b(3, 7, 8), b(0xff), b(0xff, 1, 2, 3)]
+
+  it.each(counted)("%s: every backend agrees", (_, p) => {
+    bytes.forEach((input) => same(p, input))
+  })
+
+  it("an element that consumes nothing is an Assert failure, whatever the range", () => {
+    const error = expectFailure(Parser.repeat(optA, 3), "ab")
+    expect(error.kind).toBe("Assert")
+    expect(error.mode).toBe("Cut")
+    expect(error.offset).toBe(1)
+    expect(error.message).toContain("`repeat` parsers must always consume")
+    expect(expectFailure(Parser.separated(a, Parser.opt(comma), { max: 3 }), "aa").kind).toBe("Assert")
+    // A repetition that never reaches such an element is unchanged
+    expect(Parser.parse(Parser.repeat(optA, 3), "aaa")).toEqual(Result.succeed(Arr.replicate(Option.some("a"), 3)))
+  })
+
+  it("a count from the input cannot ask for more elements than the input has tokens", () => {
+    // Used to succeed with 16 777 215 elements from 3 bytes, and to throw a RangeError from 4
+    const started = performance.now()
+    const three = Parser.parse(Binary.lengthRepeat(Binary.beU24, Parser.succeed(0)), b(0xff, 0xff, 0xff))
+    const four = Parser.parse(Binary.lengthRepeat(Binary.beU32, Parser.succeed(0)), b(0xff, 0xff, 0xff, 0xff))
+    assert(Result.isFailure(three))
+    assert(Result.isFailure(four))
+    expect(three.failure.kind).toBe("Assert")
+    expect(four.failure.kind).toBe("Assert")
+    expect(performance.now() - started).toBeLessThan(1000)
+    backends.forEach((backend) => {
+      const p = Compiler[backend](Binary.lengthRepeat(Binary.beU32, Parser.opt(Binary.u8)))
+      const r = Parser.parse(p, b(0xff, 0xff, 0xff, 0xff, 1, 2, 3))
+      assert(Result.isFailure(r), backend)
+      expect(r.failure.kind, backend).toBe("Assert")
+    })
   })
 })
 

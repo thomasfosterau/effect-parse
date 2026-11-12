@@ -684,7 +684,7 @@ class Compiler {
 
   repeat(node: NodeOf<"Repeat"> | NodeOf<"Fold">, used: boolean): Step {
     const { max, min } = node
-    const checkLoop = max === Infinity
+    // Bounded or not, the repetition checks progress below (#115)
     const isFold = Predicate.isTagged(node, "Fold")
     const cond = isFold ? node.while : undefined
     const c = this.compile(node.self, used)
@@ -731,7 +731,7 @@ class Compiler {
           s.pos = start
           return resumed ? Resume.done(s, key, entry, true, acc) : acc
         }
-        if (checkLoop && s.pos === start) {
+        if (s.pos === start) {
           s.mode = CUT
           return Fail
         }
@@ -803,7 +803,7 @@ class Compiler {
       return true
     }
     const { max, min } = node
-    const checkLoop = max === Infinity
+    // Bounded or not, the repetition checks progress below (#115)
     // A streaming build's checkpoint holds the object built so far (see `repeat`)
     const resumable = this.resumable
     const site = new Key()
@@ -831,7 +831,7 @@ class Compiler {
           if (!ok) {
             return stopEntries(s, site, at, resumed, acc, count, start, min)
           }
-          if (checkLoop && s.pos === start) {
+          if (s.pos === start) {
             s.mode = CUT
             return Fail
           }
@@ -863,7 +863,7 @@ class Compiler {
         if (sep(s) === Fail) {
           return stopEntries(s, site, at, resumed, acc, count, start, min)
         }
-        if (checkLoop && s.pos === start) {
+        if (s.pos === start) {
           s.mode = CUT
           return Fail
         }
@@ -904,7 +904,7 @@ class Compiler {
 
   separated(node: NodeOf<"Separated">, used: boolean): Step {
     const { max, min } = node
-    const checkLoop = max === Infinity
+    // Bounded or not, the repetition checks progress below (#115)
     const c = this.compile(node.self, used)
     const sep = this.compile(node.separator, false)
     const resumable = this.resumable
@@ -952,7 +952,7 @@ class Compiler {
           s.pos = start
           return resumed ? Resume.done(s, key, entry, true, acc) : acc
         }
-        if (checkLoop && s.pos === start) {
+        if (s.pos === start) {
           s.mode = CUT
           return Fail
         }
