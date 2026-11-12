@@ -126,14 +126,52 @@ remove_old_link() {
 }
 
 # ── 1. Vite+ at the catalog pin ──────────────────────────────────────────────
+# The installer is whatever https://vite.plus serves when the hook runs, and it
+# runs with the user's credentials (a Codespace's, in the dev container). It
+# is therefore downloaded to a file, checked against the SHA-256 below and
+# only then run: never piped into a shell unread (#119). The version it
+# installs is pinned separately (the catalog), and the installer checks that
+# package's npm provenance and SHA-512 itself.
+#
+# When Vite+ publishes a new installer the check fails, the hook says so and
+# `vp` falls back to this checkout's node_modules copy. To move the pin: read
+# the new script, then
+#   curl -fsSL https://vite.plus | sha256sum
+VP_INSTALLER_SHA256="5d360005c321fedb48d5a6dafb4e22e6ffc8d5a03e1b3aa3d7ee1c88f9ced3a9"
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
+install_vite_plus() {
+  command -v curl >/dev/null 2>&1 || return 1
+  installer="$(mktemp)" || return 1
+  if ! curl -fsSL https://vite.plus -o "$installer"; then
+    rm -f "$installer"
+    return 1
+  fi
+  if [ "$(sha256_of "$installer" 2>/dev/null)" != "$VP_INSTALLER_SHA256" ]; then
+    log "cannot verify the Vite+ installer: it does not match the SHA-256 pinned in this hook; not running it"
+    rm -f "$installer"
+    return 1
+  fi
+  VP_VERSION="$VP_PIN" bash "$installer" >/dev/null 2>&1
+  status=$?
+  rm -f "$installer"
+  return "$status"
+}
+
 VP_PIN="$(sed -nE 's/^  vite-plus: "?([0-9]+\.[0-9]+\.[0-9]+)"?$/\1/p' "$PROJECT_DIR/pnpm-workspace.yaml" 2>/dev/null | head -1)"
 VP_HAVE="$("$VP_GLOBAL_BIN/vp" --version 2>/dev/null | sed -nE '1s/^vp v([0-9.]+).*$/\1/p')"
 if [ -z "$VP_PIN" ]; then
   log "could not read the vite-plus catalog pin; not installing Vite+"
 elif [ "$VP_HAVE" != "$VP_PIN" ]; then
   log "installing Vite+ $VP_PIN (have: ${VP_HAVE:-none})…"
-  if command -v curl >/dev/null 2>&1 \
-    && curl -fsSL https://vite.plus | VP_VERSION="$VP_PIN" bash >/dev/null 2>&1; then
+  if install_vite_plus; then
     log "Vite+ $VP_PIN installed"
   else
     log "Vite+ installer failed (is vite.plus / viteplus.dev reachable?); continuing"
