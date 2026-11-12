@@ -45,7 +45,7 @@ import {
 import type { ClosureCompiler, CompiledRoot, Fallback, Step } from "./closure.js"
 import { backend as closureBackend, createClosureCompiler } from "./closure.js"
 import { buildsEntries, pairOf } from "./entries.js"
-import { countRefs, isLeaf, isLetter, isSmall, lowerAscii, selectorOf } from "./graph.js"
+import { countInlined, countRefs, isLeaf, isLetter, isSmall, lowerAscii, selectorOf } from "./graph.js"
 import type { Backend } from "./registry.js"
 import type { First } from "./first.js"
 import { planAlt, Strict } from "./first.js"
@@ -224,6 +224,8 @@ class Emitter {
   readonly functions: Array<string> = []
   private readonly rules = [new Map<ParserLike, string>(), new Map<ParserLike, string>()]
   private readonly refs: WeakMap<ParserLike, number>
+  /** How many parsers have been inlined (see `countInlined`). */
+  private inlined = 0
   private readonly closure: ClosureCompiler
   private next = 0
 
@@ -444,6 +446,7 @@ class Emitter {
   }
 
   inline(p: ParserLike, used: boolean, out: string | null, fail: string, fn: Fn, depth: number): string {
+    this.inlined = countInlined(this.inlined)
     const node = nodeOf(p)
     const set = (value: string) => (out === null ? "" : `${out}=${value};`)
     const d = depth + 1

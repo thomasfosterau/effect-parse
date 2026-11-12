@@ -19,7 +19,16 @@ export const isLeaf = (node: Node): boolean =>
   Predicate.isTagged(node, "OneOf") ||
   Predicate.isTagged(node, "TakeWhile")
 
-/** The number of distinct parents of each parser reachable from `root`. */
+/**
+ * How many times each parser reachable from `root` is used: one for every
+ * place a parent mentions it. A parser used twice is generated once, as a
+ * rule the two places call (unless it is small, see {@link isSmall}).
+ *
+ * Uses are counted, not distinct parents: `seq(p, p)` uses `p` twice. When
+ * only parents were counted, such a `p` was inlined at both places, and a
+ * grammar that does it at every level (`p = seq(p, p)`, twenty times over)
+ * compiled to 2^20 copies: 160 MB of source from twenty lines (#122).
+ */
 export const countRefs = (root: ParserLike): WeakMap<ParserLike, number> => {
   const refs = new WeakMap<ParserLike, number>()
   const seen = new WeakSet<ParserLike>()
@@ -27,15 +36,34 @@ export const countRefs = (root: ParserLike): WeakMap<ParserLike, number> => {
   for (let p = stack.pop(); p !== undefined; p = stack.pop()) {
     if (seen.has(p)) continue
     seen.add(p)
-    const counted = new WeakSet<ParserLike>()
     for (const c of children(nodeOf(p))) {
-      if (counted.has(c)) continue
-      counted.add(c)
       refs.set(c, (refs.get(c) ?? 0) + 1)
       stack.push(c)
     }
   }
   return refs
+}
+
+/**
+ * The most parsers a code-generating compiler inlines for one root. Sharing
+ * is what keeps generated code proportional to the grammar; a grammar that
+ * is itself enormous (a tree of distinct parsers built by a loop, a derived
+ * schema) would still take minutes and gigabytes to generate, so past this
+ * many the compiler gives up and the next one down takes over (the JIT for
+ * WebAssembly, the closure compiler for the JIT), which costs a closure per
+ * parser instead of source text. The largest grammars in this repository
+ * and the libraries built on it inline a few thousand.
+ */
+export const MaxInlined = 100_000
+
+/** Counts a parser a compiler is about to inline, failing the compilation past {@link MaxInlined}. */
+export const countInlined = (inlined: number): number => {
+  if (inlined >= MaxInlined) {
+    throw new RangeError(
+      `effect-parse: the grammar is too large to generate code for (over ${MaxInlined} parsers inlined)`
+    )
+  }
+  return inlined + 1
 }
 
 /** Whether a parser is small enough to inline wherever it is used. */
