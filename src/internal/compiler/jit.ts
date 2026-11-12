@@ -891,7 +891,7 @@ class Emitter {
         add = `${acc}.push(${x});`
       }
     }
-    const check = max === Infinity ? `if(p===${st}){$S.mode="Cut";${fail}}` : ""
+    const check = `if(p===${st}){$S.mode="Cut";${fail}}`
     const bound = max === Infinity ? "" : `${n}<${max}`
     const r = this.resumable ? this.resumePoint(fn) : undefined
     // A checkpoint holds the result so far: the accumulator, or what `collect` builds
@@ -980,7 +980,7 @@ class Emitter {
     const self = (f: string) =>
       collect === undefined ? this.gen(node.self, keep, x, f, fn, d) : collect.element(f, "")
     const sep = (f: string) => this.gen(node.separator, false, null, f, fn, d)
-    const check = max === Infinity ? `if(p===${st}){$S.mode="Cut";${fail}}` : ""
+    const check = `if(p===${st}){$S.mode="Cut";${fail}}`
     const first =
       `${collect?.init ?? (keep ? `${acc}=[];` : "")}${n}=0;${st}=p;` +
       attempt(self, `${push}${n}++;`, min > 0 ? "||true" : "", "")

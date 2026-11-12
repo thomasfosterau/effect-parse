@@ -2492,7 +2492,7 @@ const foldImpl = <A, B, E, R, I extends Input>(
 ): Parser<B, E, R, I> => {
   const [min, max] = normalizeRange(range)
   const step = self.step
-  const checkLoop = max === Infinity
+  // Bounded or not, the repetition checks progress below (#115)
   const key = new Key()
   return described(
     (state) => {
@@ -2527,7 +2527,7 @@ const foldImpl = <A, B, E, R, I extends Input>(
           recover(state, start)
           return Resume.done(state, key, entry, resumed !== undefined, acc)
         }
-        if (checkLoop && state.pos === start) return assertConsumes(state, name)
+        if (state.pos === start) return assertConsumes(state, name)
         acc = f(acc, a)
       }
       return Resume.done(state, key, entry, resumed !== undefined, acc)
@@ -2545,9 +2545,9 @@ const foldImpl = <A, B, E, R, I extends Input>(
  * exactly that many times. With a literal positive `min`, the output is
  * typed as a non-empty array.
  *
- * As in winnow, an unbounded repetition of a parser that succeeds without
- * consuming input fails with an unrecoverable assertion instead of looping
- * forever.
+ * A parser that succeeds without consuming input fails the repetition with
+ * an unrecoverable `Assert` failure, whatever the range (winnow checks only
+ * unbounded ones): a bound can come from the input (`Binary.lengthRepeat`).
  *
  * @example
  * ```ts
@@ -2738,7 +2738,7 @@ export const separated: {
     const [min, max] = normalizeRange(range)
     const step = self.step
     const sepStep = separator.step
-    const checkLoop = max === Infinity
+    // Bounded or not, the repetition checks progress below (#115)
     const key = new Key()
     return described(
       (state) => {
@@ -2779,7 +2779,7 @@ export const separated: {
             recover(state, start)
             return Resume.done(state, key, entry, resumed !== undefined, acc)
           }
-          if (checkLoop && state.pos === start) return assertConsumes(state, "separated")
+          if (state.pos === start) return assertConsumes(state, "separated")
           const a = step(state)
           if (a === Fail) {
             if (state.mode === "Incomplete" && state.resume !== undefined) {
