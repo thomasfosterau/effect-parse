@@ -34,9 +34,10 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
 
 # No permissions by default; the job reads the repository and nothing else. It
-# needs no secret and no OIDC token, so a Dependabot PR runs it safely. Every
-# action is pinned to a full commit SHA (Dependabot's `github-actions` updates
-# keep the pins current).
+# needs no secret and no OIDC token, so a Dependabot PR runs it safely.
+# actions/checkout is pinned to a full commit SHA and setup-vp to its exact
+# (immutable, signed) release tag; Dependabot's `github-actions` updates keep
+# both current.
 permissions: {}
 
 jobs:
@@ -55,13 +56,10 @@ jobs:
         with:
           persist-credentials: false
       # Only to run the CLI on the runner; the container installs its own.
-      - name: Setup pnpm
-        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: Setup Vite+ (Node.js and pnpm, to run the CLI)
+        uses: voidzero-dev/setup-vp@v1.22.0
         with:
-          node-version: "*"
-          check-latest: true
+          run-install: false
       # `up` fails when the image, a feature or `postCreateCommand` fails.
       - name: Build and start the container
         run: |

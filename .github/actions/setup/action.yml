@@ -1,34 +1,32 @@
 # Composite setup shared by every CI job that needs the toolchain.
-# Sets up Node.js + pnpm, restores the pnpm store cache (keyed on
-# pnpm-lock.yaml by setup-node), and installs dependencies with a frozen
-# lockfile (retried — see the Install step's own comment for why).
-# `vp` and the dev bins (tsc, fallow) land in node_modules/.bin; callers run
-# them as `pnpm exec vp …`. node_modules/.bin is deliberately NOT appended to
-# $GITHUB_PATH: that would let any dependency's bin shadow a system command
-# (`git`, `node`, …) in every later step (zizmor `github-env`).
-# Copied from the effect-web library (itself from effect-drizzle-ext and the gardeneria application).
+# voidzero-dev/setup-vp installs the Vite+ CLI (`vp`, at the catalog's
+# `vite-plus` pin, which it reads from package.json and pnpm-workspace.yaml),
+# the Node.js that Vite+ resolves for the project (`engines.node` in
+# package.json) and the pnpm that `packageManager` pins, and restores the pnpm
+# store cache keyed on pnpm-lock.yaml. It replaces pnpm/action-setup and
+# actions/setup-node (#111). Dependencies are then installed with a frozen
+# lockfile (retried: see the Install step's own comment for why).
+#
+# `vp` is on PATH afterwards, and it delegates to this checkout's own
+# `vite-plus`, so callers run `vp …` directly. node_modules/.bin is
+# deliberately NOT appended to $GITHUB_PATH: that would let any dependency's
+# bin shadow a system command (`git`, `node`, …) in every later step (zizmor
+# `github-env`).
 #
 # Callers must run `actions/checkout` BEFORE this (a local composite action
 # needs the repo on disk first).
 name: Setup toolchain
-description: Set up Node.js and pnpm, restore the package cache, and install dependencies.
+description: Set up Vite+ (vp, Node.js and pnpm), restore the package cache, and install dependencies.
 runs:
   using: composite
   steps:
-    # pnpm before Node so setup-node's `cache: pnpm` can resolve the store path.
-    # The pnpm version comes from the `packageManager` field in package.json.
-    - name: Setup pnpm
-      uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-
-    - name: Setup Node.js
-      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+    # An exact release tag, never the moving `v1` (frozen at v1.15.0).
+    # `run-install: false`: the step below installs, with its retry.
+    - name: Setup Vite+ (vp, Node.js, pnpm)
+      uses: voidzero-dev/setup-vp@v1.22.0
       with:
-        # Never `latest`: setup-node resolves it to the first entry of the
-        # nodejs.org index, pre-releases included (v27.0.0-alpha since
-        # 2026-10-29). `*` with `check-latest` is the newest stable release.
-        node-version: "*"
-        check-latest: true
-        cache: pnpm
+        cache: true
+        run-install: false
 
     # Retried: pnpm's linker can race itself when a package with a build
     # script resolves twice and both copies build — a transient ENOENT on the

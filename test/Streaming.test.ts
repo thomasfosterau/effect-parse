@@ -3,6 +3,7 @@
  * exactly the result of parsing the whole input at once, however it is
  * split, while parsing as the chunks arrive.
  */
+import * as Arr from "effect/Array"
 import * as Predicate from "effect/Predicate"
 import * as Effect from "effect/Effect"
 import * as Formatter from "effect/Formatter"
@@ -419,5 +420,185 @@ describe("parseReadable and parseResponse", () => {
     })
     const exit = await Effect.runPromise(Effect.result(ParserStream.parseReadable(body, json)))
     expect(Result.isFailure(exit) && exit.failure._tag).toBe("ReadError")
+  })
+})
+
+describe("buffer limits and linear re-parsing (#116)", () => {
+  const line = Parser.terminated(Token.takeTill("\n"), Token.literal("\n"))
+  const byteLine = Parser.terminated(Text.utf8.takeTill("\n"), Text.utf8.literal("\n"))
+  const encode = (s: string) => new TextEncoder().encode(s)
+  const failure = <A, E>(effect: Effect.Effect<A, E>) => Effect.runSync(Effect.flip(effect))
+
+  it("the default is one exported constant, 64 MiB", () => {
+    expect(ParserStream.defaultMaxBufferSize).toBe(64 * 1024 * 1024)
+  })
+
+  it("parseMany fails with a BufferLimitError when an unfinished value outgrows the limit", () => {
+    const chunks = Arr.replicate("x".repeat(10), 20)
+    const error = failure(
+      Stream.fromIterable(chunks).pipe(ParserStream.parseMany(line, { maxBufferSize: 64 }), Stream.runCollect)
+    )
+    assert(Predicate.isTagged(error, "BufferLimitError"))
+    expect(error.limit).toBe(64)
+    expect(error.size).toBe(70)
+    expect(error.message).toBe("the input is larger than maxBufferSize: 70 tokens, limit 64")
+    // Nothing of the input is attached to it
+    expect("input" in error).toBe(false)
+    const bytes = failure(
+      Stream.fromIterable(chunks.map(encode)).pipe(
+        ParserStream.parseMany(byteLine, { maxBufferSize: 64 }),
+        Stream.runCollect
+      )
+    )
+    expect(bytes._tag).toBe("BufferLimitError")
+  })
+
+  it("parseMany counts only what no value consumes: a large chunk of small records passes", () => {
+    const chunk = "ab\n".repeat(1000)
+    const out = Effect.runSync(
+      Stream.make(chunk, chunk).pipe(ParserStream.parseMany(line, { maxBufferSize: 8 }), Stream.runCollect)
+    )
+    expect(out).toHaveLength(2000)
+    // A value of exactly the limit is not over it
+    const exact = Effect.runSync(
+      Stream.make("abcd", "efg", "\n").pipe(ParserStream.parseMany(line, { maxBufferSize: 8 }), Stream.runCollect)
+    )
+    expect(exact).toEqual(["abcdefg"])
+  })
+
+  it("parseAll, parseReadable and parseResponse count the whole input", async () => {
+    const all = failure(
+      Stream.make("ab\n", "cd\n", "ef\n").pipe(ParserStream.parseAll(Parser.repeat(line), { maxBufferSize: 8 }))
+    )
+    assert(Predicate.isTagged(all, "BufferLimitError"))
+    expect(all).toMatchObject({ limit: 8, size: 9 })
+    expect(
+      Effect.runSync(
+        Stream.make("ab\n", "cd\n", "ef\n").pipe(ParserStream.parseAll(Parser.repeat(line), { maxBufferSize: 9 }))
+      )
+    ).toEqual(["ab", "cd", "ef"])
+    const body = () => new Response("ab\ncd\nef\n").body ?? assert.fail("no body")
+    const readable = await Effect.runPromise(
+      Effect.flip(ParserStream.parseReadable(body(), Parser.repeat(byteLine), { maxBufferSize: 8 }))
+    )
+    expect(readable._tag).toBe("BufferLimitError")
+    expect(
+      await Effect.runPromise(ParserStream.parseReadable(Parser.repeat(byteLine), { maxBufferSize: 9 })(body()))
+    ).toEqual(["ab", "cd", "ef"])
+    expect(
+      await Effect.runPromise(
+        ParserStream.parseResponse(Parser.repeat(byteLine), { maxBufferSize: 9 })(new Response("ab\ncd\nef\n"))
+      )
+    ).toEqual(["ab", "cd", "ef"])
+  })
+
+  it("parseResponse fails on a Content-Length over the limit before reading the body", async () => {
+    const response = new Response("ab\n", { headers: { "content-length": "1000000" } })
+    const error = await Effect.runPromise(
+      Effect.flip(ParserStream.parseResponse(response, Parser.repeat(byteLine), { maxBufferSize: 1024 }))
+    )
+    assert(Predicate.isTagged(error, "BufferLimitError"))
+    expect(error).toMatchObject({ limit: 1024, size: 1_000_000 })
+    expect(response.bodyUsed).toBe(false)
+    // A length that is absent, malformed or of an encoded body decides nothing: the bytes read do
+    const headers = [{}, { "content-length": "many" }, { "content-length": "1000000", "content-encoding": "gzip" }]
+    const parsed = await Effect.runPromise(
+      Effect.forEach(
+        headers,
+        (h) =>
+          ParserStream.parseResponse(new Response("ab\n", { headers: h }), Parser.repeat(byteLine), {
+            maxBufferSize: 1024
+          }),
+        { concurrency: 1 }
+      )
+    )
+    expect(parsed).toEqual([["ab"], ["ab"], ["ab"]])
+    const lying = await Effect.runPromise(
+      Effect.flip(
+        ParserStream.parseResponse(
+          new Response("ab\ncd\nef\n", { headers: { "content-length": "1" } }),
+          Parser.repeat(byteLine),
+          {
+            maxBufferSize: 8
+          }
+        )
+      )
+    )
+    expect(lying._tag).toBe("BufferLimitError")
+  })
+
+  it("rejects a limit that is not a positive number", () => {
+    ;[0, -1, Number.NaN].forEach((maxBufferSize) => {
+      expect(() => ParserStream.parseMany(Stream.make("a\n"), line, { maxBufferSize })).toThrow(RangeError)
+      expect(() => ParserStream.parseAll(Stream.make("a\n"), line, { maxBufferSize })).toThrow(RangeError)
+    })
+    expect(
+      Effect.runSync(
+        Stream.make("a\n").pipe(ParserStream.parseMany(line, { maxBufferSize: Infinity }), Stream.runCollect)
+      )
+    ).toEqual(["a"])
+  })
+
+  it.each([
+    ["string", (s: string): string | Uint8Array => s, line],
+    ["bytes", (s: string): string | Uint8Array => encode(s), byteLine]
+  ] as const)("a value that never completes is re-parsed in linear time (%s)", (_, make, p) => {
+    // 2 MiB in 1 KiB chunks with no newline took 10 s: every chunk parsed the value again from its start
+    const chunk = make("x".repeat(1024))
+    const chunks: Array<string | Uint8Array> = Arr.replicate(chunk, 2048)
+    chunks.push(make("\n"))
+    const started = performance.now()
+    // SAFETY: the chunks are all strings or all `Uint8Array`s, matching the parser given with them
+    const out = Effect.runSync(
+      Stream.fromIterable(chunks).pipe(
+        ParserStream.parseMany(p as Parser.Parser<string, never, never, any>),
+        Stream.runCollect
+      )
+    )
+    expect(performance.now() - started).toBeLessThan(2000)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toHaveLength(2048 * 1024)
+  })
+
+  it("a value up to 64 KiB is emitted as soon as its last chunk arrives", async () => {
+    // The stream never ends: only the chunks themselves can produce the value
+    const chunks = Stream.concat(Stream.make("x".repeat(60_000), "yz", "\n", "next"), Stream.never)
+    const out = await Effect.runPromise(chunks.pipe(ParserStream.parseMany(line), Stream.take(1), Stream.runCollect))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toHaveLength(60_002)
+  })
+
+  it("values parsed from bytes stay intact as later chunks are buffered", () => {
+    const frame = Binary.lengthTake(Binary.u8)
+    const random = rng(7)
+    const whole = new Uint8Array(8000)
+    const fill = (i: number): void => {
+      if (i >= whole.length) return
+      const n = Math.min(Math.floor(random() * 200), whole.length - i - 1)
+      whole[i] = n
+      whole.fill(1 + Math.floor(random() * 250), i + 1, i + 1 + n)
+      fill(i + 1 + n)
+    }
+    fill(0)
+    const expected = Parser.parseSync(Parser.repeat(frame), whole).map((frame) => frame.slice())
+    ;[3, 7, 64, 1000, 5000].forEach((max) => {
+      const out = Effect.runSync(
+        Stream.fromIterable(split(whole, random, max)).pipe(ParserStream.parseMany(frame), Stream.runCollect)
+      )
+      expect(out, `chunks of up to ${max}`).toEqual(expected)
+    })
+  })
+
+  it("parseMany over arrays of tokens", () => {
+    const pair = Token.take<ReadonlyArray<number>>(2)
+    const out = Effect.runSync(
+      Stream.make([1], [2, 3], [4, 5, 6], [7, 8]).pipe(ParserStream.parseMany(pair), Stream.runCollect)
+    )
+    expect(out).toEqual([
+      [1, 2],
+      [3, 4],
+      [5, 6],
+      [7, 8]
+    ])
   })
 })
