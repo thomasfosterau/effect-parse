@@ -6,7 +6,9 @@
   "image": "ghcr.io/voidzero-dev/vite-plus:1.4.0",
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers-extra/features/ripgrep:1": {},
+    // The feature is digest-locked (devcontainer-lock.json), but its default
+    // `version` is "latest", resolved when the container is built: pin it.
+    "ghcr.io/devcontainers-extra/features/ripgrep:1": { "version": "15.2.0" },
     "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
     "ghcr.io/devcontainer-community/devcontainer-features/jq:1": {}
   },
