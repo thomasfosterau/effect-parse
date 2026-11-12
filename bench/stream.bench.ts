@@ -19,18 +19,9 @@ import * as Effect from "effect/Effect"
 import { Compiler, Parser, ParserStream, Text } from "@thomasfosterau/effect-parse"
 import type { Json } from "../examples/json.ts"
 import { jsonGrammar } from "../examples/json-text.ts"
+import { records } from "./shared.ts"
 
-const doc = JSON.stringify(
-  Array.from({ length: 12000 }, (_, i) => ({
-    id: i,
-    name: `item ${i}`,
-    label: `élément nº${i} — 項目 😀`,
-    tags: ["a", "b", "c"],
-    price: i * 1.25,
-    active: i % 2 === 0,
-    nested: { x: i, y: [1, 2, 3], z: null }
-  }))
-)
+const doc = JSON.stringify(records(12000))
 const bytes = new TextEncoder().encode(doc)
 const chunkSize = 64 * 1024
 

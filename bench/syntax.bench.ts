@@ -11,20 +11,9 @@
  */
 import { Parser, Syntax } from "@thomasfosterau/effect-parse"
 import { json } from "../examples/json-syntax.ts"
+import { records } from "./shared.ts"
 
-const doc = JSON.stringify(
-  Array.from({ length: 2000 }, (_, i) => ({
-    id: i,
-    name: `item ${i}`,
-    label: `élément nº${i} — 項目 😀`,
-    tags: ["a", "b", "c"],
-    price: i * 1.25,
-    active: i % 2 === 0,
-    nested: { x: i, y: [1, 2, 3], z: null }
-  })),
-  null,
-  2
-)
+const doc = JSON.stringify(records(2000), null, 2)
 
 const tree = Syntax.parse(json, doc)
 const middle = doc.indexOf('"item 1000"') + 6

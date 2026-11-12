@@ -3,15 +3,17 @@ import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
 import { describe, expect, it } from "vite-plus/test"
+import * as Allocator from "@thomasfosterau/effect-ext/Allocator"
 import * as Arithmetic from "../examples/arithmetic.js"
 import * as Http from "../examples/http.js"
 import * as Ini from "../examples/ini.js"
 import * as Jq from "../examples/jq.js"
 import * as Json from "../examples/json.js"
 import * as JsonFast from "../examples/json-fast.js"
+import * as JsonTape from "../examples/json-tape.js"
 import { jsonGrammar } from "../examples/json-text.js"
 import * as Sexpr from "../examples/sexpr.js"
-import { Compiler, Encoding, Parser, ParserStream, Text } from "../src/index.js"
+import { Compiler, Encoding, type ParseError, Parser, ParserStream, Text } from "../src/index.js"
 import { expectFailure, expectSuccess } from "./utils.js"
 
 describe("examples/json", () => {
@@ -316,5 +318,116 @@ describe("examples/sexpr", () => {
     expect(err.mode).toBe("Cut")
     expect(err.expected).toContain('")"')
     expect(Option.isNone(Option.fromNullishOr(err.cause))).toBe(true)
+  })
+})
+
+describe("examples/json-tape", () => {
+  const encode = (text: string) => new TextEncoder().encode(text)
+  const docs = [
+    "[]",
+    "{}",
+    "[1,[2,[3]]]",
+    '""',
+    "0",
+    "null",
+    " true ",
+    '{"k":{"k":[{}]}}',
+    " [ 1 , 2 ] ",
+    '{"a": 42, "b": ["x", "y", 12], "c": {"hello": "wörld 😀"}, "d": [true, false, null, -1.5e2]}',
+    '{"e": "esc\\"aped \\u00e9 \\ud83d\\ude00 \\n", "\\u006bey": "", "plain": "tail\\\\"}',
+    JSON.stringify(Array.from({ length: 300 }, (_, i) => ({ id: i, name: `nº${i}`, tags: ["a", i], n: null })))
+  ]
+  /** Where a parse failed, or -1. */
+  const failedAt = <A, E>(result: Result.Result<A, ParseError.ParseError<E>>): number =>
+    Result.match(result, { onFailure: (error) => error.offset, onSuccess: () => -1 })
+  /** The index of the value of a member, or -1. */
+  const member = (doc: JsonTape.Document, index: number, key: string): number =>
+    Option.getOrElse(JsonTape.get(doc, index, key), () => -1)
+  const parsed = (parser: JsonTape.TapeParser, text: string) =>
+    Result.map(parser.parseResult(encode(text)), (doc) => JsonTape.toJson(doc, JsonTape.root(doc)))
+
+  it("agrees with JSON.parse", () => {
+    const parser = Effect.runSync(JsonTape.makeParser())
+    docs.forEach((doc) => expect(parsed(parser, doc)).toEqual(Result.succeed(JSON.parse(doc))))
+  })
+
+  it("writes the same tape interpreted and compiled", () => {
+    const tapes = [(p: Parser.Parser.Any) => p, Compiler.closure, Compiler.jit, Compiler.wasm].map((compile) => {
+      const tape = Effect.runSync(JsonTape.makeTape(4))
+      // SAFETY: each compiler returns the parser it is given
+      const parser = compile(JsonTape.jsonTape(tape)) as ReturnType<typeof JsonTape.jsonTape>
+      return docs.map((doc) => {
+        expect(Result.isSuccess(Parser.parse(parser, encode(doc)))).toBe(true)
+        return Array.from(tape.words.subarray(0, tape.length * 4))
+      })
+    })
+    tapes.slice(1).forEach((tape) => expect(tape).toEqual(tapes[0]))
+  })
+
+  it("rejects what the JSON grammar rejects, where it does", () => {
+    const parser = Effect.runSync(JsonTape.makeParser())
+    const grammar = JsonFast.jsonGrammar(Text.utf8)
+    const bad = ["", "[1,]", '{"a" 1}', '"\\x"', '"\\ud83d"', "[1 2]", '{"a":1}}', '"\u0001"', "nul", "[1"]
+    bad.forEach((doc) => {
+      const expected = Parser.parse(grammar, encode(doc))
+      const actual = parser.parseResult(encode(doc))
+      expect(Result.isFailure(expected)).toBe(true)
+      expect(failedAt(actual)).toBe(failedAt(expected))
+    })
+    // A failed parse leaves a parser that parses
+    expect(parsed(parser, "[1]")).toEqual(Result.succeed([1]))
+  })
+
+  it("reads strings as views of the input", () => {
+    const parser = Effect.runSync(JsonTape.makeParser())
+    const input = encode('{"name": "Zoë", "note": "a\\tb", "n": 1.5}')
+    const doc = Effect.runSync(parser.parse(input))
+    const name = member(doc, JsonTape.root(doc), "name")
+    expect(JsonTape.kind(doc, name)).toBe(JsonTape.Kind.String)
+    expect(String(JsonTape.str(doc, name))).toBe("Zoë")
+    // Zero-copy: the bytes are the input's own
+    expect(JsonTape.bytes(doc, name).buffer).toBe(input.buffer)
+    expect(JsonTape.bytes(doc, name).byteOffset).toBe(input.indexOf(0x5a))
+    // An escaped string is decoded on demand
+    const note = member(doc, JsonTape.root(doc), "note")
+    expect(JsonTape.kind(doc, note)).toBe(JsonTape.Kind.EscapedString)
+    expect(String(JsonTape.str(doc, note))).toBe("a\tb")
+    expect(JsonTape.number(doc, member(doc, JsonTape.root(doc), "n"))).toBe(1.5)
+    expect(JsonTape.get(doc, JsonTape.root(doc), "missing")).toEqual(Option.none())
+    expect(JsonTape.get(doc, name, "name")).toEqual(Option.none())
+  })
+
+  it("finds members with escaped keys, and steps over subtrees", () => {
+    const parser = Effect.runSync(JsonTape.makeParser())
+    const doc = Effect.runSync(parser.parse(encode('{"a": {"b": [1, {"b": 2}]}, "\\u0062": 3, "b": 4}')))
+    const b = member(doc, JsonTape.root(doc), "b")
+    expect(JsonTape.number(doc, b)).toBe(3)
+    expect(JsonTape.children(doc, JsonTape.root(doc)).map((key) => JsonTape.text(doc, key))).toEqual(["a", "b", "b"])
+  })
+
+  it("exposes a record as a struct over the tape's memory", () => {
+    const parser = Effect.runSync(JsonTape.makeParser())
+    const doc = Effect.runSync(parser.parse(encode('[ "ab", [] ]')))
+    const array = JsonTape.node(doc, 0)
+    expect([array.kind, array.next, array.start, array.end]).toEqual([JsonTape.Kind.Array, 3, 0, 12])
+    const string = JsonTape.node(doc, 1)
+    expect([string.kind, string.next, string.start, string.end]).toEqual([JsonTape.Kind.String, 2, 3, 5])
+  })
+
+  it("takes its memory from the current allocator", () => {
+    const arena = Allocator.makeArenaUnsafe(64 * 16)
+    const parser = Effect.runSync(JsonTape.makeParser(4).pipe(Allocator.withAllocator(arena)))
+    expect(arena.used).toBe(4 * 16)
+    // Growing the latest block of an arena extends it in place
+    expect(parsed(parser, "[1,2,3,4,5,6,7,8,9]")).toEqual(Result.succeed([1, 2, 3, 4, 5, 6, 7, 8, 9]))
+    expect(parser.tape.block.buffer).toBe(arena.buffer)
+    expect(arena.used).toBe(16 * 16)
+    // A document the arena can't hold fails with the allocator's error
+    const tooBig = parser.parseResult(encode(JSON.stringify(Array.from({ length: 100 }, (_, i) => i))))
+    expect(Result.isFailure(tooBig) && tooBig.failure.message).toContain("arena exhausted")
+    // ... and the parser still parses what fits
+    expect(parsed(parser, '["ok"]')).toEqual(Result.succeed(["ok"]))
+    Effect.runSync(JsonTape.freeTape(parser.tape))
+    expect(arena.used).toBe(0)
   })
 })

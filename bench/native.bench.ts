@@ -15,6 +15,7 @@ import { Compiler, Parser, Text } from "@thomasfosterau/effect-parse"
 import { json, type Json } from "../examples/json.ts"
 import { jsonGrammar as fastJsonGrammar } from "../examples/json-fast.ts"
 import { jsonGrammar } from "../examples/json-text.ts"
+import { records } from "./shared.ts"
 
 /** A deterministic PRNG (mulberry32), so every run parses the same documents. */
 const rng = (seed: number) => () => {
@@ -25,17 +26,6 @@ const rng = (seed: number) => () => {
 }
 const random = rng(2026)
 const word = () => ["alpha", "beta", "gamma", "delta", "epsilon"][Math.floor(random() * 5)]
-
-const records = (n: number) =>
-  Array.from({ length: n }, (_, i) => ({
-    id: i,
-    name: `item ${i}`,
-    label: `élément nº${i} — 項目 😀`,
-    tags: ["a", "b", "c"],
-    price: i * 1.25,
-    active: i % 2 === 0,
-    nested: { x: i, y: [1, 2, 3], z: null }
-  }))
 
 /** The values of the deep-nesting document. */
 type Nested = number | readonly [Nested, number] | { readonly k: Nested }

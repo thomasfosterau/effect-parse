@@ -266,8 +266,11 @@ export default defineConfig({
       // loop), and recursion overflows the stack on long inputs. The example
       // custom parser step is the same kind of code, and the benchmarks'
       // timing loops measure it, so a callback per iteration would skew them.
+      // The tape example's member lookup walks an object's records and
+      // compares key bytes in place: the array of members the rule's shape
+      // needs is the garbage per lookup that the example exists to avoid.
       {
-        files: ["src/**", "examples/json-syntax.ts", "bench/**"],
+        files: ["src/**", "examples/json-syntax.ts", "examples/json-tape.ts", "bench/**"],
         rules: {
           "effect/imperative-loops": "off"
         }
@@ -546,7 +549,9 @@ export default defineConfig({
       "bench:gen": bench("gen"),
       "bench:syntax": bench("syntax"),
       "bench:drivers": bench("drivers"),
-      "bench:jq": bench("jq")
+      "bench:jq": bench("jq"),
+      "bench:downstream": bench("downstream"),
+      "bench:zero-copy": bench("zero-copy")
     }
   },
   pack: {

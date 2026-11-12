@@ -406,6 +406,30 @@ Length-prefixed data (`lengthTake`, `lengthRepeat`) built a parser for each leng
 
 Interpreted parses record, for errors, what could have been accepted where the parse stopped: a parser that stops without failing (`opt`, `repeat`, a whitespace skipper) sets a hint, and a failure at the hint's offset merges the hint's expectations into its own. On JSON that is one merge per value or so, almost all between the same few constant arrays (the skipper's hint, then the separator's), and each allocated a new array; a single-entry cache of the last merge never hit, because a hint merged at one offset is itself a new array each time. `mergeExpected` keeps its last four merges by the identity of their inputs instead: expectation arrays are never mutated, a merge seen before returns the same array, and the next merge then sees that array too, so on the JSON records document 4 of 40,000 merges were computed. Interpreted parses got 2–13% faster across the JSON benchmarks (34.2 to 31.1 ms with `Token`/`Ascii`); compiled code records no diagnostics and is unaffected.
 
+#### Zero-copy output
+
+Recognition, not building values, dominates a compiled parse, but the values are still a third of it, and all of its garbage. [`examples/json-tape.ts`](../examples/json-tape.ts) is `json-fast.ts` over UTF-8 bytes with every value-building step replaced by a callback that appends a 16-byte record to a _tape_: a block from [effect-ext](https://github.com/thomasfosterau/effect-ext)'s `Allocator`, described by two `Layout.struct`s (a node: `kind`, `next`, and the byte offsets of its text in the input; a number: `kind`, `next` and the `f64`). `next` is the index after the node's subtree, so a reader steps over what it does not want. A string without escapes is read as an effect-ext `Str` over a `subarray` of the input (`Text.utf8` has validated it, so `Str.fromUtf8Unsafe` is sound); only a string with escapes is decoded, on demand, by the grammar's own string parser. A record can be read as a `BufferStruct` view.
+
+The grammar needs no new combinator. `Parser.asVoid` makes compiled code recognise a token without slicing it, `Parser.mapSpan` hands a callback the offsets, and `Parser.tap` makes compiled code call it although nothing uses its result, so the JIT compiles the whole grammar inline. A custom combinator (`Parser.combinator`, or `Parser.make`) is the wrong tool here: the JIT gives those to the closure compiler, with every parser inside them. Records are appended only on committed paths (after `dispatch`, inside `cut`), so nothing has to be undone; the interpreter and the three compilers write the same tape (`test/examples.test.ts`).
+
+`vp run bench:zero-copy`, the 0.60 MB benchmark document as UTF-8 (54,001 values, a 0.86 MB tape), median of three processes of the best of 60 interleaved runs, each parse followed by a use of its result:
+
+| Parse, then | tape, heap | tape, arena | `json-fast.ts`, JIT | `json-fast.ts`, WebAssembly | `TextDecoder` + `JSON.parse` |
+| --- | --: | --: | --: | --: | --: |
+| nothing | 2.47 ms | 2.44 ms | 4.74 ms | 3.91 ms | 3.44 ms |
+| sum one number of each record | 2.58 ms | 2.62 ms | 4.83 ms | 3.98 ms | 3.48 ms |
+| one string of each record, as text | 2.80 ms | 2.78 ms | 4.83 ms | 3.95 ms | 3.43 ms |
+| one string of each record, as bytes | 2.64 ms | 2.62 ms | 5.79 ms | 4.78 ms | 4.08 ms |
+| everything, in place: each number, each string as a `Str` | 3.93 ms | 3.90 ms | 6.43 ms | 5.52 ms | 5.23 ms |
+| everything, as JavaScript values | 16.56 ms | 15.17 ms | 6.63 ms | 5.76 ms | 4.79 ms |
+| collections in 200 parses | 0 | 0–1 | 34–56 | 34–55 | 14 |
+
+Parsing to a tape takes about half the JIT's time on the same grammar and 0.7 of `JSON.parse`'s on bytes, and reading the document keeps that, in part or in full, as long as the reader stays on the tape: every number and every string as a `Str` is still 0.75 of `JSON.parse` followed by a walk of its values. A consumer of `Str`s never needs more. The tape is the wrong representation only for one that wants every value as a JavaScript value: building them from it (an array of child indices per container, a `TextDecoder` call per string) costs three times what building them while parsing does, and `toJson` is unoptimised. The tape's time is about what the JIT takes to recognise the document (about 2.5 ms, above), so the next gain is in the recognizer: the WebAssembly scan takes about 1 ms, but a callback out of WebAssembly costs about 40 ns and the tape makes one per value, so it runs on the JIT. A tape written by the WebAssembly scan itself would need the compiler to know the record layout.
+
+An arena (one block for every parse) does not make a parse faster than the heap allocator does: the tape is one block either way, grown by doubling, and reused by the next parse. What it buys is that the tape is never garbage.
+
+effect-ext's containers were not usable for the tape itself. `Vec.push` and `StructOfArrays.push` return an `Effect` per element: appending the document's 54,001 records takes 32 ms and 28 ms, and `StructOfArrays.extend` of an array of them 6.7 ms, against 0.33 ms through typed arrays over the block. `Vec.typedArray` and `StructOfArrays.column` view the elements already pushed, not the capacity, so they cannot be written ahead of the length either. A synchronous unchecked append (after a `reserve`), or a way to set the length over a reserved column, would let a parser fill them directly.
+
 #### Measured and not adopted
 
 - **Skipping ahead in long strings with a regular expression.** For a `takeWhile` over a string whose set accepts everything from 256 up to the surrogates (the JSON string body), testing 16 units one at a time and then jumping with a global regular expression to the next unit that may stop the loop made the `Text.string` JSON grammars 10–25% slower on records and no faster on 50-character strings: a regular expression call costs about as much as the loop over such a string, and the head loop slows every short string. What did pay is the narrower case of #75, below.
