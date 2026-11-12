@@ -2316,6 +2316,96 @@ describe("the WebAssembly compiler", () => {
     sameAsInterpreted(JsonFast.jsonGrammar(Text.utf8), new TextEncoder().encode(doc))
   })
 
+  describe("limits (#123)", () => {
+    /** Watches `WebAssembly.Memory.grow`; once `refuse` is called, it throws as an engine out of memory does. */
+    const watchGrowth = () => {
+      const spy = vi.spyOn(WebAssembly.Memory.prototype, "grow")
+      onTestFinished(() => spy.mockRestore())
+      const refuse = () =>
+        spy.mockImplementation(() => {
+          throw new RangeError("WebAssembly.Memory.grow(): Unable to grow instance memory")
+        })
+      return { calls: () => spy.mock.calls.length, refuse }
+    }
+
+    it("parses on the JIT when the memory cannot grow to hold the input", () => {
+      const { calls, refuse } = watchGrowth()
+      refuse()
+      const zeros = Compiler.wasm(Token.takeWhile<Uint8Array>([0]))
+      const bytes = new Uint8Array(1 << 20)
+      // Used to throw `RangeError: WebAssembly.Memory.grow()` out of `Parser.parse`
+      expect(Parser.parse(zeros, bytes)).toEqual(Result.succeed(bytes))
+      const letters = Compiler.wasm(Parser.repeat(Token.oneOf("ab")))
+      const text = "ab".repeat(200_000)
+      expect(Parser.parse(letters, text)).toEqual(Parser.parse(Parser.repeat(Token.oneOf("ab")), text))
+      expect(Result.isFailure(Parser.parse(letters, `${text}!`))).toBe(true)
+      expect(calls()).toBeGreaterThan(0)
+      // The parser is still the WebAssembly build: only that parse left it
+      expect(Registry.compiled(letters, 0)?.backend).toBe("wasm")
+    })
+
+    it("starts again on the JIT when the trace cannot grow mid-parse", () => {
+      // The growth that holds the input goes through; the first token then turns the engine "out of
+      // memory", so the trace's own growth, part-way through the scan, is refused
+      const { calls, refuse } = watchGrowth()
+      const rest = Parser.repeat(Token.oneOf<Uint8Array>([97, 98]))
+      // A `filter` callback runs during the scan, when its token has been read
+      const first = Parser.filter(Token.oneOf<Uint8Array>([97]), () => {
+        refuse()
+        return true
+      })
+      const compiled = Compiler.wasm(Parser.preceded(first, rest))
+      const bytes = new TextEncoder().encode("ab".repeat(300_000))
+      const expected = Parser.parse(Parser.preceded(Token.oneOf<Uint8Array>([97]), rest), bytes)
+      expect(Result.isSuccess(expected)).toBe(true)
+      expect(Parser.parse(compiled, bytes)).toEqual(expected)
+      expect(calls()).toBeGreaterThanOrEqual(2)
+      expect(Parser.parse(compiled, bytes.subarray(0, 5))).toEqual(Result.succeed([98, 97, 98, 97]))
+      expect(Registry.compiled(compiled, 1)?.backend).toBe("wasm")
+    })
+
+    it("gives back the memory of a large parse", () => {
+      const created = vi.spyOn(WebAssembly, "Memory")
+      onTestFinished(() => created.mockRestore())
+      const zeros = Compiler.wasm(Token.takeWhile<Uint8Array>([0]))
+      expect(Parser.parse(zeros, new Uint8Array(1024))).toEqual(Result.succeed(new Uint8Array(1024)))
+      const before = created.mock.calls.length
+      // 28 MB of input reserves five times as much: past the 128 MiB above which a memory is replaced
+      const large = new Uint8Array(28 * 1024 * 1024)
+      const parsed = Parser.parse(zeros, large)
+      expect(Result.isSuccess(parsed) && parsed.success.length).toBe(large.length)
+      expect(created.mock.calls.length).toBe(before + 1)
+      // The new instance has its tables and parses as the old one did
+      expect(Parser.parse(zeros, new Uint8Array([0, 0, 1]))).toEqual(
+        Parser.parse(Token.takeWhile<Uint8Array>([0]), new Uint8Array([0, 0, 1]))
+      )
+      expect(created.mock.calls.length).toBe(before + 1)
+      expect(Registry.compiled(zeros, 1)?.backend).toBe("wasm")
+    })
+
+    const huge: ReadonlyArray<[name: string, p: Parser.Parser.Any]> = [
+      ["repeat(a, { min: 2 ** 32 })", Parser.repeat(a, { min: 2 ** 32 })],
+      ["repeat(a, { max: 2 ** 32 })", Parser.repeat(a, { max: 2 ** 32 })],
+      ["repeat(a, { min: 1, max: 2 ** 32 + 1 })", Parser.repeat(a, { min: 1, max: 2 ** 32 + 1 })],
+      ["repeat(a, { max: 2 ** 31 })", Parser.repeat(a, { max: 2 ** 31 })],
+      ["repeat(a, { min: 2 ** 31 })", Parser.repeat(a, { min: 2 ** 31 })],
+      ["separated(a, ',', { min: 2 ** 32 })", Parser.separated(a, Token.literal(","), { min: 2 ** 32 })],
+      ["separated(a, ',', { max: 2 ** 32 })", Parser.separated(a, Token.literal(","), { max: 2 ** 32 })],
+      [
+        "fold(a, { max: 2 ** 40 })",
+        Parser.fold(a, { range: { max: 2 ** 40 }, init: () => 0, f: (n: number) => n + 1 })
+      ],
+      ["takeWhile(a, { min: 2 ** 32 })", Token.takeWhile("a", { min: 2 ** 32 })],
+      ["takeWhile(a, { max: 2 ** 32 })", Token.takeWhile("a", { max: 2 ** 32 })],
+      ["takeWhile(a, { min: 2, max: 2 ** 32 + 2 })", Token.takeWhile("a", { min: 2, max: 2 ** 32 + 2 })],
+      ["Text.utf8.takeWhile(a, { max: 2 ** 32 })", Text.string.takeWhile("a", { max: 2 ** 32 })]
+    ]
+
+    it.each(huge)("%s: a bound past 32 bits is not truncated", (_, p) => {
+      ;["", "a", "aa", "aaa", "a,a", "a,a,a", "aab"].forEach((input) => same(p, input))
+    })
+  })
+
   it("parses again after a callback threw", () => {
     let calls = 0
     const p = Compiler.wasm(

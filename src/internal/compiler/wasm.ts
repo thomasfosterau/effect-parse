@@ -80,6 +80,32 @@ const MaxWrites = 4096
 
 /** Bytes left after the cursor beyond which a driver's parse of the same buffer runs the JIT (see `run`). */
 const LargeRest = 4096
+/**
+ * The most linear memory a module is grown to: 2 GiB. Every offset into the
+ * memory, the trace's included, is then a non-negative `i32`. A parse that
+ * would need more (its input copied, and four to seven times as much of
+ * trace), or whose `memory.grow` the engine refuses, runs on the JIT, which
+ * needs neither (#123).
+ */
+const MaxMemory = 2 ** 31
+/**
+ * Above this much linear memory after a parse (128 MiB), the module is
+ * given a new memory: `WebAssembly.Memory` never shrinks, so one large
+ * input would otherwise hold five to ten times its size for the life of
+ * the process, per compiled parser and input kind.
+ */
+const ReleaseAbove = 128 * 1024 * 1024
+/** What `grow` throws when the trace cannot grow: the parse starts again on the JIT. */
+class MemoryExhausted {}
+/**
+ * A repetition bound as the `i32` it is compared with, unsigned. A count
+ * never reaches 2^32 - 1 (the input is in a 32-bit memory), so a larger
+ * minimum is one that cannot be met, and a larger maximum is none at all
+ * (see `unbounded`); written as given, it was truncated to its low 32 bits.
+ */
+const bound = (n: number): number => (n >= 0xffffffff ? 0xffffffff : n)
+/** Whether a maximum can never be reached by a count (see {@link bound}). */
+const unbounded = (max: number): boolean => max >= 0xffffffff
 
 /** The most literals a compiled `takeUntilAny` checks at each candidate; more are searched in JavaScript. */
 const MaxUntil = 64
@@ -1260,7 +1286,7 @@ class WasmCompiler {
   private stop(b: Body, fail: Label, n: number, min: number, restore: () => void, done: Label): void {
     this.unlessBacktrack(b, fail)
     if (min > 0) {
-      b.get(n).i32(min).op(Op.i32LtU)
+      b.get(n).i32(bound(min)).op(Op.i32LtU)
       b.if(() => b.br(fail))
     }
     restore()
@@ -1302,7 +1328,7 @@ class WasmCompiler {
     b.i32(0).set(n)
     b.block((done) => {
       this.loop(b, (again) => {
-        if (max !== Infinity) b.get(n).i32(max).op(Op.i32GeU).brIf(done)
+        if (!unbounded(max)) b.get(n).i32(bound(max)).op(Op.i32GeU).brIf(done)
         const saved = this.save(b)
         this.attempt(
           b,
@@ -1369,7 +1395,7 @@ class WasmCompiler {
         }
       )
       this.loop(b, (again) => {
-        if (max !== Infinity) b.get(n).i32(max).op(Op.i32GeU).brIf(done)
+        if (!unbounded(max)) b.get(n).i32(bound(max)).op(Op.i32GeU).brIf(done)
         mark()
         this.attempt(
           b,
@@ -1676,14 +1702,14 @@ class WasmCompiler {
       b.loop((again) => {
         this.atEnd(b, 0)
         b.brIf(stop)
-        if (max !== Infinity) b.get(n).i32(max).op(Op.i32GeU).brIf(stop)
+        if (!unbounded(max)) b.get(n).i32(bound(max)).op(Op.i32GeU).brIf(stop)
         this.whileStep(enc, b, set, w, wide, stop)
         if (counted) b.get(n).i32(1).op(Op.i32Add).set(n)
         b.br(again)
       })
     })
     if (min > 0) {
-      if (counted) b.get(n).i32(min).op(Op.i32LtU)
+      if (counted) b.get(n).i32(bound(min)).op(Op.i32LtU)
       else b.get(0).get(st).op(Op.i32Eq)
       this.failIf(b, s.fail)
     }
@@ -3007,6 +3033,13 @@ const compileWasm = (root: ParserLike, kind: 0 | 1): Result.Result<Compiled, str
   return run(root, c, bytes, kind, build, source)
 }
 
+/** What a parse calls in an instance of a module: its functions are typed by the module's own type section. */
+interface Entries {
+  readonly widen: Function
+  readonly start: Function
+  readonly mode: WebAssembly.Global
+}
+
 /** A global of a module's exports. */
 const exportedGlobal = (exports: WebAssembly.Exports, name: string): Result.Result<WebAssembly.Global, string> => {
   const g = exports[name]
@@ -3021,7 +3054,7 @@ const run = (
   build: Builder,
   source: string
 ): Result.Result<Compiled, string> => {
-  const memory = new WebAssembly.Memory({ initial: 2 })
+  let memory = new WebAssembly.Memory({ initial: 2 })
   // `memory.buffer` is slow to read: its size, as of the latest growth
   let size = memory.buffer.byteLength
   let i32 = new Int32Array(memory.buffer)
@@ -3032,13 +3065,21 @@ const run = (
     f64 = new Float64Array(memory.buffer)
     u8 = new Uint8Array(memory.buffer)
   }
-  /** Grows the memory to at least `bytes`, doubling it. */
-  const reserve = (bytes: number) => {
+  /**
+   * Grows the memory to at least `bytes`, doubling it: false when that is
+   * more than {@link MaxMemory}, or more than the engine will give.
+   */
+  const reserve = (bytes: number): boolean => {
     const have = size
-    if (have >= bytes) return
-    memory.grow(Math.ceil((Math.max(bytes, have * 2) - have) / PageSize))
+    if (have >= bytes) return true
+    if (bytes > MaxMemory) return false
+    const pages = Math.ceil((Math.min(Math.max(bytes, have * 2), MaxMemory) - have) / PageSize)
+    // `grow` throws a `RangeError` when the engine cannot allocate the pages
+    const grown = Result.try(() => memory.grow(pages))
+    if (Result.isFailure(grown)) return false
     size = memory.buffer.byteLength
     views()
+    return true
   }
   const steps: Array<Step> = c.islands.map(({ parser }) => jitBackend.build(parser, kind, false).step ?? parser.step)
   const used = c.islands.map(({ used }) => used)
@@ -3046,58 +3087,59 @@ const run = (
   const checks = c.checks
   let state: State<any> = idle
   const values: Array<Value> = []
-  const imports = {
-    env: {
-      mem: memory,
-      island: (id: number, pos: number): number => {
-        const s = state
-        s.pos = pos
-        const a = steps[id](s)
-        if (a === Fail) return s.mode === "Cut" ? -2 : -1
-        if (used[id]) values.push(a)
-        return s.pos
-      },
-      // Doubles the memory, returning the new limit of the trace
-      grow: (): number => {
-        reserve(size * 2)
-        // The views changed
-        build.bind(i32, f64, state.input, state.end, values, state)
-        return size - Slack
-      },
-      test: (id: number, cp: number): number => tests[id](cp),
-      // A value island: the value of its parser, built from its trace at `from`, and the callback
-      check: (id: number, from: number): number => {
-        const s = state
-        const a = checks[id](build.value(id, from >> 2))
-        if (a === Fail) {
-          s.mode = "Backtrack"
-          return 0
-        }
-        values.push(a)
-        return 1
-      },
-      // The value of the float text at `[start, end)`, which is ASCII: one byte each, or a
-      // byte and a zero byte in UTF-16
-      float: (start: number, end: number): number => {
-        const input: string | Uint8Array = state.input
-        return toFloat(
-          Predicate.isString(input) ? input.slice(start, end) : latin1.text(input, start, end).replace(/\0/g, "")
-        )
+  const env = {
+    island: (id: number, pos: number): number => {
+      const s = state
+      s.pos = pos
+      const a = steps[id](s)
+      if (a === Fail) return s.mode === "Cut" ? -2 : -1
+      if (used[id]) values.push(a)
+      return s.pos
+    },
+    // Doubles the memory, returning the new limit of the trace
+    grow: (): number => {
+      if (size >= MaxMemory || !reserve(Math.min(size * 2, MaxMemory))) throw new MemoryExhausted()
+      // The views changed
+      build.bind(i32, f64, state.input, state.end, values, state)
+      return size - Slack
+    },
+    test: (id: number, cp: number): number => tests[id](cp),
+    // A value island: the value of its parser, built from its trace at `from`, and the callback
+    check: (id: number, from: number): number => {
+      const s = state
+      // `from` is a byte offset below 2 GiB (`MaxMemory`); unsigned all the same, were it ever not
+      const a = checks[id](build.value(id, from >>> 2))
+      if (a === Fail) {
+        s.mode = "Backtrack"
+        return 0
       }
+      values.push(a)
+      return 1
+    },
+    // The value of the float text at `[start, end)`, which is ASCII: one byte each, or a
+    // byte and a zero byte in UTF-16
+    float: (start: number, end: number): number => {
+      const input: string | Uint8Array = state.input
+      return toFloat(
+        Predicate.isString(input) ? input.slice(start, end) : latin1.text(input, start, end).replace(/\0/g, "")
+      )
     }
   }
-  const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes), imports)
-  const exported = instance.exports
-  const rootFn = exported.root
-  if (!Predicate.isFunction(rootFn)) return Result.fail("no root function")
-  const widenFn = kind === 0 ? exported.widen : rootFn
-  if (!Predicate.isFunction(widenFn)) return Result.fail("no widen function")
-  const startFn = exported.start
-  if (!Predicate.isFunction(startFn)) return Result.fail("no start function")
-  const names = ["mode"] as const
-  const globals = Result.all(names.map((name) => exportedGlobal(exported, name)))
-  if (Result.isFailure(globals)) return Result.fail(globals.failure)
-  const [mode] = globals.success
+  const module = new WebAssembly.Module(bytes)
+  /** The entry points of an instance of the module over `mem`. */
+  const instantiate = (mem: WebAssembly.Memory): Result.Result<Entries, string> => {
+    const exported = new WebAssembly.Instance(module, { env: { ...env, mem } }).exports
+    const rootFn = exported.root
+    if (!Predicate.isFunction(rootFn)) return Result.fail("no root function")
+    const widenFn = kind === 0 ? exported.widen : rootFn
+    if (!Predicate.isFunction(widenFn)) return Result.fail("no widen function")
+    const startFn = exported.start
+    if (!Predicate.isFunction(startFn)) return Result.fail("no start function")
+    return Result.map(exportedGlobal(exported, "mode"), (mode) => ({ widen: widenFn, start: startFn, mode }))
+  }
+  const first = instantiate(memory)
+  if (Result.isFailure(first)) return Result.fail(first.failure)
+  let entries = first.success
   let busy = false
   /** The JIT's step for the parser, built on first use. */
   let fallback: Step = (s) => {
@@ -3113,7 +3155,7 @@ const run = (
    */
   const copyString = (input: string, staging: number) => {
     const { written } = utf8Encoder.encodeInto(input, u8.subarray(staging, staging + 3 * input.length))
-    const replaced: number = widenFn(staging, written)
+    const replaced: number = entries.widen(staging, written)
     if (replaced === 0) return
     // U+FFFD in the string, or a lone surrogate that `encodeInto` replaced by it: its unit, as it is
     const view = new DataView(memory.buffer)
@@ -3131,7 +3173,9 @@ const run = (
     const inputBytes = kind === 0 ? 2 * n : n
     const traceStart = (Input + inputBytes + 15) & -16
     // Strings are staged where the trace goes: 3 bytes of UTF-8 and 4 of list at most per unit
-    reserve(traceStart + Math.max(Slack * 4, inputBytes * 4, kind === 0 ? 7 * n + 16 : 0))
+    if (!reserve(traceStart + Math.max(Slack * 4, inputBytes * 4, kind === 0 ? 7 * n + 16 : 0))) {
+      throw new MemoryExhausted()
+    }
     if (Predicate.isString(input)) {
       // Strings never change: one already in memory (parsed again, or from another offset) stays there
       if (input !== copied) {
@@ -3146,13 +3190,30 @@ const run = (
     values.length = 0
     state = s
     build.bind(i32, f64, input, s.end, values, s)
-    const r: number = startFn(s.pos, s.end, n, traceStart, size - Slack)
+    const r: number = entries.start(s.pos, s.end, n, traceStart, size - Slack)
     if (r < 0) {
-      s.mode = mode.value === Cut ? "Cut" : "Backtrack"
+      s.mode = entries.mode.value === Cut ? "Cut" : "Backtrack"
       return Fail
     }
     s.pos = r
-    return build.root(traceStart >> 2)
+    return build.root(traceStart >>> 2)
+  }
+  /**
+   * Gives the module a new memory of the initial size, dropping the one a
+   * large parse grew (and the string it held). An instance is bound to its
+   * memory, so the module is instantiated again; its data segments fill
+   * the tables in.
+   */
+  const release = () => {
+    const fresh = new WebAssembly.Memory({ initial: 2 })
+    const next = instantiate(fresh)
+    // The module instantiated once already, with these imports; were it to fail, the grown memory stays
+    if (Result.isFailure(next)) return
+    memory = fresh
+    size = fresh.buffer.byteLength
+    views()
+    copied = ""
+    entries = next.success
   }
   /** The bytes copied by the latest parse: parsing them again from further on is a driver at work. */
   let lastBytes: Uint8Array = new Uint8Array(0)
@@ -3173,13 +3234,22 @@ const run = (
     busy = true
     // Whatever happens (a callback may throw), the next parse starts afresh
     pending = s
+    const from = s.pos
     const result = Result.try(parsePending)
     build.unbind()
     state = idle
     pending = idle
     busy = false
     values.length = 0
-    if (Result.isFailure(result)) throw result.failure
+    if (size > ReleaseAbove) release()
+    if (Result.isFailure(result)) {
+      // The input, or its trace, needs more memory than there is: the JIT parses it in place
+      if (result.failure instanceof MemoryExhausted) {
+        s.pos = from
+        return fallback(s)
+      }
+      throw result.failure
+    }
     return result.success
   }
   return Result.succeed({ backend: "wasm", step, guarded: false, fallbacks: c.fallbacks, error: undefined, source })

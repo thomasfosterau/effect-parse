@@ -537,8 +537,8 @@ export default defineConfig({
       // on `git commit` / `git push` but never refreshes this map).
       "test:coverage": {
         // Istanbul instrumentation slows the differential suites several-fold,
-        // past vitest's 5 s default; the unit run keeps the default.
-        command: "vp test run --coverage --testTimeout 30000",
+        // past the unit run's timeout (`test.testTimeout` below).
+        command: "vp test run --coverage --testTimeout 60000",
         cache: { env: ["VITEST_MAX_WORKERS", "NODE_OPTIONS"], input: cacheInputs, output: ["coverage/**"] }
       },
       // Benchmarks: run by hand around a change to a hot path, never in CI
@@ -585,6 +585,11 @@ export default defineConfig({
     // The example packages' suites run with the library's: examples/ripgrep
     // checks its output against ripgrep's when `rg` is installed.
     include: ["test/**/*.test.ts", "examples/*/test/**/*.test.ts"],
+    // The differential suites and the ripgrep example have tests that take
+    // 4 to 5 s on a quiet machine: with the files running in parallel on a
+    // small one they crossed vitest's 5 s default and failed with no wrong
+    // result (#130). Still short enough that a hang is reported promptly.
+    testTimeout: 20_000,
     ...(maxWorkers === undefined ? {} : { maxWorkers: Number(maxWorkers) }),
     coverage: {
       provider: "istanbul",
