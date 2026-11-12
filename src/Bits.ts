@@ -24,6 +24,7 @@ import type { State } from "./Input.js"
 import { Fail, Failure } from "./Input.js"
 import type { Parser } from "./Parser.js"
 import { make } from "./Parser.js"
+import { checkCount } from "./internal/node.js"
 
 declare const BitInputBrand: unique symbol
 
@@ -136,6 +137,7 @@ const readBits = (state: State<any>, count: number): number => {
  * @category parsers
  */
 export const take = (count: number): Parser<number, never, never, BitInput> => {
+  checkCount(count)
   if (count > 53) throw new RangeError("Bits.take: use Bits.takeBig for more than 53 bits")
   const expected = [`${count} bits`]
   return make((state: State<any>) => {
@@ -152,6 +154,7 @@ export const take = (count: number): Parser<number, never, never, BitInput> => {
  * @category parsers
  */
 export const takeBig = (count: number): Parser<bigint, never, never, BitInput> => {
+  checkCount(count)
   const expected = [`${count} bits`]
   return make((state: State<any>) => {
     const avail = state.end - state.pos
@@ -175,6 +178,7 @@ export const takeBig = (count: number): Parser<bigint, never, never, BitInput> =
  * @category parsers
  */
 export const pattern = (pattern: number, count: number): Parser<number, never, never, BitInput> => {
+  checkCount(count)
   const expected = [`bit pattern ${pattern.toString(2).padStart(count, "0")}`]
   return make((state: State<any>) => {
     const start = state.pos

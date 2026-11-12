@@ -197,13 +197,59 @@ export const describedNode = (p: ParserLike): Node | undefined =>
 /** The description of a parser: `Opaque` when it has none. */
 export const nodeOf = (p: ParserLike): Node => describedNode(p) ?? { _tag: "Opaque", step: p.step }
 
-/** Normalizes a range, as `repeat`, `takeWhile`, ... do. */
+/** How a rejected argument reads in an error: never the argument's own text. */
+const describeArgument = (u: unknown): string =>
+  Predicate.isNumber(u) || Predicate.isBigInt(u) || u === undefined || u === null
+    ? String(u)
+    : Predicate.isString(u)
+      ? "a string"
+      : "a value that is not a number"
+
+/**
+ * `count` as given, which must be a non-negative safe integer, else a
+ * `RangeError`. A count is a `number` only in the types, and each backend
+ * read a negative, fractional, `NaN` or non-number count its own way: the
+ * interpreter moved the cursor backwards, and the JIT wrote the value into
+ * the source it compiles.
+ */
+export const checkCount = (count: number, what: string = "count"): number => {
+  if (!Number.isSafeInteger(count) || count < 0)
+    throw new RangeError(`invalid ${what}: expected a non-negative integer, got ${describeArgument(count)}`)
+  return count
+}
+
+/**
+ * Normalizes a range, as `repeat`, `takeWhile`, ... do. Throws a
+ * `RangeError` unless both bounds are non-negative integers (`max` may be
+ * `Infinity`) with `min <= max` (see {@link checkCount}).
+ */
 export const bounds = (
   range: number | { readonly min?: number | undefined; readonly max?: number | undefined } | undefined
 ): Bounds => {
   if (range === undefined) return { min: 0, max: Infinity }
-  if (Predicate.isNumber(range)) return { min: range, max: range }
-  return { min: range.min ?? 0, max: range.max ?? Infinity }
+  if (!Predicate.isObject(range)) {
+    const count = checkCount(range)
+    return { min: count, max: count }
+  }
+  const min = checkCount(range.min ?? 0, "range: min")
+  const max = range.max ?? Infinity
+  if (max !== Infinity) checkCount(max, "range: max")
+  if (min > max) throw new RangeError(`invalid range: min (${min}) > max (${max})`)
+  return { min, max }
+}
+
+/**
+ * The code of a control character given as a one-character string or a
+ * code: a non-negative integer, else a `RangeError` (it is compared with
+ * input units, and the JIT writes it into the source it compiles).
+ */
+export const controlCode = (control: string | number, read: (s: string) => number): number => {
+  const code = Predicate.isString(control) ? read(control) : control
+  if (!Number.isSafeInteger(code) || code < 0)
+    throw new RangeError(
+      `invalid control character: expected a character or its code, got ${describeArgument(control)}`
+    )
+  return code
 }
 
 /**

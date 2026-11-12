@@ -38,7 +38,7 @@ import {
   splitSurrogate
 } from "./internal/tokens.js"
 import type { ErrorKind } from "./ParseError.js"
-import { bounds } from "./internal/node.js"
+import { bounds, checkCount } from "./internal/node.js"
 import type { Parser, Range } from "./Parser.js"
 import { described } from "./Parser.js"
 
@@ -353,12 +353,22 @@ export const noneOf = <I extends Input = string>(
 }
 
 /**
- * Takes exactly `count` tokens (winnow's and nom's `take`).
+ * Takes exactly `count` tokens (winnow's and nom's `take`). `count` must be
+ * a non-negative integer: anything else throws a `RangeError` here, when
+ * the parser is built.
+ *
+ * @example
+ * ```ts
+ * import { Parser, Token } from "@thomasfosterau/effect-parse"
+ *
+ * Parser.parsePeek(Token.take(2), "abc") // Result.succeed(["c", "ab"])
+ * ```
  *
  * @since 0.1.0
  * @category slices
  */
 export const take = <I extends Input = string>(count: number): Parser<Slice<NoInfer<I>>, never, never, NoInfer<I>> => {
+  checkCount(count)
   const expected = [count === 1 ? "1 token" : `${count} tokens`]
   return described(
     (state) => {
@@ -374,9 +384,8 @@ export const take = <I extends Input = string>(count: number): Parser<Slice<NoIn
 }
 
 const normalize = (r: Range | undefined): [number, number] => {
-  if (r === undefined) return [0, Infinity]
-  if (Predicate.isNumber(r)) return [r, r]
-  return [r.min ?? 0, r.max ?? Infinity]
+  const { max, min } = bounds(r)
+  return [min, max]
 }
 
 /** @internal */
