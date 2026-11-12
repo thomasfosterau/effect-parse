@@ -385,6 +385,21 @@ const value = await Effect.runPromise(ParserStream.parseResponse(await fetch(url
 
 The result, and any error, is the same as parsing the whole body at once. Compiled parsers stream compiled. With the JSON example on a 2 MB document, `parseResponse` returns about 1 ms after the last byte at 10 MB/s, and keeps pace with `Response.json()` at 25 MB/s; on faster connections the native parser is quicker (`vp run bench:stream`).
 
+### Untrusted streams
+
+Every stream runner bounds what it buffers. `maxBufferSize` (in tokens: UTF-16 code units, bytes or array elements) defaults to 64 MiB (`ParserStream.defaultMaxBufferSize`) on `parseMany`, `parseAll`, `parseReadable` and `parseResponse`; a stream that exceeds it fails with a `ParserStream.BufferLimitError` (`limit`, `size`), a different tagged error from `ParseError`, so "too large" and "malformed" can be answered differently:
+
+```ts
+import { Effect } from "effect"
+import { ParserStream } from "@thomasfosterau/effect-parse"
+
+const body = ParserStream.parseResponse(await fetch(url), json, { maxBufferSize: 8 * 1024 * 1024 }).pipe(
+  Effect.catchTag("BufferLimitError", (e) => Effect.fail(`payload too large: ${e.size} > ${e.limit} bytes`))
+)
+```
+
+`parseMany` counts the input it has not consumed yet (one unfinished value, so a missing delimiter is caught); the other three hold the whole input and count all of it, and `parseResponse` fails before reading the body when `Content-Length` is already over the limit. Pass `Infinity` to turn the limit off for input you trust.
+
 ## Services
 
 Parsers can require Effect services. These replace winnow's `Stateful` input: configuration, symbol tables, indentation stacks and so on.

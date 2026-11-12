@@ -1925,6 +1925,7 @@ describe("ParserStream.parseMany", () => {
     )
     // The interpreter's error, with offsets in the buffer of unconsumed input
     expect(w.interpreted).toBe(1)
+    assert(Predicate.isTagged(failed, "ParseError"))
     expect(failed.offset).toBe(2)
     expect(failed.input).toBe("1\nx\n")
   })

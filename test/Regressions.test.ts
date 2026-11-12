@@ -210,8 +210,11 @@ describe("deeply nested input reports TooDeep instead of throwing (#14)", () => 
     return p
   }
   const deep = "{".repeat(100_000)
-  const expectTooDeep = (result: Result.Result<unknown, ParseError.ParseError<unknown>>) => {
+  const expectTooDeep = (
+    result: Result.Result<unknown, ParseError.ParseError<unknown> | ParserStream.BufferLimitError>
+  ) => {
     if (Result.isSuccess(result)) return assert.fail("expected failure")
+    assert(Predicate.isTagged(result.failure, "ParseError"))
     expect(result.failure.kind).toBe("TooDeep")
     expect(result.failure.mode).toBe("Cut")
     expect(result.failure.offset).toBeGreaterThan(0)
