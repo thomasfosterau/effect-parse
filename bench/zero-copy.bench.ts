@@ -11,8 +11,11 @@
  *   the rest of the record);
  * - one string of each record, as text (the tape decodes just those) and as
  *   bytes (it decodes nothing: an effect-ext `Str` over the input);
+ * - everything, in place (every number, and every string as a `Str`: what a
+ *   consumer that stays on effect-ext's types reads);
  * - everything, as JavaScript values (the tape builds what the others built
- *   while parsing, from its records: the worst case for it).
+ *   while parsing, from its records: the worst case for it, and one a
+ *   consumer of `Str`s never needs).
  *
  * The garbage each parse leaves is reported as the collections 200 parses
  * cause. A last section times appending the document's records through
@@ -22,6 +25,7 @@
  * Run with `vp run bench:zero-copy`.
  */
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import * as Allocator from "@thomasfosterau/effect-ext/Allocator"
 import * as Layout from "@thomasfosterau/effect-ext/Layout"
@@ -104,10 +108,35 @@ const tapeUses = {
     })
     return length
   },
+  // Every record, where it lies: numbers from the tape, strings as `Str`s over the input
+  "everything, in place": (d: JsonTape.Document) => {
+    let sum = 0
+    for (let index = 0; index < d.tape.length; index++) {
+      const kind = JsonTape.kind(d, index)
+      if (kind === JsonTape.Kind.Number) sum += JsonTape.number(d, index)
+      else if (kind === JsonTape.Kind.String || kind === JsonTape.Kind.EscapedString) {
+        sum += Str.isEmpty(JsonTape.str(d, index)) ? 1 : 2
+      }
+    }
+    return sum
+  },
   "everything, as values": (d: JsonTape.Document) => JSON.stringify(JsonTape.toJson(d, JsonTape.root(d))).length
 } as const
 
 const encoder = new TextEncoder()
+/** Every number and every string (keys included) of a value: the same sum as the tape's walk. */
+const walk = (value: Json): number => {
+  if (Predicate.isNumber(value)) return value
+  if (Predicate.isString(value)) return value === "" ? 1 : 2
+  if (value === null || Predicate.isBoolean(value)) return 0
+  let sum = 0
+  if (Array.isArray(value)) {
+    for (const element of value) sum += walk(element)
+    return sum
+  }
+  for (const [key, member] of Object.entries(value)) sum += (key === "" ? 1 : 2) + walk(member)
+  return sum
+}
 const valueUses = {
   "": (_: ReadonlyArray<Item>) => 0,
   "sum of price": (v: ReadonlyArray<Item>) => {
@@ -126,6 +155,7 @@ const valueUses = {
     for (const item of v) length += encoder.encode(item.label).length
     return length
   },
+  "everything, in place": (v: ReadonlyArray<Item>) => walk(v),
   "everything, as values": (v: ReadonlyArray<Item>) => JSON.stringify(v).length
 } as const
 
