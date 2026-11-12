@@ -37,6 +37,7 @@ This repo publishes one package, `@thomasfosterau/effect-parse`: parser combinat
 - `vp run test:unit` — the unit suite (about 90 s; the differential suites are large).
 - `vp run build` — `vp pack` → `dist/`.
 - `vp run check:dist` — the dist guard (builds first).
+- `vp run ci` — gates 2–8 of [Verification](#verification) in order, as CI runs them (`pnpm audit` needs the network).
 - `vp run test:coverage` — the suite under Istanbul with the coverage floor, writing `coverage/coverage-final.json` for `fallow audit`.
 - `vp run bench`, `bench:native`, `bench:stream`, `bench:gen`, `bench:syntax`, `bench:downstream`, `bench:zero-copy` — benchmarks over the built `dist/` (they build first). Never in CI; numbers depend on the machine. `bench:downstream` runs the published releases of the libraries built on this package (effect-bib, effect-ical, effect-rdf, effect-xml, effect-ext; dev dependencies pinned exact in the catalog) on this checkout's build: the `@thomasfosterau/effect-parse` override and the root's `workspace:*` dev dependency on itself are what point them here, so keep both.
 - `pnpm changeset` — add a changeset.
@@ -57,7 +58,7 @@ Before you report work as done, run the gates below in order and quote each comm
 8. `pnpm audit --audit-level high` (network)
 9. `vp run test:coverage`, then `vp exec fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk` (the fallow gate below; not a CI step).
 
-Steps 2–8 are CI's required `ci` job, in its order ([ci.yml](.github/workflows/ci.yml)). A change to a hot path also reports `vp run bench`, `vp run bench:downstream` (and the benchmark for the area touched) before and after. `CONTRIBUTING.md` and the PR template link here rather than restating the list.
+Steps 2–8 are the `ci` task (`vp run ci` runs them in this order and stops at the first failure), which is the only command CI runs: [ci.yml](.github/workflows/ci.yml) runs it on the Node.js LTS and Current lines (`ci (node lts)`, `ci (node latest)`), and the required check `ci` passes when both did. A change to a hot path also reports `vp run bench`, `vp run bench:downstream` (and the benchmark for the area touched) before and after. `CONTRIBUTING.md` and the PR template link here rather than restating the list.
 
 ## Branches and pull requests
 

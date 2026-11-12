@@ -24,7 +24,7 @@ Hooks are managed by Vite+; the editable [.vite-hooks/pre-commit](.vite-hooks/pr
 
 ## CI expectations
 
-[ci.yml](.github/workflows/ci.yml) runs one required job, `ci`, whose steps are the gate list in [AGENTS.md](AGENTS.md#verification). [release.yml](.github/workflows/release.yml) runs changesets/action on `trunk`: it opens the version PR while unreleased changesets exist and publishes once it merges, via npm OIDC trusted publishing (see [PUBLISHING.md](PUBLISHING.md)). Dependabot proposes updates weekly, grouping only the lockstep sets (the Vite+ / TypeScript / tsgo toolchain, the Effect packages); everything else arrives as its own PR. The workflows are hardened against a malicious dependency or Dependabot PR: `permissions: {}` by default, every action pinned to a commit SHA, `persist-credentials: false` wherever nothing pushes, no secrets or OIDC in any PR-triggered job (Release runs only on pushes to `trunk`, never as Dependabot), no dependency bin on `$GITHUB_PATH`, and never `node-version: latest` (setup-node would pick a Node pre-release); `uvx zizmor .github` (config in `.github/zizmor.yml`) reports no findings.
+[ci.yml](.github/workflows/ci.yml) is the only CI workflow and runs one command, `vp run ci` (the `ci` task in `vite.config.ts`: gates 2–8 of the list in [AGENTS.md](AGENTS.md#verification)), on the Node.js LTS and Current lines: the checks `ci (node lts)` and `ci (node latest)`. The one required check is `ci`, which passes when every matrix leg did. [release.yml](.github/workflows/release.yml) runs changesets/action on `trunk`: it opens the version PR while unreleased changesets exist and publishes once it merges, via npm OIDC trusted publishing (see [PUBLISHING.md](PUBLISHING.md)). Dependabot proposes updates weekly, grouping only the lockstep sets (the Vite+ / TypeScript / tsgo toolchain, the Effect packages); everything else arrives as its own PR. The workflows are hardened against a malicious dependency or Dependabot PR: `permissions: {}` by default, every action pinned to a commit SHA, `persist-credentials: false` wherever nothing pushes, no secrets or OIDC in any PR-triggered job (Release runs only on pushes to `trunk`, never as Dependabot), no dependency bin on `$GITHUB_PATH`, and Node.js versions resolved by Vite+ from the released lines (`lts`, `latest`), never by setup-node (whose `latest` can pick a pre-release); `uvx zizmor .github` (config in `.github/zizmor.yml`) reports no findings.
 
 ## Pre-PR checklist
 
@@ -46,6 +46,7 @@ vp test run -t "dispatch"            # tests by name
 vp run test:unit                     # the whole suite
 vp run build                         # emit dist/
 vp run check:dist                    # the dist guard
+vp run ci                            # the whole CI gate, in order (needs the network for the audit)
 vp run test:coverage                 # coverage map for fallow
 vp run fallow:audit                  # change-set review (not a CI gate)
 vp run bench                         # JSON example: interpreted vs compiled, per encoding

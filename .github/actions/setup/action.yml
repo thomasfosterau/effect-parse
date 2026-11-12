@@ -17,6 +17,13 @@
 # needs the repo on disk first).
 name: Setup toolchain
 description: Set up Vite+ (vp, Node.js and pnpm), restore the package cache, and install dependencies.
+inputs:
+  node-version:
+    description: >
+      The Node.js to install (`lts`, `latest` or a version), passed to
+      setup-vp. Empty: the version Vite+ resolves for the project.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -27,6 +34,7 @@ runs:
       with:
         cache: true
         run-install: false
+        node-version: ${{ inputs.node-version }}
 
     # Retried: pnpm's linker can race itself when a package with a build
     # script resolves twice and both copies build — a transient ENOENT on the
