@@ -247,6 +247,109 @@ describe("State.reset keeps what the state learnt about its input (#126)", () =>
     })
   })
 
+  describe("takeUntilAny, whose searches the interpreter remembers too", () => {
+    const stops = ["<!--", "&", "]]>"]
+    const bytesOf = (text: string) => new TextEncoder().encode(text)
+    const inputs = [
+      `${"plain text ".repeat(12)}&amp; more <!-- note --> and ]]> the end`,
+      `<!--${"x".repeat(50)}&${"y".repeat(50)}]]>${"z".repeat(50)}`,
+      "nothing to find here, however long the text runs on for",
+      "&&&",
+      ""
+    ]
+    /** `count` offsets into an input of `length`, neither sorted nor distinct. */
+    const scattered = (length: number, count: number) =>
+      Array.from({ length: Math.min(count, length * 3) }, (_, i) => (i * 7919) % (length + 1))
+    /** The value and position of one run on `state`, or the failure's mode. */
+    const run = (p: Parser.Parser.Any, state: Input.State<any>) => {
+      const a = Parser.run(p, state)
+      return a === Input.Fail ? [state.mode] : [a, state.pos]
+    }
+
+    it.each(["interpreted", "closure", "jit", "wasm"] as const)(
+      "a reused state answers as a new one does, at any offset in any order (%s)",
+      (backend) => {
+        const make = () => Token.takeUntilAny(stops)
+        const makeBytes = () => Token.takeUntilAny(stops.map(bytesOf))
+        const compile = (p: Parser.Parser.Any): Parser.Parser.Any =>
+          backend === "interpreted" ? p : Compiler[backend](p)
+        const text = compile(make())
+        const binary = compile(makeBytes())
+        inputs.forEach((input) => {
+          const state = new Input.State(input)
+          const bytes = bytesOf(input)
+          const byteState = new Input.State(bytes)
+          scattered(input.length, 200).forEach((offset, i) => {
+            // Complete and partial runs alternate on the one state
+            const options = i % 3 === 0 ? { partial: true } : undefined
+            expect(run(text, state.reset(offset, options)), `string, offset ${offset}`).toEqual(
+              run(make(), new Input.State(input, { ...options, offset }))
+            )
+          })
+          scattered(bytes.length, 200).forEach((offset, i) => {
+            const options = i % 3 === 0 ? { partial: true } : undefined
+            expect(run(binary, byteState.reset(offset, options)), `bytes, offset ${offset}`).toEqual(
+              run(makeBytes(), new Input.State(bytes, { ...options, offset }))
+            )
+          })
+        })
+      }
+    )
+
+    it("a miss within a narrowed end is not remembered for a wider one", () => {
+      const cases: ReadonlyArray<[Input.Input, Parser.Parser.Any]> = [
+        ["aaaa|bbbb", Token.takeUntilAny(["|", "#"])],
+        [bytesOf("aaaa|bbbb"), Token.takeUntilAny([bytesOf("|"), bytesOf("#")])]
+      ]
+      cases.forEach(([input, p]) => {
+        const state = new Input.State(input)
+        // A parser narrows the end for a while (`Text` validation and `Bits` do); the search misses within it
+        state.end = 3
+        expect(Parser.run(p, state)).toBe(Input.Fail)
+        // The same run, the end restored: the literal is there to be found
+        state.pos = 0
+        state.end = input.length
+        expect(run(p, state)).toEqual(run(p, new Input.State(input)))
+        expect(state.pos).toBe(4)
+        // And across a reset, which widens the end again
+        state.end = 2
+        state.pos = 0
+        expect(Parser.run(p, state)).toBe(Input.Fail)
+        expect(run(p, state.reset(0))).toEqual(run(p, new Input.State(input)))
+      })
+    })
+
+    it("a byte buffer refilled in place between resets is searched afresh", () => {
+      const p = Parser.terminated(Token.takeUntilAny([bytesOf("|"), bytesOf(";")]), Token.take<Uint8Array>(1))
+      const buffer = bytesOf("aaaa|bbbb;cc")
+      const state = new Input.State(buffer)
+      const tokens = () =>
+        Arr.unfold(0, (pos) => {
+          if (pos >= buffer.length) return Option.none()
+          const a = Parser.run(p, state.reset(pos))
+          return a === Input.Fail ? Option.none() : Option.some([new TextDecoder().decode(a), state.pos] as const)
+        })
+      expect(tokens()).toEqual(["aaaa", "bbbb"])
+      // The caller reads the next record into the same buffer: every remembered position is now wrong
+      buffer.set(bytesOf("a;bb|c;dd|e;"))
+      expect(tokens()).toEqual(["a", "bb", "c", "dd", "e"])
+      buffer.set(bytesOf("xxxxxxxxxx|;"))
+      expect(tokens()).toEqual(["xxxxxxxxxx", ""])
+      // The sharpest case: the same offset searched twice, the hit having moved earlier in between
+      const first = (s: Input.State<Uint8Array>) => {
+        const a = Parser.run(p, s.reset(0))
+        return a === Input.Fail ? "" : new TextDecoder().decode(a)
+      }
+      const reused = bytesOf("aaaaaa|b")
+      const reusedState = new Input.State(reused)
+      expect(first(reusedState)).toBe("aaaaaa")
+      reused.set(bytesOf("a|aaaaaa"))
+      expect(first(reusedState)).toBe("a")
+      reused.set(bytesOf("aaaaaaa;"))
+      expect(first(reusedState)).toBe("aaaaaaa")
+    })
+  })
+
   it("still resets everything that belongs to a run", () => {
     const state = new Input.State("abc<", { partial: true })
     expect(Parser.run(Compiler.jit(text()), state)).toBe("abc")
