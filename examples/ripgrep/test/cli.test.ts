@@ -2,10 +2,12 @@ import * as Fs from "node:fs"
 import * as Os from "node:os"
 import * as Path from "node:path"
 import * as Predicate from "effect/Predicate"
+import * as Result from "effect/Result"
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test"
 import * as Corpus from "../bench/corpus.ts"
 import * as Differential from "../bench/differential.ts"
 import { main } from "../src/main.ts"
+import * as Input from "../src/search/input.ts"
 
 const encoder = new TextEncoder()
 let scratch = ""
@@ -349,6 +351,36 @@ describe("erg", () => {
     expect(erg(["--pre", "./pre.sh", "PARSER", "keep.log"]).stdout).toBe("PARSER KEPT LOG LINE\n")
     expect(erg(["--pre", "./pre.sh", "--pre-glob", "*.txt", "-c", "PARSER", "keep.log"]).status).toBe(1)
     Fs.rmSync(Path.join(root, "pre.sh"))
+  })
+
+  it("refuses to expand a compressed file past the limit (#120)", () => {
+    const zlib = process.getBuiltinModule("node:zlib")
+    const text = encoder.encode("parser\n".repeat(20_000))
+    const cases: ReadonlyArray<readonly [string, Uint8Array]> = [
+      ["bomb.gz", zlib.gzipSync(text)],
+      ["bomb.br", zlib.brotliCompressSync(text)]
+    ]
+    cases.forEach(([name, packed]) => {
+      // 140 000 bytes from a few hundred: within the limit it is searched, over it it is an error, not an allocation
+      expect(packed.length, name).toBeLessThan(2000)
+      expect(
+        Result.map(Input.decompress(name, packed), (b) => b.length),
+        name
+      ).toEqual(Result.succeed(text.length))
+      const over = Input.decompress(name, packed, 4096)
+      expect(Result.isFailure(over) && over.failure, name).toMatch(
+        /^(gzip|brotli): .*(larger than|Cannot create a Buffer)/i
+      )
+      expect(Result.isFailure(Input.decompress(name, encoder.encode("not compressed"))), name).toBe(true)
+    })
+    expect(Input.MaxDecompressed).toBe(1 << 30)
+    // Through the command line: the file is reported and skipped, and the search goes on
+    Fs.writeFileSync(Path.join(root, "broken.gz"), "not gzip")
+    const out = erg(["-z", "-c", "parser", "broken.gz", "keep.log"])
+    Fs.rmSync(Path.join(root, "broken.gz"))
+    expect(out.stdout).toBe("keep.log:1\n")
+    expect(out.stderr).toContain("broken.gz")
+    expect(out.status).toBe(2)
   })
 
   it("writes hyperlinks when colours are on", () => {
