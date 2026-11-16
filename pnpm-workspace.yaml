@@ -54,7 +54,7 @@ catalog:
   "@thomasfosterau/effect-bib": 0.1.0
   "@thomasfosterau/effect-ext": 0.2.0
   "@thomasfosterau/effect-ical": 0.1.0
-  "@thomasfosterau/effect-rdf": 0.2.0
+  "@thomasfosterau/effect-rdf": 0.3.0
   "@thomasfosterau/effect-xml": 0.1.0
   "@types/node": ^26.6.5
   # Must equal the vitest that vite-plus bundles (see `vitest` below); vite-plus
