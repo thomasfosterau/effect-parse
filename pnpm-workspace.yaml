@@ -43,7 +43,7 @@ catalog:
   # on any other component version, failing `pnpm install` itself. Read the
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
   # before bumping any of the three.
-  "@effect/tsgo": 0.67.7
+  "@effect/tsgo": 0.69.0
   # The libraries built on this package, for the downstream benchmarks only
   # (`bench/downstream.bench.ts`, `bench/zero-copy.bench.ts`, and the
   # `examples/json-tape.ts` they time): never a runtime dependency. Each is
