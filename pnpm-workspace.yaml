@@ -51,7 +51,7 @@ catalog:
   # by hand; the `@thomasfosterau/effect-parse` override below makes them run
   # on this checkout's build rather than the release they were published
   # against.
-  "@thomasfosterau/effect-bib": 0.1.0
+  "@thomasfosterau/effect-bib": 0.2.0
   "@thomasfosterau/effect-ext": 0.2.0
   "@thomasfosterau/effect-ical": 0.1.0
   "@thomasfosterau/effect-rdf": 0.2.0
