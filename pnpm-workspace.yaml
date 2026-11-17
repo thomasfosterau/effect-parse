@@ -52,7 +52,7 @@ catalog:
   # on this checkout's build rather than the release they were published
   # against.
   "@thomasfosterau/effect-bib": 0.2.0
-  "@thomasfosterau/effect-ext": 0.2.0
+  "@thomasfosterau/effect-ext": 0.3.1
   "@thomasfosterau/effect-ical": 0.1.0
   "@thomasfosterau/effect-rdf": 0.3.0
   "@thomasfosterau/effect-xml": 0.2.0
