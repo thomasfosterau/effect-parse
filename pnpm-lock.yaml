@@ -28,8 +28,8 @@ catalogs:
       specifier: 0.2.0
       version: 0.2.0
     '@thomasfosterau/effect-ext':
-      specifier: 0.2.0
-      version: 0.2.0
+      specifier: 0.3.1
+      version: 0.3.1
     '@thomasfosterau/effect-ical':
       specifier: 0.1.0
       version: 0.1.0
@@ -100,7 +100,7 @@ importers:
         version: 0.2.0(@thomasfosterau/effect-parse@)(effect@4.1.4)
       '@thomasfosterau/effect-ext':
         specifier: 'catalog:'
-        version: 0.2.0(@thomasfosterau/effect-parse@)(effect@4.1.4)
+        version: 0.3.1(@thomasfosterau/effect-parse@)(effect@4.1.4)
       '@thomasfosterau/effect-ical':
         specifier: 'catalog:'
         version: 0.1.0(@thomasfosterau/effect-parse@)(effect@4.1.4)
@@ -109,7 +109,7 @@ importers:
         version: 'link:'
       '@thomasfosterau/effect-rdf':
         specifier: 'catalog:'
-        version: 0.3.0(@thomasfosterau/effect-ext@0.2.0(@thomasfosterau/effect-parse@)(effect@4.1.4))(@thomasfosterau/effect-parse@)(@thomasfosterau/effect-xml@0.2.0(@thomasfosterau/effect-parse@)(effect@4.1.4))(effect@4.1.4)
+        version: 0.3.0(@thomasfosterau/effect-ext@0.3.1(@thomasfosterau/effect-parse@)(effect@4.1.4))(@thomasfosterau/effect-parse@)(@thomasfosterau/effect-xml@0.2.0(@thomasfosterau/effect-parse@)(effect@4.1.4))(effect@4.1.4)
       '@thomasfosterau/effect-xml':
         specifier: 'catalog:'
         version: 0.2.0(@thomasfosterau/effect-parse@)(effect@4.1.4)
@@ -806,22 +806,19 @@ packages:
       '@thomasfosterau/effect-parse':
         optional: true
 
-  '@thomasfosterau/effect-ext@0.2.0':
-    resolution: {integrity: sha512-T1EukW6BJDub7EMdii65Qisy1uDMwAkbso6s2gQQD9MbUC8jGycJppsL4McRdnjgboEu5yVxirzr2pobkh9qFw==}
-    engines: {node: '>=22.18'}
+  '@thomasfosterau/effect-ext@0.3.1':
+    resolution: {integrity: sha512-r9co+0cnkrrUjPoyyiFXC82AIjYDCqhboXlDitsc1hL231WwSlxIGjqqQIdWMgufCAcphLCJkGHKsd+1P+uvPw==}
+    engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
       '@effect/platform-browser': ^4.0.0
       '@effect/platform-node': ^4.0.0
-      '@thomasfosterau/effect-jsonapi': '>=0.16.1'
       '@thomasfosterau/effect-parse': workspace:*
       effect: 4.1.4
     peerDependenciesMeta:
       '@effect/platform-browser':
         optional: true
       '@effect/platform-node':
-        optional: true
-      '@thomasfosterau/effect-jsonapi':
         optional: true
       '@thomasfosterau/effect-parse':
         optional: true
@@ -2140,7 +2137,7 @@ snapshots:
     optionalDependencies:
       '@thomasfosterau/effect-parse': 'link:'
 
-  '@thomasfosterau/effect-ext@0.2.0(@thomasfosterau/effect-parse@)(effect@4.1.4)':
+  '@thomasfosterau/effect-ext@0.3.1(@thomasfosterau/effect-parse@)(effect@4.1.4)':
     dependencies:
       effect: 4.1.4
     optionalDependencies:
@@ -2151,11 +2148,11 @@ snapshots:
       '@thomasfosterau/effect-parse': 'link:'
       effect: 4.1.4
 
-  '@thomasfosterau/effect-rdf@0.3.0(@thomasfosterau/effect-ext@0.2.0(@thomasfosterau/effect-parse@)(effect@4.1.4))(@thomasfosterau/effect-parse@)(@thomasfosterau/effect-xml@0.2.0(@thomasfosterau/effect-parse@)(effect@4.1.4))(effect@4.1.4)':
+  '@thomasfosterau/effect-rdf@0.3.0(@thomasfosterau/effect-ext@0.3.1(@thomasfosterau/effect-parse@)(effect@4.1.4))(@thomasfosterau/effect-parse@)(@thomasfosterau/effect-xml@0.2.0(@thomasfosterau/effect-parse@)(effect@4.1.4))(effect@4.1.4)':
     dependencies:
       effect: 4.1.4
     optionalDependencies:
-      '@thomasfosterau/effect-ext': 0.2.0(@thomasfosterau/effect-parse@)(effect@4.1.4)
+      '@thomasfosterau/effect-ext': 0.3.1(@thomasfosterau/effect-parse@)(effect@4.1.4)
       '@thomasfosterau/effect-parse': 'link:'
       '@thomasfosterau/effect-xml': 0.2.0(@thomasfosterau/effect-parse@)(effect@4.1.4)
 
