@@ -7,8 +7,7 @@ name: CI
 # runs it. The benchmarks (`vp run bench*`) are machine-dependent and stay out.
 #
 # It runs on the Node.js LTS and Current lines (`engines.node` is `>=22`).
-# The `ci` job at the end is the one stable check name for a ruleset to
-# require: it passes only when every matrix leg did.
+# A ruleset requires each leg by name: `ci (node lts)` and `ci (node latest)`.
 
 on:
   pull_request:
@@ -25,7 +24,7 @@ concurrency:
 permissions: {}
 
 jobs:
-  test:
+  ci:
     name: ci (node ${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -60,18 +59,3 @@ jobs:
         run: node --version
       - name: CI
         run: vp run ci
-
-  ci:
-    name: ci
-    needs: [test]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions: {}
-    steps:
-      - name: Every matrix leg passed
-        env:
-          RESULT: ${{ needs.test.result }}
-        run: |
-          echo "test: $RESULT"
-          [ "$RESULT" = "success" ]
