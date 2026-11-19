@@ -34,7 +34,7 @@ export default defineConfig({
     semi: false,
     trailingComma: "none",
     printWidth: 120,
-    ignorePatterns: ["**/dist/**", "**/coverage/**", "CHANGELOG.md", "pnpm-lock.yaml"],
+    ignorePatterns: ["**/dist/**", "**/coverage/**", "**/CHANGELOG.md", "pnpm-lock.yaml"],
     overrides: [
       {
         files: ["**/*.md"],

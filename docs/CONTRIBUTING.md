@@ -35,7 +35,8 @@ Every version lives in the `pnpm-workspace.yaml` catalog; `package.json` uses `c
 
 ## Coding guidelines
 
-- Use Effect idioms and the Effect standard library. Public failures are `ParseError`; inside step functions the protocol is plain values and the `Fail` sentinel, for speed. Read the installed `effect` package (`node_modules/effect/dist/*.d.ts`) rather than guessing at its API.
+- Use Effect idioms throughout, and prefer Effect v4's own modules (`Option`, `Result`, `Array`, `Match`, `Schema`, …) to re-inventing them; convert existing code where practical. The exceptions are non-Effect APIs, adapted at the edge, and hot paths where a measurement shows plain code is needed (the step functions and compilers, with the measurements in `vite.config.ts`). If you find non-idiomatic code you can't fix trivially, file an issue listing the sites and the idiomatic replacement.
+- Public failures are `ParseError`; inside step functions the protocol is plain values and the `Fail` sentinel, for speed. Read the installed `effect` package (`node_modules/effect/dist/*.d.ts`) rather than guessing at its API.
 - Step functions are hot loops: keep allocation and closures out of them, and report `vp run bench` (and the benchmark for the area) before and after changing a parser hot path or a compiler.
 - Compiled and interpreted parsers must agree exactly; extend the differential suites in `test/Compiler.test.ts`, `test/Streaming.test.ts` and `test/Syntax.test.ts` with any new combinator.
 - `"sideEffects": false` holds only if every top-level call is marked `/*#__PURE__*/`.
