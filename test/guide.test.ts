@@ -19,7 +19,7 @@ import {
   Token
 } from "../src/index.js"
 
-it("README examples behave as documented", () => {
+it("guide examples behave as documented", () => {
   const point = Parser.gen(function* () {
     yield* Token.literal("(")
     const x = yield* Ascii.decInt
@@ -125,7 +125,7 @@ it("README examples behave as documented", () => {
   expect(Parser.parseSync(Compiler.jit(twice(Token.oneOf("ab"))), "ba")).toEqual(["b", "a"])
 })
 
-it("README Unicode examples behave as documented", () => {
+it("guide Unicode examples behave as documented", () => {
   const assignment = <I extends string | Uint8Array>(T: Text.TextParsers<I>) =>
     Parser.separatedPair(T.identifier, Parser.delimited(T.space0, T.literal("≔"), T.space0), T.decInt)
   const text = "größe ≔ 42"
@@ -172,7 +172,7 @@ it("Text and Encoding doc examples behave as documented", () => {
   expect(Parser.parse(Compiler.jit(Token.takeWhile(isNameStart)), "_aé😀")).toEqual(Result.succeed("_aé😀"))
 })
 
-it("README: reusing a state for one run per token", () => {
+it("guide: reusing a state for one run per token", () => {
   const buffer = "12 abc 34"
   const lexeme = Parser.terminated(Parser.alt(Ascii.digit1, Ascii.alpha1), Token.literal(" "))
   const state = new Input.State(buffer)
@@ -189,7 +189,7 @@ it("README: reusing a state for one run per token", () => {
   expect(token(0)).toEqual({ value: "12", end: 3 })
 })
 
-it("README hoisted generator example behaves like the inline one", () => {
+it("guide hoisted generator example behaves like the inline one", () => {
   const inline = Parser.gen(function* () {
     const name = yield* Token.takeWhile(Ascii.isAlphanumeric, { min: 1 })
     yield* Token.literal(": ")

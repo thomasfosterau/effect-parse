@@ -197,6 +197,6 @@
     "src/internal/syntax.ts:complexity",
     "test/Regressions.test.ts:hidden coupling",
     "src/Expression.ts:complexity",
-    "test/readme.test.ts:hidden coupling"
+    "test/guide.test.ts:hidden coupling"
   ]
 }
