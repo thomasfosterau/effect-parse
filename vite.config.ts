@@ -540,10 +540,12 @@ export default defineConfig({
         cache: false
       },
       // Builds the dev container and checks `vp` and the install inside it
-      // (needs Docker). Run by CI's `devcontainer` job.
+      // (needs Docker). Run by CI's `devcontainer` job. The host's
+      // node_modules (which holds this CLI) uses another pnpm store, so with
+      // `CI=true` the container's install replaces it instead of prompting.
       "check:devcontainer": {
         command:
-          "devcontainer up --workspace-folder . && devcontainer exec --workspace-folder . bash -lc 'vp --version && test -x node_modules/.bin/vp'",
+          "devcontainer up --workspace-folder . --remote-env CI=true && devcontainer exec --workspace-folder . bash -lc 'vp --version && test -x node_modules/.bin/vp'",
         cache: false
       },
       // Run by the Release workflow's version step.
