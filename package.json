@@ -102,7 +102,6 @@
   "scripts": {
     "changeset": "changeset",
     "version": "changeset version && vp fmt && pnpm install --lockfile-only",
-    "release": "bash scripts/release.sh",
     "fallow": "fallow --summary",
     "fallow:audit": "fallow audit",
     "prepare": "vp config && effect-tsgo patch --typescript --oxlint"

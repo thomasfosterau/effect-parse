@@ -6,15 +6,15 @@
 
 1. **Add a changeset with your change.** Run `pnpm changeset`, pick the bump (`patch` / `minor` / `major`) and write a user-facing summary, then commit the generated file with the change. Which changes need one is set out in [AGENTS.md](AGENTS.md#branches-and-pull-requests); a doc-comment change reaches the emitted `.d.ts` and takes a `patch`. While the package is `0.x`, a breaking change is a `minor`.
 2. **Merge to `trunk`.** The [Release workflow](.github/workflows/release.yml) opens or updates a **`chore: version packages`** PR that bumps `package.json` and rolls the pending changesets into `CHANGELOG.md`. The version step is `changeset version && vp fmt && pnpm install --lockfile-only`, with `"format": false` in `.changeset/config.json`: Changesets 3 would otherwise run the `oxfmt` binary Vite+ installs (an IDE-only shim that exits 1 outside LSP mode) on the changelog.
-3. **Merge the version PR.** With no changesets left, the workflow waits for approval on the `release` environment, builds `dist/` and runs [`scripts/release.sh`](scripts/release.sh): it packs the package with `pnpm pack` (which replaces `catalog:peers` with the published peer range), publishes the tarball with `npm publish` (which performs the OIDC exchange), and runs `changeset tag` so the action pushes the `v<version>` tag and creates the GitHub release.
+3. **Merge the version PR.** With no changesets left, the workflow's `build` job (read-only token, no `id-token`) installs without scripts, builds `dist/`, runs the dist guard on that build and packs it with `pnpm pack` (which replaces `catalog:peers` with the published peer range), then uploads the tarball. The `publish` job waits for approval on the `release` environment; it downloads the tarball, checks its SHA-256 against the one `build` reported, publishes it with `npm publish` (which performs the OIDC exchange), and creates the `v<version>` tag and the GitHub release (with that version's `CHANGELOG.md` section) through the GitHub API.
 
 Never version or publish by hand.
 
-**No scripts in the release job.** The job holds `id-token: write`, so it installs with `--ignore-scripts` (with pnpm's `verify-deps-before-run` off, so no later `pnpm run` re-installs with scripts), packs with `--config.ignore-scripts=true`, and publishes a tarball (which runs no lifecycle script). `release.sh` skips a version that is already on npm, so a re-run after a partial publish does not fail.
+**No dependency code next to the OIDC token.** The `publish` job holds `id-token: write`, so it checks out nothing, installs nothing and restores no cache: it runs `npm publish <tarball>` (a tarball spec runs no lifecycle script) and `gh release create`. Everything that executes dependency code, the install (`--ignore-scripts`, with pnpm's `verify-deps-before-run` off so no later `pnpm run` re-installs with scripts), `vp pack` and `pnpm pack`, runs in `build`, which has no publishing rights.
 
 **Provenance.** Nothing requests [provenance](https://docs.npmjs.com/generating-provenance-statements) explicitly. Under trusted publishing npm attaches it by itself when the repository is public; an explicit `--provenance` from a private repository fails the publish, so do not add one.
 
-**npm version.** OIDC publishing needs npm >= 11.5.1; the job installs an exact version (`npm@11.20.0`). Bump it by hand.
+**npm version.** OIDC publishing needs npm >= 11.5.1; the `publish` job installs an exact version (`npm@11.20.0`, with `--ignore-scripts`) on the runner image's Node.js. Bump it by hand.
 
 ## One-time setup
 
