@@ -173,7 +173,7 @@ export const make = <A, E, R, I extends Input, const Ops extends ReadonlyArray<O
     // Attempts each operator in turn. Returns the index of the first match
     // (with its output in `matched`), -1 if none matched, or -2 on a fatal
     // failure. Failed attempts are folded into `failures`, merged only when
-    // read (#44): a round in which an operator matches discards them unmerged.
+    // read: a round in which an operator matches discards them unmerged.
     // Like `matched`, it is shared by nested expressions, which clear it.
     let matched: unknown
     const failures = new TiedFailures()

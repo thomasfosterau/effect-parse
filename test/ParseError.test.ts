@@ -7,7 +7,7 @@ import { describe, expect, it } from "vite-plus/test"
 import { Parser, ParseError, Text, Token } from "../src/index.js"
 import { expectFailure } from "./utils.js"
 
-describe("ParseError does not serialise its input (#117)", () => {
+describe("ParseError does not serialise its input", () => {
   const secret = "hunter2-hunter2"
   const p = Parser.terminated(Parser.repeat(Token.literal("a")), Token.literal(";"))
   const input = `aaa!${secret}`
@@ -90,7 +90,7 @@ describe("ParseError does not serialise its input (#117)", () => {
   })
 })
 
-describe("ParseError.message shows a window around the failure (#117)", () => {
+describe("ParseError.message shows a window around the failure", () => {
   const a = Token.literal("a")
 
   it("bounds a failure at the end of a long line", () => {

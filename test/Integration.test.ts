@@ -87,8 +87,8 @@ describe("Expression", () => {
   })
 
   it("reports the failure that merging every tie as it happens would", () => {
-    // The operator loop leaves tied failures unmerged until they are read
-    // (#44), as `Parser.alt` does (#38); `eagerExpression` is the algorithm it
+    // The operator loop leaves tied failures unmerged until they are read,
+    // as `Parser.alt` does; `eagerExpression` is the algorithm it
     // replaced. Operators tie with each other, with the operand and with
     // nested alternatives, and a postfix call reruns the whole expression.
     type Make = (options: {

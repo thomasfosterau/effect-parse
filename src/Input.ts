@@ -282,7 +282,7 @@ export class State<I extends Input = Input> {
    * that succeeds records no diagnostics, so interpreted steps called from it
    * (an opaque `Parser.make`, a leaf near the end of a partial input) record
    * a `Backtrack` or `Cut` failure's mode only, without building its
-   * {@link Failure} (#82). `Incomplete` failures are still built: a compiled
+   * {@link Failure}. `Incomplete` failures are still built: a compiled
    * run's `Incomplete` is reported as it stands.
    *
    * @internal
@@ -449,8 +449,8 @@ export class State<I extends Input = Input> {
     // For a string, `searches` is kept: it remembers where stop characters
     // and literals occur by absolute position, and a string never changes,
     // so it holds at any offset. A lexer that resets before each token
-    // otherwise searched to the end of the buffer again for every token
-    // (#126). Bytes and arrays can be refilled in place between runs (a
+    // otherwise searched to the end of the buffer again for every token.
+    // Bytes and arrays can be refilled in place between runs (a
     // `Uint8Array` source is viewed, not copied), so theirs is dropped.
     if (this.inputKind !== 0) this.searches = undefined
     this.asciiRun = undefined

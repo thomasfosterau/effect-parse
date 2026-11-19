@@ -34,7 +34,7 @@ describe("Parser", () => {
         )
       )
 
-      it("reports a check's failure where it chooses (#73)", () => {
+      it("reports a check's failure where it chooses", () => {
         expectSuccess(element, "<a></a>", "a")
         const err = expectFailure(element, "<ab></a>")
         expect(err.offset).toBe(4)
@@ -58,7 +58,7 @@ describe("Parser", () => {
       expect(peek(Parser.alt(Parser.reject, a), "a")).toEqual(Result.succeed(["", "a"]))
     })
 
-    it("seqWith passes one argument per parser (#64)", () => {
+    it("seqWith passes one argument per parser", () => {
       const p = Parser.seqWith(
         [a, Parser.opt(b), Token.literal("c")],
         (x, y, z) => `${x}${Option.getOrElse(y, () => "-")}${z}`
@@ -122,7 +122,7 @@ describe("Parser", () => {
       expect(err.message).toContain("bad: no")
     })
 
-    it("mapOrFail rejects with the Fail sentinel (#66)", () => {
+    it("mapOrFail rejects with the Fail sentinel", () => {
       const pair = Token.take(2)
       const p = pair.pipe(
         Parser.mapOrFail(
@@ -181,7 +181,7 @@ describe("Parser", () => {
       expectSuccess(Parser.withSpan(ab), "ab", ["ab", { start: 0, end: 2 }])
     })
 
-    it("mapSpan passes the output and its offsets (#64)", () => {
+    it("mapSpan passes the output and its offsets", () => {
       const p = Parser.preceded(
         a,
         Parser.mapSpan(Parser.repeat(b), (bs, start, end) => `${bs.length}@${start}-${end}`)
@@ -315,7 +315,7 @@ describe("Parser", () => {
     })
 
     it("alt reports the failure that merging every tie as it happens would", () => {
-      // `alt` leaves ties unmerged until they are read (#38). `eagerAlt` is
+      // `alt` leaves ties unmerged until they are read. `eagerAlt` is
       // the algorithm it replaced, merging every failure as it happens: both
       // must report the same failure, furthest failure and hint.
       type Alt = (...parsers: Array<Parser.Parser<unknown, unknown>>) => Parser.Parser<unknown, unknown>
@@ -418,8 +418,8 @@ describe("Parser", () => {
     })
 
     it("permutation reports the failure that merging every tie as it happens would", () => {
-      // `permutation` leaves a round's ties unmerged until they are read (#44),
-      // as `alt` does (#38); `eagerPermutation` is the algorithm it replaced.
+      // `permutation` leaves a round's ties unmerged until they are read,
+      // as `alt` does; `eagerPermutation` is the algorithm it replaced.
       type Permutation = (...parsers: Array<Parser.Parser<unknown, unknown>>) => Parser.Parser<unknown, unknown>
       const c = Token.literal("c")
       const leaves: ReadonlyArray<Parser.Parser<unknown, unknown>> = [

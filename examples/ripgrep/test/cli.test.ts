@@ -353,7 +353,7 @@ describe("erg", () => {
     Fs.rmSync(Path.join(root, "pre.sh"))
   })
 
-  it("refuses to expand a compressed file past the limit (#120)", () => {
+  it("refuses to expand a compressed file past the limit", () => {
     const zlib = process.getBuiltinModule("node:zlib")
     const text = encoder.encode("parser\n".repeat(20_000))
     const cases: ReadonlyArray<readonly [string, Uint8Array]> = [

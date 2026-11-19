@@ -1,17 +1,3 @@
-/**
- * The one Vite+ configuration for this package: the repo-wide format / lint /
- * staged passes (read statically by `vp fmt` / `vp lint` / `vp staged`), the
- * task graph (`check`, `build`, `check:dist`, `test:unit`, `test:coverage`,
- * the `bench*` tasks), the `vp pack` (tsdown) settings and the vitest /
- * coverage settings.
- *
- * Shaped like the owner's other Effect libraries (effect-web,
- * effect-schema-ext): every comment that explains a load-bearing decision is
- * part of the standard and travels with the config.
- *
- * @copyright Thomas Foster
- */
-
 import { fileURLToPath } from "node:url"
 import { recommended } from "@effect/tsgo/oxlint-presets"
 import effect from "@enfect/oxlint"
@@ -48,7 +34,7 @@ export default defineConfig({
     semi: false,
     trailingComma: "none",
     printWidth: 120,
-    ignorePatterns: ["**/dist/**", "**/coverage/**", "CHANGELOG.md", "pnpm-lock.yaml"],
+    ignorePatterns: ["**/dist/**", "**/coverage/**", "**/CHANGELOG.md", "pnpm-lock.yaml"],
     overrides: [
       {
         files: ["**/*.md"],
@@ -88,9 +74,8 @@ export default defineConfig({
             "The `Buffer` global is typed `any` wherever @cloudflare/workers-types is loaded. Use Uint8Array / TextEncoder / DataView."
         }
       ],
-      // Every `effect/*` rule is at the preset's `error`. The overrides below
-      // turn a rule off only where it cannot apply, each with its reason
-      // (effect-parse#68); a new site anywhere else is an error.
+      // The `effect/*` overrides below turn a rule off only where it cannot
+      // apply, each with its reason.
       //
       // `casting-awareness` flags every `as`, as a prompt to justify it. Each
       // assertion here is justified by the `// SAFETY:` comment that
@@ -121,7 +106,6 @@ export default defineConfig({
       "vitest/valid-expect": ["error", { maxArgs: 2 }]
     },
     overrides: [
-      // ---- Effect rules that cannot apply here (effect-parse#68) ----------
       // `unknown` is the honest type at the interpreter's erased boundary: a
       // step returns the value of whatever parser it runs, a node stores the
       // user callbacks of every parser kind, and the compilers walk nodes
@@ -185,10 +169,9 @@ export default defineConfig({
         }
       },
       // `Result.try` measured ~12x slower than an inline `try` on the parse
-      // path (effect-parse#53): `tryMapUnknown` (per call of `f`) and
-      // `Stack.run` (per run). `provideService` / `provide`, `Stack.runCompiled`
-      // (its `compiledRun` flag, #82) and two tests use `try`/`finally` to
-      // restore state, which `Result.try` cannot express.
+      // path: `tryMapUnknown` (per call of `f`) and `Stack.run` (per run).
+      // `provideService` / `provide`, `Stack.runCompiled` and two tests use
+      // `try`/`finally` to restore state, which `Result.try` cannot express.
       {
         files: ["src/Parser.ts", "src/internal/stack.ts", "test/Parser.test.ts", "test/Compiler.test.ts"],
         rules: {
@@ -251,7 +234,7 @@ export default defineConfig({
         }
       },
       // The hand-fused benchmark parser's `let v: unknown` holds any JSON
-      // value. (The overloaded exports have named contracts since #77.)
+      // value.
       {
         files: ["bench/json-fused.ts"],
         rules: {
@@ -495,12 +478,11 @@ export default defineConfig({
   run: {
     tasks: {
       // The whole gate, in order, and the only command CI runs
-      // (.github/workflows/ci.yml): the toolchain lockstep, format + lint,
-      // the type gate, the unit suite, the build with its dist guard, and the
-      // dependency audit (network). It stops at the first failure.
+      // (.github/workflows/ci.yml): format + lint, the type gate, the unit
+      // suite, the build with its dist guard, and the dependency audit
+      // (network). It stops at the first failure.
       ci: {
-        command:
-          "vp run check:toolchain && vp check && vp run check && vp run test:unit && vp run check:dist && pnpm audit --audit-level high",
+        command: "vp check && vp run check && vp run test:unit && vp run check:dist && pnpm audit --audit-level high",
         cache: false
       },
       // The type gate: `src`, the tests, the examples and the benchmarks
@@ -509,13 +491,6 @@ export default defineConfig({
       check: {
         command: "tsc -p tsconfig.json",
         cache: { input: cacheInputs, output: [] }
-      },
-      // The catalog entries that move in lockstep with `vite-plus`
-      // (scripts/check-toolchain.mjs; `--fix` rewrites them): Dependabot
-      // bumps vite-plus but not its `vite` alias or its vitest pin.
-      "check:toolchain": {
-        command: "node scripts/check-toolchain.mjs",
-        cache: false
       },
       // The published artifact: one ESM module + declaration file per source
       // module (`vp pack` → tsdown; see `pack` below).
@@ -537,18 +512,44 @@ export default defineConfig({
         command: "vp test run",
         cache: { env: ["VITEST_MAX_WORKERS", "NODE_OPTIONS"], input: cacheInputs, output: [] }
       },
-      // The unit suite under Istanbul, writing `coverage/coverage-final.json`,
-      // which `fallow audit` reads for exact per-function CRAP scores
-      // (`health.coverage` in .fallowrc.json). Without it fallow estimates
-      // every function as uncovered, and any function with cyclomatic
-      // complexity ≥ 5 fails the gate on its own. Run this before
-      // `fallow audit` (the Claude Code PreToolUse fallow gate runs the audit
-      // on `git commit` / `git push` but never refreshes this map).
+      // Writes coverage/coverage-final.json, which `fallow audit` reads for
+      // CRAP scores: run it before the audit.
       "test:coverage": {
         // Istanbul instrumentation slows the differential suites several-fold,
         // past the unit run's timeout (`test.testTimeout` below).
         command: "vp test run --coverage --testTimeout 60000",
         cache: { env: ["VITEST_MAX_WORKERS", "NODE_OPTIONS"], input: cacheInputs, output: ["coverage/**"] }
+      },
+      // The fallow gate, run by the pre-commit hook after `vp staged`.
+      "fallow:audit": {
+        command: "vp exec fallow audit --base origin/trunk --quiet",
+        dependsOn: ["test:coverage"],
+        cache: false
+      },
+      fallow: {
+        command: "vp exec fallow --summary",
+        cache: false
+      },
+      // The release tarball, after the dist guard: `pnpm pack` rewrites
+      // `catalog:peers` to the published range, and has no `--ignore-scripts`
+      // flag, so lifecycle scripts are turned off through config. Run by the
+      // Release workflow's build job, which uploads `release-artifact/`.
+      "release:pack": {
+        command: "pnpm pack --config.ignore-scripts=true --pack-destination release-artifact",
+        dependsOn: ["check:dist"],
+        cache: false
+      },
+      // Builds the dev container and checks `vp` and the install inside it
+      // (needs Docker). Run by CI's `devcontainer` job.
+      "check:devcontainer": {
+        command:
+          "devcontainer up --workspace-folder . && devcontainer exec --workspace-folder . bash -lc 'vp --version && test -x node_modules/.bin/vp'",
+        cache: false
+      },
+      // Run by the Release workflow's version step.
+      "changeset:version": {
+        command: "changeset version && vp fmt && pnpm install --lockfile-only",
+        cache: false
       },
       // Benchmarks: run by hand around a change to a hot path, never in CI
       // (their numbers depend on the machine).
@@ -594,10 +595,7 @@ export default defineConfig({
     // The example packages' suites run with the library's: examples/ripgrep
     // checks its output against ripgrep's when `rg` is installed.
     include: ["test/**/*.test.ts", "examples/*/test/**/*.test.ts"],
-    // The differential suites and the ripgrep example have tests that take
-    // 4 to 5 s on a quiet machine: with the files running in parallel on a
-    // small one they crossed vitest's 5 s default and failed with no wrong
-    // result (#130). Still short enough that a hang is reported promptly.
+    // Some differential and ripgrep tests take 4 to 5 s on a quiet machine.
     testTimeout: 20_000,
     ...(maxWorkers === undefined ? {} : { maxWorkers: Number(maxWorkers) }),
     coverage: {
@@ -608,9 +606,7 @@ export default defineConfig({
       reportsDirectory: "./coverage",
       include: ["src/**/*.ts", "examples/ripgrep/src/**/*.ts"],
       exclude: ["**/*.d.ts"],
-      // Per glob, so the library's floor covers the library alone, as it did
-      // before the example's sources were measured (a top-level threshold
-      // counts every included file).
+      // Per glob, so the library's floor covers the library alone.
       thresholds: {
         "src/**/*.ts": { statements: 90, branches: 85, functions: 90, lines: 90 },
         "examples/ripgrep/src/**/*.ts": { statements: 80, branches: 70, functions: 80, lines: 80 }

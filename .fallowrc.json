@@ -36,6 +36,7 @@
     "vitest",
     "vite-plus",
     "@changesets/cli",
+    "@devcontainers/cli",
     "@changesets/changelog-github",
     "@vitest/coverage-istanbul",
     "fallow"

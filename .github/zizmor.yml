@@ -1,13 +1,10 @@
-# zizmor (GitHub Actions static analysis) configuration. Run it with
-# `uvx zizmor .github`; it reads this file from .github/ by itself.
+# `uvx zizmor --offline .github` should report nothing beyond what is configured here.
 rules:
-  # The owner's supply-chain wait is pnpm's `minimumReleaseAge` (8 hours);
-  # Dependabot's cooldown is the smallest whole unit above it, 1 day.
-  # zizmor's default asks for 7.
   dependabot-cooldown:
     config:
       days: 1
-  # `./.github/actions/setup` is the documented local-action form; the `$/`
-  # spelling zizmor suggests is not yet something the owner's other repos use.
-  self-repository:
-    disable: true
+  # `uses:` pins exact release tags; .github/workflows/actions.lock pins their commits.
+  unpinned-uses:
+    config:
+      policies:
+        "*": ref-pin

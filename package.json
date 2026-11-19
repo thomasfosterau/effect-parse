@@ -101,14 +101,12 @@
   },
   "scripts": {
     "changeset": "changeset",
-    "version": "changeset version && vp fmt && pnpm install --lockfile-only",
-    "fallow": "fallow --summary",
-    "fallow:audit": "fallow audit",
     "prepare": "vp config && effect-tsgo patch --typescript --oxlint"
   },
   "devDependencies": {
     "@changesets/changelog-github": "catalog:",
     "@changesets/cli": "catalog:",
+    "@devcontainers/cli": "catalog:",
     "@effect/language-service": "catalog:",
     "@effect/platform-node-shared": "catalog:",
     "@effect/tsgo": "catalog:",
@@ -133,9 +131,14 @@
   "peerDependencies": {
     "effect": "catalog:peers"
   },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "lts"
+    }
+  },
   "engines": {
-    "node": ">=22",
-    "pnpm": ">=11"
+    "node": ">=22"
   },
   "packageManager": "pnpm@11.28.6"
 }

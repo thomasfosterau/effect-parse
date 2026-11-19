@@ -99,7 +99,7 @@ report(`lexer, ${source.length / 1000} K characters, one token per run`, {
 })
 
 // -----------------------------------------------------------------------------
-// A lexer whose stop character never occurs (#126)
+// A lexer whose stop character never occurs
 // -----------------------------------------------------------------------------
 
 // Text tokens of an XML-like lexer: each run of text ends at `<` or `&`, and
@@ -213,7 +213,7 @@ report(`token array, ${tokens.length / 1000} K tokens`, {
 })
 
 // -----------------------------------------------------------------------------
-// A check on every token: tryMap / filterMap against mapOrFail (#66)
+// A check on every token: tryMap / filterMap against mapOrFail
 // -----------------------------------------------------------------------------
 
 const word = Token.takeWhile(Ascii.isAlpha, { min: 1 })
@@ -281,7 +281,7 @@ report(`a check on every word, ${prose2.length / 1000} K characters`, {
 })
 
 // -----------------------------------------------------------------------------
-// A lexer that records spans: withSpan against mapSpan (#64)
+// A lexer that records spans: withSpan against mapSpan
 // -----------------------------------------------------------------------------
 
 const text = Parser.terminated(Token.takeTill("<"), Token.literal("<"))
@@ -311,7 +311,7 @@ report(`text runs with spans, ${runs.length / 1000} K characters, one token per 
 })
 
 // -----------------------------------------------------------------------------
-// Runs up to a stop character: takeTill on CSV-shaped input (#75)
+// Runs up to a stop character: takeTill on CSV-shaped input
 // -----------------------------------------------------------------------------
 
 /** Fields of the given length, quoted (`takeTill('"')`) and unquoted (`takeTill(",\r\n")`). */
@@ -343,7 +343,7 @@ for (const length of [4, 16, 32, 64, 256]) {
 }
 
 // -----------------------------------------------------------------------------
-// A name-like terminal: a repetition of a shared character alternative (#79)
+// A name-like terminal: a repetition of a shared character alternative
 // -----------------------------------------------------------------------------
 
 const nameChar = Token.oneOf<string>([Token.range("a", "z"), Token.range("0", "9"), "_"])

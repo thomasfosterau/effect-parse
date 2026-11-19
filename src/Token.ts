@@ -445,6 +445,11 @@ export const takeWhile = <I extends Input = string>(
  * Takes the longest run of tokens *not* belonging to a set (winnow's
  * `take_till`, nom's `take_till` and `take_till1`).
  *
+ * Unbounded on a string, with one to three stop characters that are whole
+ * code points (`'"'`, `",\r\n"`), the JIT and closure compilers find the
+ * end of a long run with `indexOf` rather than testing each character, so
+ * long fields cost little more than short ones.
+ *
  * @since 0.1.0
  * @category slices
  */

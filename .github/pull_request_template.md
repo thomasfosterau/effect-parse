@@ -1,15 +1,11 @@
 ## Summary
 
-What changed and why. If this closes an issue, add `Closes #N` so it closes on merge to `trunk`.
+What changed and why. Add `Closes #N` if it closes an issue.
 
 ## Verification
 
-Run the gates in [AGENTS.md](https://github.com/thomasfosterau/effect-parse/blob/trunk/AGENTS.md#verification) and list each command with its final pass/fail. If a gate could not run, say which and why. For a change to a parser hot path or a compiler, give `vp run bench` (and the benchmark for the area) before and after.
+The gates you ran (`vp run ci`, see [docs/CONTRIBUTING.md](https://github.com/thomasfosterau/effect-parse/blob/trunk/docs/CONTRIBUTING.md#before-you-push)) with their results, and any that couldn't run. For a parser hot path or a compiler, `vp run bench` before and after.
 
 ## Changeset
 
-Name the changeset(s) under `.changeset/`, or say why none is needed (see [AGENTS.md](https://github.com/thomasfosterau/effect-parse/blob/trunk/AGENTS.md#branches-and-pull-requests)).
-
-## Notes
-
-Anything reviewers should look at closely: exported signatures (other libraries depend on them), the peer range, `/*#__PURE__*/` on top-level calls (`sideEffects: false`), compiled/interpreted agreement.
+The changeset(s) under `.changeset/`, or why none is needed.

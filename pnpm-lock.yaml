@@ -12,6 +12,9 @@ catalogs:
     '@changesets/cli':
       specifier: ^3.0.3
       version: 3.0.3
+    '@devcontainers/cli':
+      specifier: ^0.90.0
+      version: 0.90.0
     '@effect/language-service':
       specifier: ^0.87.5
       version: 0.87.5
@@ -83,6 +86,9 @@ importers:
       '@changesets/cli':
         specifier: 'catalog:'
         version: 3.0.3
+      '@devcontainers/cli':
+        specifier: 'catalog:'
+        version: 0.90.0
       '@effect/language-service':
         specifier: 'catalog:'
         version: 0.87.5
@@ -259,6 +265,11 @@ packages:
   '@clack/prompts@1.8.1':
     resolution: {integrity: sha512-dlT1m5e/0yUL0kRNcQn7yGLVThkgbB0Ga/1AmfDDC/8ik6AIiSf2QLQO2zPYvefsHP0aFgxO93cVLCCfDp7kzQ==}
     engines: {node: '>= 20.12.0'}
+
+  '@devcontainers/cli@0.90.0':
+    resolution: {integrity: sha512-A4ceztBMlNzd1MUlQNel0dWxnkDlE83+WsgS4JOZfeBkbO0QUKEzBpd3UQ7Xqf7s0KzJaAj+Udnp4E8I3oqK3w==}
+    engines: {node: '>=20.0.0'}
+    hasBin: true
 
   '@effect/language-service@0.87.5':
     resolution: {integrity: sha512-np/zJgk71/PyHxtoqyUKLYcpQhoRBI+L6+1Z0ILk35JSQ/lvXzwlwOwddYZLDkeC4bdF2ukKekqKlla/F88R5w==}
@@ -1814,6 +1825,8 @@ snapshots:
       fast-string-width: 3.0.2
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
+
+  '@devcontainers/cli@0.90.0': {}
 
   '@effect/language-service@0.87.5': {}
 

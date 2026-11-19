@@ -1,13 +1,7 @@
 name: CI
 
-# ONE workflow, ONE command: the whole gate is the `ci` task in vite.config.ts
-# (`vp run ci`: toolchain lockstep, format + lint, type gate, unit suite,
-# build, dist guard, dependency audit), so CI runs exactly what a contributor
-# runs. Nothing here needs a database, a stage or a credential, so every PR
-# runs it. The benchmarks (`vp run bench*`) are machine-dependent and stay out.
-#
-# It runs on the Node.js LTS and Current lines (`engines.node` is `>=22`).
-# A ruleset requires each leg by name: `ci (node lts)` and `ci (node latest)`.
+# One command: `vp run ci` (the `ci` task in vite.config.ts) is the whole gate,
+# so CI runs exactly what a contributor runs.
 
 on:
   pull_request:
@@ -20,7 +14,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
 
-# No permissions by default; each job grants only what it reads.
 permissions: {}
 
 jobs:
@@ -31,31 +24,47 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Resolved by Vite+ (`vp env use`) from the released Node.js versions:
-        # `lts` is the newest LTS line, `latest` the newest Current release.
         node: [lts, latest]
     permissions:
       contents: read
     env:
-      # A modest ceiling for every Node process in the pipeline. NODE_OPTIONS
-      # is inherited by every child, including each vitest fork.
       NODE_OPTIONS: --max-old-space-size=2048
       VITEST_MAX_WORKERS: 2
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup
+      - uses: voidzero-dev/setup-vp@v1.22.0
         with:
+          version-file: pnpm-workspace.yaml
           node-version: ${{ matrix.node }}
+          cache: true
+          run-install: true
       - name: Restore the Vite+ task cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@v6.1.0
         with:
           path: node_modules/.vite/task-cache
           key: vp-task-v2-${{ runner.os }}-node-${{ matrix.node }}-${{ github.sha }}
           restore-keys: |
             vp-task-v2-${{ runner.os }}-node-${{ matrix.node }}-
-      - name: Node.js version
-        run: node --version
       - name: CI
         run: vp run ci
+
+  # Not part of the required `ci` matrix.
+  devcontainer:
+    name: devcontainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@v1.22.0
+        with:
+          version-file: pnpm-workspace.yaml
+          cache: true
+          run-install: true
+      - name: Build the container and check vp inside it
+        run: vp run check:devcontainer

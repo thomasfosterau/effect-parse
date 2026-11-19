@@ -27,7 +27,7 @@ export const isLeaf = (node: Node): boolean =>
  * Uses are counted, not distinct parents: `seq(p, p)` uses `p` twice. When
  * only parents were counted, such a `p` was inlined at both places, and a
  * grammar that does it at every level (`p = seq(p, p)`, twenty times over)
- * compiled to 2^20 copies: 160 MB of source from twenty lines (#122).
+ * compiled to 2^20 copies: 160 MB of source from twenty lines.
  */
 export const countRefs = (root: ParserLike): WeakMap<ParserLike, number> => {
   const refs = new WeakMap<ParserLike, number>()

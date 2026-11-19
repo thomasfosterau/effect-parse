@@ -71,7 +71,7 @@ describe("regressions", () => {
   })
 })
 
-describe("takeUntil stops at State.end (#30)", () => {
+describe("takeUntil stops at State.end", () => {
   // Runs `p` over the next `n` units only
   const within = <A>(n: number, p: Parser.Parser<A, never, never, any>) =>
     Parser.make((state) => {
@@ -111,7 +111,7 @@ describe("takeUntil stops at State.end (#30)", () => {
   })
 })
 
-describe("furthest failure and commits (#21)", () => {
+describe("furthest failure and commits", () => {
   const ident = Parser.taken(
     Parser.seq(
       Token.takeWhile("abcx", { min: 1 }),
@@ -194,7 +194,7 @@ describe("furthest failure and commits (#21)", () => {
   })
 })
 
-describe("deeply nested input reports TooDeep instead of throwing (#14)", () => {
+describe("deeply nested input reports TooDeep instead of throwing", () => {
   const braced = () => {
     const text = Token.takeTill("{}", { min: 1 })
     const p: Parser.Parser<unknown> = Parser.seq(

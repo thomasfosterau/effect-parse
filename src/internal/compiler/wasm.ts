@@ -1,6 +1,6 @@
 /**
  * The WebAssembly compiler: scans the input in WebAssembly, then builds the
- * value in JavaScript (see `docs/DESIGN.md`, "The WebAssembly compiler").
+ * value in JavaScript (see `docs/ARCHITECTURE.md`, "Compiled parsers").
  *
  * A parse runs in two passes over one description of the grammar:
  *
@@ -85,7 +85,7 @@ const LargeRest = 4096
  * memory, the trace's included, is then a non-negative `i32`. A parse that
  * would need more (its input copied, and four to seven times as much of
  * trace), or whose `memory.grow` the engine refuses, runs on the JIT, which
- * needs neither (#123).
+ * needs neither.
  */
 const MaxMemory = 2 ** 31
 /**

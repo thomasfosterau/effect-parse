@@ -386,7 +386,7 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
   ["alt with cut", Parser.alt(Parser.preceded(a, Parser.cut(b)), Parser.seq(a, a), Token.any)],
   ["alt with backtrack", Parser.alt(Parser.backtrack(Parser.preceded(a, Parser.cut(b))), Parser.seq(a, a))],
   ["alt of optional", Parser.alt(Parser.opt(a), b)],
-  // Nested alts whose branches tie: the ties are merged lazily (#38)
+  // Nested alts whose branches tie: the ties are merged lazily
   [
     "alt of tied alts",
     Parser.alt(
@@ -409,7 +409,7 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
     )
   ],
   ["peek and not", Parser.seq(Parser.peek(a), Parser.not(ab), Token.any, Parser.opt(Parser.not(b)))],
-  // Branches that start with a lookahead: dispatched on what follows it (#84)
+  // Branches that start with a lookahead: dispatched on what follows it
   [
     "alt of branches led by not",
     Parser.alt(
@@ -505,7 +505,7 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
       Parser.zipWith(Parser.opt(a), Parser.opt(b), (x, y) => [y, x])
     )
   ],
-  // The allocation-free spellings of map(withSpan(p)) and map(seq(...)) (#64)
+  // The allocation-free spellings of map(withSpan(p)) and map(seq(...))
   [
     "mapSpan and seqWith",
     Parser.alt(
@@ -564,7 +564,7 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
     )
   ],
   ["cut and context", Parser.preceded(a, Parser.cut(Parser.context(Parser.expected(digit, "a digit"), "number")))],
-  // Repetitions of a character set whose values are unused scan as runs (#79)
+  // Repetitions of a character set whose values are unused scan as runs
   [
     "repeat(oneOf) as a run",
     (() => {
@@ -580,7 +580,7 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
       )
     })()
   ],
-  // A hand-written fast path in front of a grammar (#78): runs of "a" before a "b"
+  // A hand-written fast path in front of a grammar: runs of "a" before a "b"
   [
     "withFastPath",
     Parser.separated(
@@ -588,7 +588,7 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
       Token.literal("+")
     )
   ],
-  // A check that fails at an offset it chooses (#73)
+  // A check that fails at an offset it chooses
   [
     "failAt",
     Parser.alt(
@@ -598,7 +598,7 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
       Parser.seq(digit, b)
     )
   ],
-  // Skippers whose hints and furthest failures are dropped (#74)
+  // Skippers whose hints and furthest failures are dropped
   [
     "quiet",
     Parser.separated(
@@ -655,7 +655,7 @@ const grammars: ReadonlyArray<readonly [string, Parser.Parser<any, any, never, s
       return (state) => (item(state) === Fail ? Fail : more(state, 1))
     })
   ],
-  // Permutation and expression rounds whose attempts tie: merged lazily (#44)
+  // Permutation and expression rounds whose attempts tie: merged lazily
   [
     "permutation of tied alts",
     Parser.seq(
@@ -1231,7 +1231,7 @@ describe("compiled combinators", () => {
 
   // Compiled parsers assign plain keys and define the others, as
   // Object.fromEntries does
-  describe("withFastPath (#78)", () => {
+  describe("withFastPath", () => {
     const grammar = Parser.terminated(Token.takeWhile("a", { min: 1 }), Token.literal("b"))
     const fast =
       (calls: { n: number }, wrong = false) =>
@@ -1292,7 +1292,7 @@ describe("compiled combinators", () => {
     })
   })
 
-  it("takeTill searches for its stop characters (#75)", () => {
+  it("takeTill searches for its stop characters", () => {
     const random = rng(75)
     // Astral characters and lone surrogates: a `Token` set accepts both
     const fill = ["a", "😀", "\ud800", "é", "b"]
@@ -1325,7 +1325,7 @@ describe("compiled combinators", () => {
     inputs.forEach((input) => [quoted, plain, backtracking].forEach((p) => same(p, input)))
   })
 
-  it("takeTill keeps its searches per state, across runs (#75)", () => {
+  it("takeTill keeps its searches per state, across runs", () => {
     const field = Token.takeTill(",;")
     const separator = Token.oneOf(",;")
     /** The fields of `text`, one run of `step` each, on one state reset before every run. */
@@ -1350,7 +1350,7 @@ describe("compiled combinators", () => {
     })
   })
 
-  it("seq tuples of every arity, by literal up to 8 and past it (#86)", () => {
+  it("seq tuples of every arity, by literal up to 8 and past it", () => {
     Array.from({ length: 11 }, (_, n) => n).forEach((n) => {
       const p = Parser.seq(...Array.from({ length: n }, () => Parser.alt(a, b)))
       const input = "ab".repeat(n).slice(0, n)
@@ -1394,7 +1394,7 @@ describe("compiled combinators", () => {
       })
   })
 
-  it("cut and lookahead errors (#21)", () => {
+  it("cut and lookahead errors", () => {
     const ident = Parser.taken(
       Parser.seq(
         Token.takeWhile("abcx", { min: 1 }),
@@ -1411,7 +1411,7 @@ describe("compiled combinators", () => {
     allStrings(["x", "a", "b", "c", ":", ";"], 4).forEach((input) => same(p, input))
   })
 
-  it("a branch led by not(p) starts with p's first units and what follows (#84)", () => {
+  it("a branch led by not(p) starts with p's first units and what follows", () => {
     const iri = Parser.seq(Token.literal("<"), Token.takeTill(">"), Token.literal(">"))
     const arrow = Parser.preceded(Parser.seq(Parser.not(iri), Token.literal("<-")), Ascii.alpha1)
     const first = new FirstSets(0).of(arrow)
@@ -1534,7 +1534,7 @@ describe.each(backends)("Compiler.%s", (backend) => {
     ])
   })
 
-  it("an interpreted guard builds no failure inside compiled code (#82)", () => {
+  it("an interpreted guard builds no failure inside compiled code", () => {
     const built: Array<boolean> = []
     const guard = Parser.make<undefined>((state) => {
       const before = state.failureHead
@@ -1571,7 +1571,7 @@ describe.each(backends)("Compiler.%s", (backend) => {
     expect(defined(Registry.stepFor(p, state))(state)).toEqual(["a", "a"])
   })
 
-  it("takeUntil does not match past a state's end (#30)", () => {
+  it("takeUntil does not match past a state's end", () => {
     const p = Compiler[backend](Token.takeUntil("-->"))
     Parser.parse(p, "-->")
     const state = new State("abcdefg-->h")
@@ -2024,7 +2024,7 @@ describe("the JIT", () => {
   })
 })
 
-describe("a bounded repetition checks progress (#115)", () => {
+describe("a bounded repetition checks progress", () => {
   const b = (...xs: ReadonlyArray<number>) => new Uint8Array(xs)
   const optA = Parser.opt(a)
   const comma = Token.literal(",")
@@ -2091,7 +2091,7 @@ describe("a bounded repetition checks progress (#115)", () => {
   })
 })
 
-describe("hostile counts and bounds (#114, #121)", () => {
+describe("hostile counts and bounds", () => {
   /** A bound that is a number only in the types, as one read from JSON or a query string is. */
   const payload = "64&&(globalThis.effectParseHit=(globalThis.effectParseHit||0)+1,64)"
   // SAFETY: deliberately ill-typed, as `JSON.parse(text).max` is for a grammar that trusts its config: a string
@@ -2252,7 +2252,7 @@ describe("hostile counts and bounds (#114, #121)", () => {
   })
 })
 
-describe("generated code stays proportional to the grammar (#122)", () => {
+describe("generated code stays proportional to the grammar", () => {
   const leaf: Parser.Parser.Any = Parser.map(a, (x) => x)
   /** `p` used twice by its parent, `levels` times over: 2^levels uses of the innermost parser. */
   const doubled = (levels: number): Parser.Parser.Any =>
@@ -2317,7 +2317,7 @@ describe("the WebAssembly compiler", () => {
     sameAsInterpreted(JsonFast.jsonGrammar(Text.utf8), new TextEncoder().encode(doc))
   })
 
-  describe("limits (#123)", () => {
+  describe("limits", () => {
     /** Watches `WebAssembly.Memory.grow`; once `refuse` is called, it throws as an engine out of memory does. */
     const watchGrowth = () => {
       const spy = vi.spyOn(WebAssembly.Memory.prototype, "grow")

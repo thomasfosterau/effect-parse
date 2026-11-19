@@ -20,6 +20,8 @@ const objectPrototype = Object.prototype
  * as `Object.fromEntries` (a writable, enumerable, configurable data
  * property): `key` is a string that `Object.prototype` has no property for,
  * so there is no setter (`__proto__`) or read-only property to run into.
+ * The check costs about 16 ns per key (13% of `json-fast.ts` on records),
+ * but nothing cheaper tells whether `Object.prototype` has changed.
  */
 export const isPlainKey = (key: unknown): key is string =>
   Predicate.isString(key) && !Object.hasOwn(objectPrototype, key)

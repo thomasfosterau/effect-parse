@@ -42,8 +42,8 @@ export const run = <S extends State<any>, A>(step: (state: S) => A, state: S): A
 
 /**
  * Runs a compiled step with `state.compiledRun` set, so that the
- * interpreted steps it calls skip building the failures it throws away
- * (#82): directly when the step guards against call-stack overflows itself
+ * interpreted steps it calls skip building the failures it throws away:
+ * directly when the step guards against call-stack overflows itself
  * (the JIT's), else under {@link run}. The flag is restored however the
  * step ends, a throw included, since the state may be the caller's.
  */
