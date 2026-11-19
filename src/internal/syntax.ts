@@ -1,6 +1,6 @@
 /**
- * The tree builder behind the `Syntax` module (see `docs/DESIGN.md`,
- * "Syntax trees").
+ * The tree builder behind the `Syntax` module (see
+ * `docs/ARCHITECTURE.md`, "Syntax trees").
  *
  * Trees are stored as *green* nodes, as in Roslyn and rust-analyzer: a green
  * node knows its kind, its width and its children's offsets relative to its

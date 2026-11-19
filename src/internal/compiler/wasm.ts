@@ -1,6 +1,6 @@
 /**
  * The WebAssembly compiler: scans the input in WebAssembly, then builds the
- * value in JavaScript (see `docs/DESIGN.md`, "The WebAssembly compiler").
+ * value in JavaScript (see `docs/ARCHITECTURE.md`, "Compiled parsers").
  *
  * A parse runs in two passes over one description of the grammar:
  *

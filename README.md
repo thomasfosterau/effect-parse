@@ -34,7 +34,7 @@ Parser.parse(point, "(1;-2)") // Result.fail(ParseError): expected digit or ",",
 ## Documentation
 
 - [Guide](https://github.com/thomasfosterau/effect-parse/blob/trunk/docs/guide.md): writing, running and compiling parsers, errors, streaming, schemas, Unicode, syntax trees, coming from nom or winnow.
-- [Design](https://github.com/thomasfosterau/effect-parse/blob/trunk/docs/DESIGN.md): the reasoning behind each subsystem.
+- [Architecture](https://github.com/thomasfosterau/effect-parse/blob/trunk/docs/ARCHITECTURE.md): how parsing, compilation, streaming and syntax trees fit together.
 - [Examples](https://github.com/thomasfosterau/effect-parse/tree/trunk/examples): JSON, arithmetic, INI, HTTP, jq and a ripgrep clone.
 - [Contributing](https://github.com/thomasfosterau/effect-parse/blob/trunk/docs/CONTRIBUTING.md), [security](https://github.com/thomasfosterau/effect-parse/blob/trunk/docs/SECURITY.md), [changelog](https://github.com/thomasfosterau/effect-parse/blob/trunk/CHANGELOG.md).
 

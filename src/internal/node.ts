@@ -1,6 +1,6 @@
 /**
  * Descriptions of parsers, recorded next to their steps so that parsers can
- * be compiled (see `docs/DESIGN.md`, "Compiled parsers").
+ * be compiled (see `docs/ARCHITECTURE.md`, "Compiled parsers").
  *
  * Nodes refer to their child parsers rather than to child nodes, so a
  * child's own step is always at hand for fallback, and recursion through

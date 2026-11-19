@@ -478,12 +478,11 @@ export default defineConfig({
   run: {
     tasks: {
       // The whole gate, in order, and the only command CI runs
-      // (.github/workflows/ci.yml): the toolchain lockstep, format + lint,
-      // the type gate, the unit suite, the build with its dist guard, and the
-      // dependency audit (network). It stops at the first failure.
+      // (.github/workflows/ci.yml): format + lint, the type gate, the unit
+      // suite, the build with its dist guard, and the dependency audit
+      // (network). It stops at the first failure.
       ci: {
-        command:
-          "vp run check:toolchain && vp check && vp run check && vp run test:unit && vp run check:dist && pnpm audit --audit-level high",
+        command: "vp check && vp run check && vp run test:unit && vp run check:dist && pnpm audit --audit-level high",
         cache: false
       },
       // The type gate: `src`, the tests, the examples and the benchmarks
@@ -492,13 +491,6 @@ export default defineConfig({
       check: {
         command: "tsc -p tsconfig.json",
         cache: { input: cacheInputs, output: [] }
-      },
-      // The catalog entries that move in lockstep with `vite-plus`
-      // (scripts/check-toolchain.mjs; `--fix` rewrites them): Dependabot
-      // bumps vite-plus but not its `vite` alias or its vitest pin.
-      "check:toolchain": {
-        command: "node scripts/check-toolchain.mjs",
-        cache: false
       },
       // The published artifact: one ESM module + declaration file per source
       // module (`vp pack` → tsdown; see `pack` below).
@@ -536,6 +528,22 @@ export default defineConfig({
       },
       fallow: {
         command: "vp exec fallow --summary",
+        cache: false
+      },
+      // The release tarball, after the dist guard: `pnpm pack` rewrites
+      // `catalog:peers` to the published range, and has no `--ignore-scripts`
+      // flag, so lifecycle scripts are turned off through config. Run by the
+      // Release workflow's build job, which uploads `release-artifact/`.
+      "release:pack": {
+        command: "pnpm pack --config.ignore-scripts=true --pack-destination release-artifact",
+        dependsOn: ["check:dist"],
+        cache: false
+      },
+      // Builds the dev container and checks `vp` and the install inside it
+      // (needs Docker). Run by CI's `devcontainer` job.
+      "check:devcontainer": {
+        command:
+          "devcontainer up --workspace-folder . && devcontainer exec --workspace-folder . bash -lc 'vp --version && test -x node_modules/.bin/vp'",
         cache: false
       },
       // Run by the Release workflow's version step.

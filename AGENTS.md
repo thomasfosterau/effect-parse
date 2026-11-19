@@ -6,5 +6,5 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 - Out-of-scope work you notice: file an issue and move on.
 - Write idiomatic Effect v4 (see docs/CONTRIBUTING.md); non-idiomatic code that isn't a trivial fix gets an issue listing the sites and the replacement.
 - Other libraries depend on the exported surface: change it only on purpose, with a changeset.
-- `docs/DESIGN.md` explains the compilers, streaming and syntax trees; read the relevant section before changing one.
+- `docs/ARCHITECTURE.md` gives the broad view of the compilers, streaming and syntax trees, and each internal module's header comment the details; read both before changing one.
 - The full suite takes about 90 s; run single files while iterating.

@@ -21,6 +21,7 @@ Read the [README](../README.md) first. Agents should also read [AGENTS.md](../AG
 | `vp run build` / `vp run check:dist` | `vp pack` to `dist/`; the dist guard (exports, `/*#__PURE__*/`, compiler isolation) |
 | `vp run ci` | Everything CI runs, in order, stopping at the first failure |
 | `vp run test:coverage` | The suite under Istanbul with coverage floors; writes the map `fallow audit` reads |
+| `vp run check:devcontainer` | Builds the dev container and checks `vp` inside it (Docker); CI's `devcontainer` job |
 | `vp run bench*` | Benchmarks over `dist/` (`bench`, `bench:native`, `bench:stream`, `bench:downstream`, …); never in CI |
 
 [Fallow](https://docs.fallow.tools) finds dead code, duplication and complexity. The pre-commit hook runs `vp run fallow:audit` after `vp staged` (it runs `test:coverage` first, since the audit reads the coverage map) and fails on findings your change introduces; pre-existing ones are baselined in `fallow-baselines/`, which you re-save only to shrink. Treat its findings as advice, not dogma; CI doesn't run it.
@@ -29,7 +30,7 @@ Read the [README](../README.md) first. Agents should also read [AGENTS.md](../AG
 
 Every version lives in the `pnpm-workspace.yaml` catalog; `package.json` uses `catalog:` only. After editing the catalog, run `vp install` and commit `pnpm-lock.yaml`. Dependabot can't do these:
 
-- `vite`, `vitest` and `@vitest/coverage-istanbul` must equal what `vite-plus` pins: after a `vite-plus` bump, run `node scripts/check-toolchain.mjs --fix` and `vp install` (CI's `check:toolchain` catches drift).
+- `vite`, `vitest` and `@vitest/coverage-istanbul` must equal what `vite-plus` pins: on its PR, run `vp dlx --package=vite-plus@<v> vp migrate --no-interactive` (it re-pins `vite` and `vitest`; drop the `minimumReleaseAgeExclude` entries it adds), set `@vitest/coverage-istanbul` to the new `vitest`, and run `vp install`.
 - `@effect/tsgo`, `@typescript/native` (an npm alias) and vite-plus's oxlint must be a combination the `components` table in `node_modules/@effect/tsgo/dist/effect-tsgo.cjs` supports, or `vp install` fails.
 - The devcontainer image tag equals the `vite-plus` pin; the `npm` version in `release.yml` is bumped by hand.
 

@@ -121,18 +121,14 @@ jobs:
           cache: false
           run-install: |
             - args: ['--frozen-lockfile', '--ignore-scripts']
-      - run: vp run check:dist
-      # `pnpm pack` rewrites `catalog:peers` to the published range; it has no
-      # `--ignore-scripts` flag, so the setting is passed as config. The notes
-      # are this version's CHANGELOG.md section, for the GitHub release.
-      - name: Pack
+      - run: vp run release:pack
+      # The notes are this version's CHANGELOG.md section, for the GitHub release.
+      - name: Describe the tarball
         id: pack
         run: |
           set -euo pipefail
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
-          mkdir -p release-artifact
-          pnpm pack --config.ignore-scripts=true --pack-destination release-artifact
           tarball="$(cd release-artifact && ls ./*.tgz)"
           tarball="${tarball#./}"
           awk -v v="## $version" '$0 == v { on = 1; next } on && /^## / { exit } on { print }' CHANGELOG.md > release-artifact/notes.md

@@ -3051,6 +3051,7 @@ export const provide: {
 /**
  * Error recovery: if the parser fails, record the failure, skip input with
  * `recover`, and continue with `Option.none()` (winnow's `resume_after`).
+ * `recover` runs from where `self` started, not from where it failed.
  *
  * Recovery is only active when running with {@link parseRecoverable}. Under
  * the other runners the parser behaves like `Parser.asSome(self)`.
@@ -3097,6 +3098,7 @@ export const resumeAfter: {
 /**
  * Error recovery: if the parser fails, record the failure, skip input with
  * `recover`, and try the parser again (winnow's `retry_after`).
+ * `recover` runs from where `self` started, not from where it failed.
  *
  * Recovery is only active when running with {@link parseRecoverable}. Under
  * the other runners the parser behaves like `self`.

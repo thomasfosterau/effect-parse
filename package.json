@@ -106,6 +106,7 @@
   "devDependencies": {
     "@changesets/changelog-github": "catalog:",
     "@changesets/cli": "catalog:",
+    "@devcontainers/cli": "catalog:",
     "@effect/language-service": "catalog:",
     "@effect/platform-node-shared": "catalog:",
     "@effect/tsgo": "catalog:",

@@ -53,7 +53,9 @@ import { describeLiteral } from "./internal/tokens.js"
 /**
  * The key of the annotation that says how a schema is written as text
  * ({@link Annotation}), namespaced to this package so it cannot collide with
- * another library's. {@link annotate} sets it.
+ * another library's. It is a string rather than a symbol so that two copies
+ * of the package in one program still read each other's annotations.
+ * {@link annotate} sets it.
  *
  * @since 0.3.0
  * @category annotations

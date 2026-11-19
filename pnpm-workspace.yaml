@@ -10,6 +10,8 @@ packages:
 catalog:
   "@changesets/changelog-github": ^1.0.1
   "@changesets/cli": ^3.0.3
+  # The devcontainers CLI, for the `check:devcontainer` task.
+  "@devcontainers/cli": ^0.90.0
   "@effect/language-service": ^0.87.5
   # For the `effect/cli` jq example only. Moves with `effect`.
   "@effect/platform-node-shared": 4.1.4
@@ -24,7 +26,7 @@ catalog:
   "@thomasfosterau/effect-rdf": 0.3.0
   "@thomasfosterau/effect-xml": 0.2.0
   "@types/node": ^26.6.5
-  # Must equal vite-plus's vitest (scripts/check-toolchain.mjs).
+  # Must equal vite-plus's vitest.
   "@vitest/coverage-istanbul": 5.1.0
   "@enfect/oxlint": ^0.10.0
   effect: 4.1.4
@@ -35,7 +37,7 @@ catalog:
   typescript: "npm:@typescript/typescript6@6.0.2"
   "@typescript/native": "npm:typescript@7.0.2"
   # `vite` and `vitest` follow vite-plus: after bumping it, run
-  # `node scripts/check-toolchain.mjs --fix`.
+  # `vp dlx --package=vite-plus@<v> vp migrate --no-interactive`.
   vite-plus: 1.6.0
   vite: npm:@voidzero-dev/vite-plus-core@1.6.0
   vitest: 5.1.0
@@ -61,6 +63,6 @@ peerDependencyRules:
     vite: "*"
     vitest: "*"
 
-minimumReleaseAge: 480
+minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - "@thomasfosterau/*"

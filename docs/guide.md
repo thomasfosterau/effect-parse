@@ -1,6 +1,6 @@
 # Guide
 
-The API guide for `@thomasfosterau/effect-parse`. Each export's doc comment is the reference; [DESIGN.md](DESIGN.md) records why the port is shaped as it is. The examples here are run by `test/guide.test.ts`.
+The API guide for `@thomasfosterau/effect-parse`. Each export's doc comment is the reference; [ARCHITECTURE.md](ARCHITECTURE.md) explains how it fits together. The examples here are run by `test/guide.test.ts`.
 
 effect-parse keeps the core model of nom and winnow: small parsers composed into larger ones; `Backtrack` / `Cut` / `Incomplete` error modes; one set of parsers for both complete and streaming input; text, bytes, bits and token streams. On top of that it follows Effect's conventions: pipeable, dual combinators; generator syntax with `Parser.gen`; typed user errors in the `E` channel and `ParseError` as a `Data.TaggedError`; `Context` services in the `R` channel; and `Option`, `Result`, `Effect`, `Stream` and `Schema` integration.
 
@@ -247,7 +247,7 @@ export const json = Compiler.jit(Parser.preceded(ws, value))
 Parser.parse(json, text) // same Result as before, about 5 times faster
 ```
 
-On the JSON example, compiled parsing runs at 5–6 times the speed of the interpreter, for strings, UTF-8 and UTF-16 alike, and at 1–4 times the time of `JSON.parse` depending on the document (see [the design notes](DESIGN.md#results)). That is 3–5 times as fast as the same JSON grammar in Chevrotain, the fastest of the other JavaScript parser libraries measured, and about 8 and 20 times as fast as in Peggy and Parsimmon ([the comparison](DESIGN.md#against-other-javascript-parser-libraries)).
+On the JSON example, compiled parsing runs at 5–6 times the speed of the interpreter, for strings, UTF-8 and UTF-16 alike, and at 1–6 times the time of `JSON.parse` depending on the document (see [the benchmarks](ARCHITECTURE.md#performance)). That is 3–5 times as fast as the same JSON grammar in Chevrotain, the fastest of the other JavaScript parser libraries measured, and about 8 and 20 times as fast as in Peggy and Parsimmon ([the comparison](ARCHITECTURE.md#against-other-javascript-parser-libraries)).
 
 There are three compilers, one function each:
 
@@ -259,7 +259,7 @@ A bundle contains only the compilers it calls. A program that compiles nothing b
 
 Each returns the same parser. The code is built on the first run, for each kind of input, and cached. `parse`, `parseSync`, `parsePeek`, `parsePartial`, `parseEffect`, `ParserStream.parseMany` and `ParserStream.parseAll` use it, from any `offset`; `parseRecoverable` and tracing stay interpreted. A driver that keeps its own `Input.State` (a lexer reading one token at a time, say) runs the compiled code with `Parser.run(p, state)`; calling `p.step(state)` directly always runs interpreted.
 
-Compiled code records no diagnostics. When it fails, the parser runs again interpreted, so errors are exactly the same, byte for byte. Callbacks should therefore be pure: on failing input they may run twice, and those whose results are unused may be skipped. Parsers built with `Parser.make` or `Parser.gen` run interpreted inside compiled code; the parsers given to a `Parser.combinator` compile. See the [design notes](DESIGN.md#6-compiled-parsers) for details.
+Compiled code records no diagnostics. When it fails, the parser runs again interpreted, so errors are exactly the same, byte for byte. Callbacks should therefore be pure: on failing input they may run twice, and those whose results are unused may be skipped. Parsers built with `Parser.make` or `Parser.gen` run interpreted inside compiled code; the parsers given to a `Parser.combinator` compile. See [ARCHITECTURE.md](ARCHITECTURE.md#compiled-parsers) for how compilation works.
 
 Some ways of writing a grammar compile to faster code than others:
 
@@ -603,7 +603,7 @@ The `Nom` module provides the nom names directly, with nom's argument orders, fo
 - [`json.ts`](../examples/json.ts): JSON with `dispatch`, `cut` and escapes
 - [`json-text.ts`](../examples/json-text.ts): the same grammar written once against `Text.TextParsers`, for strings, UTF-8 and UTF-16
 - [`json-fast.ts`](../examples/json-fast.ts): the same grammar written for compiled parsers, with `Parser.fromEntries`
-- [`json-tape.ts`](../examples/json-tape.ts): the same grammar building no values at all: it appends 16-byte records to memory from [effect-ext](https://github.com/thomasfosterau/effect-ext)'s `Allocator`, and strings are read as views of the input's bytes. On UTF-8 input it parses about 1.4 times as fast as `TextDecoder` and `JSON.parse`, and leaves no garbage ([DESIGN.md](DESIGN.md#zero-copy-output))
+- [`json-tape.ts`](../examples/json-tape.ts): the same grammar building no values at all: it appends 16-byte records to memory from [effect-ext](https://github.com/thomasfosterau/effect-ext)'s `Allocator`, and strings are read as views of the input's bytes. On UTF-8 input it parses about 1.4 times as fast as `TextDecoder` and `JSON.parse`, and leaves no garbage
 - [`arithmetic.ts`](../examples/arithmetic.ts): direct evaluation, an AST via the Pratt parser, and a lexer plus a parser over the token array
 - [`ini.ts`](../examples/ini.ts): INI files with a generator-style parser
 - [`http.ts`](../examples/http.ts): HTTP requests over bytes, complete and streamed
