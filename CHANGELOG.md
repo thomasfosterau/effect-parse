@@ -1,5 +1,13 @@
 # @thomasfosterau/effect-parse
 
+## 0.6.2
+
+### Patch Changes
+
+- [#159](https://github.com/thomasfosterau/effect-parse/pull/159) [`70d4048`](https://github.com/thomasfosterau/effect-parse/commit/70d4048ab31cf5a6e15f292eb6cc68519e27747f) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - Doc comments now say where `Parser.resumeAfter` and `Parser.retryAfter` recover from, how compiled `Token.takeTill` searches for its stop characters, and why `ParserSchema.annotationKey` is a string.
+
+- [#159](https://github.com/thomasfosterau/effect-parse/pull/159) [`aecc0ab`](https://github.com/thomasfosterau/effect-parse/commit/aecc0ab5a4d223d0d15fa94765244c7d93ed7969) Thanks [@thomasfosterau](https://github.com/thomasfosterau)! - Doc comments no longer cite issue numbers.
+
 ## 0.6.1
 
 ### Patch Changes
