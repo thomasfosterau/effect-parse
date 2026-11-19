@@ -1,67 +1,11 @@
-# Dependabot version updates, shaped like the owner's other Effect libraries.
-#
-# A group exists only for dependencies that MUST move together (one release
-# train, or a hard compatibility table), so updating one alone breaks the
-# install or the build. Everything else (`@enfect/oxlint`, the changesets CLI,
-# fallow, `@types/node`, …) arrives as its own PR:
-#
-# - `toolchain`: vite-plus pins `oxlint`, `oxfmt` and `vitest` exactly, and
-#   `effect-tsgo patch` (the `prepare` script) matches the native `tsc`
-#   (`@typescript/native`) and that `oxlint` by gitHead / version and
-#   hard-errors (UnsupportedTargetPackageVersionError) on any pairing it has
-#   no artifact for. A PR moving one of them alone fails `pnpm install`, so
-#   they move as ONE group. Check the `components` table in
-#   node_modules/@effect/tsgo/dist/effect-tsgo.cjs before merging.
-#   `@enfect/oxlint` is not in it: it takes `@oxlint/plugins` as a range, so
-#   nothing ties it to vite-plus's oxlint.
-#
-#   Dependabot does not update `npm:` alias specifiers, and the catalog has
-#   three: `vite` (vite-plus's core), `typescript` (TS6) and
-#   `@typescript/native` (TS7). So a toolchain PR can bump `vite-plus` but
-#   never its `vite` alias, and `vitest` / `@vitest/coverage-istanbul` must
-#   equal vite-plus's exact vitest pin, not the newest vitest. Those three
-#   are therefore ignored below and derived from vite-plus instead: CI's
-#   "Toolchain lockstep" step (scripts/check-toolchain.mjs) fails a PR that
-#   left them behind, and on the PR branch
-#   `pnpm install && node scripts/check-toolchain.mjs --fix && pnpm install`
-#   completes it (PR #48 failed its Build step this way). A TypeScript move
-#   that a new @effect/tsgo needs is a hand edit of the two TS aliases;
-#   `pnpm install` fails at once, naming the version, if it is missing.
-# - `effect`: the Effect 4 release line is a lockstep-versioned singleton set
-#   (`@effect/tsgo` is in `toolchain`, so it is excluded here).
-# There is no benchmark-library group: the benchmarks compare against the
-# native `JSON.parse` only, and nothing else is benchmarked against.
-#
-# `cooldown` covers pnpm-workspace.yaml's `minimumReleaseAge` (480 minutes,
-# 8 hours) with the first-party `@thomasfosterau/*` packages exempt, as there.
-# Dependabot counts cooldown in whole days only, so it is 1 day: longer than
-# pnpm's 8 hours, so a Dependabot PR never proposes a version pnpm would still
-# refuse to install.
-#
-# Hand moves Dependabot cannot make (also listed in AGENTS.md):
-# - `vite`, `vitest`, `@vitest/coverage-istanbul`: derived from vite-plus by
-#   `node scripts/check-toolchain.mjs --fix` (ignored below).
-# - `typescript` / `@typescript/native`: `npm:` aliases, moved with the
-#   @effect/tsgo release that supports them.
-# - the `overrides` keys in pnpm-workspace.yaml (`vite@*`, `vitest@*`,
-#   `effect`) follow their catalog entries and need no bump of their own.
-# - the `npm@11.20.0` that release.yml installs for OIDC publishing.
-# - the `ghcr.io/voidzero-dev/vite-plus:<tag>@sha256:<digest>` image in .devcontainer/devcontainer.json:
-#   it equals the catalog's `vite-plus` pin, moved on the toolchain PR.
-#
-# The `github-actions` entry also scans the local composite action under
-# .github/actions/, whose `uses:` pins it would otherwise never see. Every
-# action is pinned to a full commit SHA with a `# vX.Y.Z` comment, which
-# Dependabot keeps current; voidzero-dev/setup-vp is pinned to its exact
-# release tag instead (its tags are immutable, and the moving `v1` is frozen).
+# Groups exist only for sets that must move together. The by-hand steps are in
+# docs/CONTRIBUTING.md (Dependencies).
 version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/"
-    target-branch: "trunk"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
@@ -71,25 +15,17 @@ updates:
       default-days: 1
       exclude:
         - "@thomasfosterau/*"
-    # Derived from vite-plus by scripts/check-toolchain.mjs (see above)
-    ignore:
-      - dependency-name: "vite"
-      - dependency-name: "vitest"
-      - dependency-name: "@vitest/coverage-istanbul"
     groups:
-      # vite-plus pins vitest / oxlint exactly; @effect/tsgo's patch supports
-      # only the oxlint / tsgolint / tsc versions its components table lists.
+      # vite-plus pins vitest and oxlint exactly; `effect-tsgo patch` supports
+      # only the oxlint / tsc versions its components table lists.
       toolchain:
         applies-to: version-updates
         patterns:
           - "vite-plus"
           - "@voidzero-dev/*"
+          - "vitest"
           - "@vitest/*"
           - "@effect/tsgo"
-          - "@typescript/native"
-          - "typescript"
-        update-types: ["major", "minor", "patch"]
-      # One release train: the Effect 4 packages share one version.
       effect:
         applies-to: version-updates
         patterns:
@@ -97,41 +33,33 @@ updates:
           - "@effect/*"
         exclude-patterns:
           - "@effect/tsgo"
-        update-types: ["major", "minor", "patch"]
     assignees:
       - thomasfosterau
+
   - package-ecosystem: "github-actions"
-    directories:
-      - "/"
-      - "/.github/actions/*"
-    target-branch: "trunk"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
-    cooldown:
-      default-days: 1
-    labels:
-      - "dependencies"
-    commit-message:
-      prefix: "ci"
-    assignees:
-      - thomasfosterau
-  # The dev container's features (.devcontainer/devcontainer.json) and their
-  # lockfile. The base image tag is not a feature: it is the catalog's
-  # `vite-plus` pin, moved by hand on the toolchain PR.
-  - package-ecosystem: "devcontainers"
     directory: "/"
-    target-branch: "trunk"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     open-pull-requests-limit: 5
-    cooldown:
-      default-days: 1
     labels:
       - "dependencies"
     commit-message:
       prefix: "chore"
+    cooldown:
+      default-days: 1
+    assignees:
+      - thomasfosterau
+
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 1
     assignees:
       - thomasfosterau
