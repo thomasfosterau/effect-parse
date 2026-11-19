@@ -528,6 +528,21 @@ export default defineConfig({
         command: "vp test run --coverage --testTimeout 60000",
         cache: { env: ["VITEST_MAX_WORKERS", "NODE_OPTIONS"], input: cacheInputs, output: ["coverage/**"] }
       },
+      // The fallow gate, run by the pre-commit hook after `vp staged`.
+      "fallow:audit": {
+        command: "vp exec fallow audit --base origin/trunk --quiet",
+        dependsOn: ["test:coverage"],
+        cache: false
+      },
+      fallow: {
+        command: "vp exec fallow --summary",
+        cache: false
+      },
+      // Run by the Release workflow's version step.
+      "changeset:version": {
+        command: "changeset version && vp fmt && pnpm install --lockfile-only",
+        cache: false
+      },
       // Benchmarks: run by hand around a change to a hot path, never in CI
       // (their numbers depend on the machine).
       bench: bench("json"),

@@ -11,7 +11,7 @@ Read the [README](../README.md) first. Agents should also read [AGENTS.md](../AG
 
 ## Toolchain
 
-[Vite+](https://viteplus.dev) (`vp`) manages Node, pnpm and every tool; run things through it (`vp exec <bin>` instead of `npx`, `vp run <task>` for the tasks in `vite.config.ts`). `vp install` installs dependencies, the git hooks (pre-commit runs `vp staged`: format and lint staged files) and the `prepare` step that patches the native `tsc` / `oxlint` with `@effect/tsgo`.
+[Vite+](https://viteplus.dev) (`vp`) manages Node, pnpm and every tool; run things through it (`vp exec <bin>` instead of `npx`, `vp run <task>` for the tasks in `vite.config.ts`). `vp install` installs dependencies, the git hooks (pre-commit runs `vp staged`, formatting and linting staged files, then the fallow audit) and the `prepare` step that patches the native `tsc` / `oxlint` with `@effect/tsgo`.
 
 | Command | What it does |
 | --- | --- |
@@ -23,7 +23,7 @@ Read the [README](../README.md) first. Agents should also read [AGENTS.md](../AG
 | `vp run test:coverage` | The suite under Istanbul with coverage floors; writes the map `fallow audit` reads |
 | `vp run bench*` | Benchmarks over `dist/` (`bench`, `bench:native`, `bench:stream`, `bench:downstream`, …); never in CI |
 
-[Fallow](https://docs.fallow.tools) finds dead code, duplication and complexity. Use it to guide your work (`vp run test:coverage`, then `vp exec fallow audit --base origin/trunk`); its findings are advice, not dogma, and CI doesn't run it.
+[Fallow](https://docs.fallow.tools) finds dead code, duplication and complexity. The pre-commit hook runs `vp run fallow:audit` after `vp staged` (it runs `test:coverage` first, since the audit reads the coverage map) and fails on findings your change introduces; pre-existing ones are baselined in `fallow-baselines/`, which you re-save only to shrink. Treat its findings as advice, not dogma; CI doesn't run it.
 
 ### Dependencies
 
@@ -57,7 +57,7 @@ Every version lives in the `pnpm-workspace.yaml` catalog; `package.json` uses `c
 
 ## Before you push
 
-Run `vp run ci` (format, lint, type gate, tests, build, dist guard, `pnpm audit`); for parity with CI, start from `rm -rf node_modules dist && vp install --frozen-lockfile`. Optionally run `vp run test:coverage` and `vp exec fallow audit --base origin/trunk`.
+Run `vp run ci` (format, lint, type gate, tests, build, dist guard, `pnpm audit`); for parity with CI, start from `rm -rf node_modules dist && vp install --frozen-lockfile`. The pre-commit hook already runs the fallow audit.
 
 ## Changesets
 

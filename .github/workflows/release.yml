@@ -34,7 +34,7 @@ jobs:
       - uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
-          node-version: "22"
+          node-version: lts
           cache: true
           run-install: |
             - args: ['--frozen-lockfile', '--ignore-scripts']
@@ -61,14 +61,14 @@ jobs:
       - uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
-          node-version: "22"
+          node-version: lts
           cache: true
           run-install: |
             - args: ['--frozen-lockfile', '--ignore-scripts']
       - id: version
         uses: changesets/action/version@v2.1.2
         with:
-          script: pnpm run version
+          script: vp run changeset:version
           commit-message: "chore: version packages"
           pr-title: "chore: version packages"
       - name: Assign the owner to the version PR
@@ -101,7 +101,7 @@ jobs:
       - uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
-          node-version: "22"
+          node-version: lts
           cache: false
           run-install: |
             - args: ['--frozen-lockfile', '--ignore-scripts']

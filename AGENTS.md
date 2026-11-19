@@ -8,7 +8,3 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 - Other libraries depend on the exported surface: change it only on purpose, with a changeset.
 - `docs/DESIGN.md` explains the compilers, streaming and syntax trees; read the relevant section before changing one.
 - The full suite takes about 90 s; run single files while iterating.
-
-## Fallow
-
-Before a commit or push, run `vp run test:coverage`, then `vp exec fallow audit --format json --quiet --explain --gate-marker agent --base origin/trunk`. Fix a `fail` verdict caused by your change; treat `{ "error": true }` as non-blocking. Pre-existing complexity and duplication are recorded in `fallow-baselines/`; re-save a baseline only to shrink it.
