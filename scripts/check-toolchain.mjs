@@ -1,15 +1,5 @@
-// Checks the catalog entries that must move in lockstep with `vite-plus`, and
-// with `--fix` rewrites them. Dependabot bumps `vite-plus` but cannot keep
-// these in step: it does not update `npm:` alias specifiers (the `vite` entry
-// is one), and `vitest` must equal vite-plus's exact pin rather than the
-// newest release. A drift installs cleanly and fails later (the Build step,
-// on toolchain PR #48), so CI runs this right after installing.
-//
-//   node scripts/check-toolchain.mjs          # fails, naming each fix
-//   node scripts/check-toolchain.mjs --fix    # rewrites the catalog; then `pnpm install`
-//
-// It reads the installed vite-plus (`pnpm install` first), whose version is
-// the catalog's.
+// Checks the catalog entries that must equal what `vite-plus` pins (Dependabot
+// cannot move the `vite` npm alias); `--fix` rewrites them, then `pnpm install`.
 import { readFile, writeFile } from "node:fs/promises"
 
 const workspaceUrl = new URL("../pnpm-workspace.yaml", import.meta.url)

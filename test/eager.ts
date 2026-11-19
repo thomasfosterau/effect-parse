@@ -1,6 +1,6 @@
 /**
- * Reference implementations of combinators that merge tied failures lazily
- * (#38, #44): the eager algorithms they replaced, merging every failure as it
+ * Reference implementations of combinators that merge tied failures lazily:
+ * the eager algorithms they replaced, merging every failure as it
  * happens. A lazy combinator must report exactly what its eager reference
  * does: the same failure, furthest failure and hint.
  */
@@ -10,7 +10,7 @@ import { Input, Parser } from "../src/index.js"
 
 type Any = Parser.Parser<unknown, unknown>
 
-/** `Parser.permutation` as it was before #44. */
+/** `Parser.permutation`, merging failures eagerly. */
 export const eagerPermutation = (...ps: ReadonlyArray<Any>): Any =>
   Parser.make((state) => {
     const out: Array<unknown> = ps.map(() => undefined)
@@ -37,7 +37,7 @@ export const eagerPermutation = (...ps: ReadonlyArray<Any>): Any =>
     return round(ps.length)
   })
 
-/** `Expression.make` as it was before #44, its loops written as recursion. */
+/** `Expression.make` merging failures eagerly, its loops written as recursion. */
 export const eagerExpression = <A>(options: {
   readonly operand: Parser.Parser<A, unknown>
   readonly operators: ReadonlyArray<Expression.Operator<A, unknown>>

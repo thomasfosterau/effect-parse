@@ -7,7 +7,7 @@
  * time one of the later attempts succeeds and the merge is thrown away, so
  * {@link TiedFailures} keeps the last two failures tied with the running
  * one unmerged, and {@link TiedFailures.fail} hands them to the state with
- * `State.failTies`, which merges them on first read (#38, #44).
+ * `State.failTies`, which merges them on first read.
  *
  * `Parser.alt` does the same fold in locals, since it is the hottest
  * combinator and cannot afford an accumulator per call.

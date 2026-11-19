@@ -263,7 +263,7 @@ class Emitter {
    * A count or bound as source text. Every number a description contributes
    * to the generated source is written here, so nothing but a non-negative
    * integer can reach it: a bound is a `number` only in the types, and a
-   * string written as given would run as code (#121).
+   * string written as given would run as code.
    */
   num(n: number): string {
     if (!Number.isSafeInteger(n) || n < 0)
@@ -658,7 +658,7 @@ class Emitter {
         return this.dispatch(p, node, used, out, fail, fn, d)
       case "Repeat":
       case "Fold": {
-        // A run of a character set whose characters are not kept is a `takeWhile` (#79)
+        // A run of a character set whose characters are not kept is a `takeWhile`
         const run =
           out === null && Predicate.isTagged(node, "Repeat") ? this.repeatRun(p, node, fail, fn, d) : undefined
         return run ?? this.repeat(node, used, out, fail, fn, d)
@@ -827,7 +827,7 @@ class Emitter {
 
   /**
    * A repetition whose elements are not kept, rewritten to scan a run of a
-   * character set in one loop instead of one element at a time (#79):
+   * character set in one loop instead of one element at a time:
    *
    * - `repeat(oneOf(S), range)` matches what `takeWhile(S, range)` matches,
    *   stopping, failing and reporting `Incomplete` where it does, so it
@@ -1303,7 +1303,7 @@ class Emitter {
    * included, so the run ends at the first stop character. The first
    * `SearchHead` units are tested one at a time, which beats a native
    * search on short runs; a longer run ends at the next occurrence that
-   * `nextStop` finds with `indexOf` (#75).
+   * `nextStop` finds with `indexOf`.
    */
   private stopSearch(stops: ReadonlyArray<number>, st: string, c: string, finish: string, fn: Fn): string {
     const h = this.v(fn)

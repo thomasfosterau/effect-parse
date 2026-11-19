@@ -153,7 +153,7 @@ describe("streaming parses", () => {
       Parser.terminated(Ascii.escaped(Token.takeTill('\\"'), "\\", Token.oneOf('\\"n')), Token.literal('"')),
       Parser.terminated(Ascii.takeEscaped(Ascii.alpha1, "\\", Token.oneOf("an")), Token.literal(";")),
       Parser.repeat(Parser.separated(a, b), { min: 1, max: 3 }),
-      // Repetitions of a character set whose values are unused scan as runs (#79)
+      // Repetitions of a character set whose values are unused scan as runs
       Parser.taken(
         Parser.repeat(Parser.alt(Token.oneOf("ab"), Parser.seq(Token.literal("\\"), Token.any)), { min: 1 })
       ),
@@ -188,7 +188,7 @@ describe("streaming parses", () => {
       Parser.repeat(
         Parser.alt(Parser.alt(Token.literal("ab"), b, Token.literal("c")), Token.literal("+"), Ascii.digit1)
       ),
-      // Branches led by a lookahead are dispatched on what follows it (#84)
+      // Branches led by a lookahead are dispatched on what follows it
       Parser.repeat(
         Parser.alt(
           Parser.preceded(Parser.not(Token.literal("ab")), Token.literal("a+")),
@@ -265,13 +265,13 @@ describe("streaming parses", () => {
     runs.forEach((input, i) => same(proto, input, i))
   })
 
-  it("withFastPath defers at the end of a partial input (#78)", () => {
+  it("withFastPath defers at the end of a partial input", () => {
     const grammar = Parser.terminated(Token.takeWhile("a", { min: 1 }), Token.literal("b"))
     const p = Parser.repeat(Parser.withFastPath(grammar, runOfAs))
     ;["ab", "aabab", "aaaab" + "ab".repeat(20), "aba", "b"].forEach((input, i) => same(p, input, i))
   })
 
-  it("takeTill searches across chunk boundaries (#75)", () => {
+  it("takeTill searches across chunk boundaries", () => {
     const quoted = Parser.repeat(
       Parser.terminated(
         Parser.delimited(Token.literal('"'), Token.takeTill('"'), Token.literal('"')),
@@ -423,7 +423,7 @@ describe("parseReadable and parseResponse", () => {
   })
 })
 
-describe("buffer limits and linear re-parsing (#116)", () => {
+describe("buffer limits and linear re-parsing", () => {
   const line = Parser.terminated(Token.takeTill("\n"), Token.literal("\n"))
   const byteLine = Parser.terminated(Text.utf8.takeTill("\n"), Text.utf8.literal("\n"))
   const encode = (s: string) => new TextEncoder().encode(s)

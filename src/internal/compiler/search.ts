@@ -1,6 +1,6 @@
 /**
- * Searching for the stop characters of `Token.takeTill` on string input
- * (#75): a run is scanned a unit at a time for `SearchHead` units, then
+ * Searching for the stop characters of `Token.takeTill` on string input:
+ * a run is scanned a unit at a time for `SearchHead` units, then
  * found with `indexOf`, which V8 runs much faster on long runs. Both
  * compilers use these; the interpreter scans unit by unit.
  */

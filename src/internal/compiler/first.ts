@@ -177,7 +177,7 @@ export class FirstSets {
       // backtracks there, so `not(p)` succeeds without consuming: Optional
       // over `p`'s units. On a unit in that set it may also fail, Cut
       // included, which Optional leaves open. So `seq(not(p), q)` starts
-      // with `p`'s units and `q`'s, and an `alt` can skip it on any other (#84)
+      // with `p`'s units and `q`'s, and an `alt` can skip it on any other
       case "Not":
       case "Opt":
       case "OrElseSucceed": {

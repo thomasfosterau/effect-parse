@@ -193,7 +193,7 @@ describe("State.reset", () => {
   })
 })
 
-describe("State.reset keeps what the state learnt about its input (#126)", () => {
+describe("State.reset keeps what the state learnt about its input", () => {
   const text = () => Parser.terminated(Token.takeTill("<&", { min: 1 }), Token.literal("<"))
   /** The tokens of `input`, one run per token, on one state reset before each or on a new state each time. */
   const lex = (p: Parser.Parser<string>, input: string, reuse: boolean) => {

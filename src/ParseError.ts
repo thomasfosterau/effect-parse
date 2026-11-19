@@ -147,7 +147,7 @@ export class ParseError<out E = never>
 
   // Private fields, not properties: nothing that walks the error (its own
   // keys, enumerable or not, or the arguments `Data.TaggedError` keeps for
-  // `toJSON` and structural equality) can reach the input (#117)
+  // `toJSON` and structural equality) can reach the input
   readonly #input: Input
   readonly #encoding: Encoding<Uint8Array> | undefined
   // Both are functions of the fields above, which never change, and both

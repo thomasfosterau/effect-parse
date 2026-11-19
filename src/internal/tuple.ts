@@ -7,7 +7,7 @@
  * are promoted. A literal's site learns that its arrays survive, and V8 then
  * allocates them straight into the old generation. So arities up to
  * {@link maxLiteral} build their tuple with a literal of that arity, each its
- * own site; longer tuples fall back to `new Array(n)` (#86).
+ * own site; longer tuples fall back to `new Array(n)`.
  */
 import { Fail } from "../Input.js"
 import type { State } from "../Input.js"
