@@ -2426,7 +2426,7 @@ export const permutation = <const Ps extends ReadonlyArray<Parser.Any>>(
   return combinator(
     parsers,
     (steps) => (state: State<any>) => {
-      // A round's failures, merged only if no parser matches in it
+      // A round's failures, merged only if no parser matches in it.
       const ties = new TiedFailures()
       const done = new Array<boolean>(n).fill(false)
       const out = new Array(n)
@@ -2494,7 +2494,7 @@ const foldImpl = <A, B, E, R, I extends Input>(
 ): Parser<B, E, R, I> => {
   const [min, max] = normalizeRange(range)
   const step = self.step
-  // Bounded or not, the repetition checks progress below
+  // Bounded or not, the repetition checks progress below.
   const key = new Key()
   return described(
     (state) => {
@@ -2740,7 +2740,7 @@ export const separated: {
     const [min, max] = normalizeRange(range)
     const step = self.step
     const sepStep = separator.step
-    // Bounded or not, the repetition checks progress below
+    // Bounded or not, the repetition checks progress below.
     const key = new Key()
     return described(
       (state) => {

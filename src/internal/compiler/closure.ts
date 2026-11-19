@@ -684,7 +684,7 @@ class Compiler {
 
   repeat(node: NodeOf<"Repeat"> | NodeOf<"Fold">, used: boolean): Step {
     const { max, min } = node
-    // Bounded or not, the repetition checks progress below
+    // Bounded or not, the repetition checks progress below.
     const isFold = Predicate.isTagged(node, "Fold")
     const cond = isFold ? node.while : undefined
     const c = this.compile(node.self, used)
@@ -803,7 +803,7 @@ class Compiler {
       return true
     }
     const { max, min } = node
-    // Bounded or not, the repetition checks progress below
+    // Bounded or not, the repetition checks progress below.
     // A streaming build's checkpoint holds the object built so far (see `repeat`)
     const resumable = this.resumable
     const site = new Key()
@@ -904,7 +904,7 @@ class Compiler {
 
   separated(node: NodeOf<"Separated">, used: boolean): Step {
     const { max, min } = node
-    // Bounded or not, the repetition checks progress below
+    // Bounded or not, the repetition checks progress below.
     const c = this.compile(node.self, used)
     const sep = this.compile(node.separator, false)
     const resumable = this.resumable
