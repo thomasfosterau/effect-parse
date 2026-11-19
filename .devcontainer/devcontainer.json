@@ -7,7 +7,14 @@
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
   },
-  "postCreateCommand": "vp install --frozen-lockfile",
+  // The container keeps its own node_modules in volumes, so its install never
+  // touches the host checkout's (built against another pnpm store). Fresh
+  // volumes are root-owned, hence the chown.
+  "mounts": [
+    "source=effect-parse-node_modules-${devcontainerId},target=${containerWorkspaceFolder}/node_modules,type=volume",
+    "source=effect-parse-ripgrep-node_modules-${devcontainerId},target=${containerWorkspaceFolder}/examples/ripgrep/node_modules,type=volume"
+  ],
+  "postCreateCommand": "sudo chown \"$(id -u):$(id -g)\" node_modules examples/ripgrep/node_modules && vp install --frozen-lockfile",
   "customizations": {
     "vscode": {
       "extensions": ["Anthropic.claude-code", "oxc.oxc-vscode"]
