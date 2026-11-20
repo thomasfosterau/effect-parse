@@ -459,14 +459,14 @@ export default defineConfig({
         }
       }
     ],
-    // Type-aware rules run through the oxlint-tsgolint Vite+ bundles (patched
-    // by `effect-tsgo patch --oxlint`, so the `effecttsgo/*` rules see types
-    // too). `typeCheck` adds the compiler's own diagnostics; the one
-    // tsconfig.json covers src, test, examples and bench, so it agrees with
-    // the `check` task, which stays the gate of record.
+    // Type-aware rules run through the tsrs Vite+ bundles (patched by
+    // `effect-tsgo patch --tsrs`, so the `effecttsgo/*` rules see types
+    // too). No `typeCheck`: tsrs's type check reports the Effect language
+    // service's warnings (tsconfig.base.json's `diagnosticSeverity`) as
+    // errors, ignoring `ignoreEffectWarningsInTscExitCode`. The `check` task
+    // reports them as warnings and stays the type gate.
     options: {
-      typeAware: true,
-      typeCheck: true
+      typeAware: true
     },
     jsPlugins: [
       {
@@ -592,7 +592,13 @@ export default defineConfig({
     // namespace re-export (bundling it, even unbundled, makes each subpath
     // export an extra `X_exports` binding the root namespace does not have).
     entry: ["src/**/*.ts"],
-    deps: { neverBundle: [/^\.\.?\//] },
+    deps: {
+      // tsdown <0.23 compatibility: resolve external dependency subpaths.
+      // Remove to preserve subpath imports as written (the new default).
+      // https://tsdown.dev/options/dependencies#deps-resolvedepsubpath
+      resolveDepSubpath: true,
+      neverBundle: [/^\.\.?\//]
+    },
     format: "esm",
     platform: "neutral",
     target: "es2022",

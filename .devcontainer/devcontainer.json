@@ -2,7 +2,7 @@
   "name": "effect-parse",
   // Tag = the catalog's `vite-plus` pin, moved by hand with it (digest from
   // `docker buildx imagetools inspect ghcr.io/voidzero-dev/vite-plus:<tag>`).
-  "image": "ghcr.io/voidzero-dev/vite-plus:1.6.0@sha256:eefe84f6bf32756307fe1452b49c81e6b3af98edb328a838ac1e90d6faaa7acc",
+  "image": "ghcr.io/voidzero-dev/vite-plus:1.7.0@sha256:dcdbe5282b3c2087fec3f5e38272b8e04939f1ef5c565b8bfec0cbfb66f238ae",
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}

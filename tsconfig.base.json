@@ -47,11 +47,11 @@
           "globalDateInEffect": "warning",
           "globalFetch": "warning",
           "globalFetchInEffect": "warning",
+          "globalJsonInEffect": "warning",
           "globalTimers": "warning",
           "globalTimersInEffect": "warning",
           "newPromise": "warning",
           "nodeBuiltinImport": "warning",
-          "preferSchemaOverJson": "warning",
           "unsafeEffectTypeAssertion": "warning"
         }
       }
