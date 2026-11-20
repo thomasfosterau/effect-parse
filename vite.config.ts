@@ -461,12 +461,13 @@ export default defineConfig({
     ],
     // Type-aware rules run through the tsrs Vite+ bundles (patched by
     // `effect-tsgo patch --tsrs`, so the `effecttsgo/*` rules see types
-    // too). No `typeCheck`: tsrs's type check reports the Effect language
+    // too). `typeCheck` is off: tsrs's type check reports the Effect language
     // service's warnings (tsconfig.base.json's `diagnosticSeverity`) as
     // errors, ignoring `ignoreEffectWarningsInTscExitCode`. The `check` task
     // reports them as warnings and stays the type gate.
     options: {
-      typeAware: true
+      typeAware: true,
+      typeCheck: false
     },
     jsPlugins: [
       {
