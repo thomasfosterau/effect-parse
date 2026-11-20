@@ -64,6 +64,7 @@ jobs:
       - uses: voidzero-dev/setup-vp@v1.22.0
         with:
           version-file: pnpm-workspace.yaml
+          node-version: lts
           cache: true
           run-install: true
       - name: Build the container and check vp inside it
