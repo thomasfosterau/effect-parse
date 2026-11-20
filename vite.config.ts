@@ -489,9 +489,9 @@ export default defineConfig({
         command: "vp check && vp run check && vp run test:unit && vp run check:dist && pnpm audit --audit-level high",
         cache: false
       },
-      // The type gate: `src`, the tests, the examples and the benchmarks
-      // under the native, Effect-patched `tsc`. tsconfig.json resolves the
-      // package name to `src/`, so it never needs a build first.
+      // The type gate: `src`, the tests, the examples, the benchmarks and this
+      // config under the native, Effect-patched `tsc`. tsconfig.json resolves
+      // the package name to `src/`, so it never needs a build first.
       check: {
         command: "tsc -p tsconfig.json",
         cache: { input: cacheInputs, output: [] }

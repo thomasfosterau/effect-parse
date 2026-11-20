@@ -10,5 +10,5 @@
       "@thomasfosterau/effect-parse": ["./src/index.ts"]
     }
   },
-  "include": ["src", "test", "examples", "bench"]
+  "include": ["src", "test", "examples", "bench", "vite.config.ts"]
 }
