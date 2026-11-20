@@ -32,7 +32,7 @@ Every version lives in the `pnpm-workspace.yaml` catalog; `package.json` uses `c
 
 - `vite`, `vitest` and `@vitest/coverage-istanbul` must equal what `vite-plus` pins: on its PR, run `vp dlx --package=vite-plus@<v> vp migrate --no-interactive` (it re-pins `vite` and `vitest`; drop the `minimumReleaseAgeExclude` entries it adds), set `@vitest/coverage-istanbul` to the new `vitest`, and run `vp install`.
 - `@effect/tsgo`, `@typescript/native` (an npm alias) and vite-plus's oxlint must be a combination the `components` table in `node_modules/@effect/tsgo/dist/effect-tsgo.cjs` supports, or `vp install` fails.
-- The devcontainer image tag equals the `vite-plus` pin; the `npm` version in `release.yml` is bumped by hand.
+- The devcontainer image tag equals the `vite-plus` pin.
 
 ## Coding guidelines
 
@@ -63,4 +63,4 @@ Run `vp run ci` (format, lint, type gate, tests, build, dist guard, `pnpm audit`
 
 ## Changesets
 
-Every change to the package's behaviour or its emitted `.d.ts` (doc comments included, as a `patch`) needs a changeset: run `pnpm changeset` and commit the file with the change. Docs, CI and tooling changes need none. While the package is `0.x`, a breaking change is a `minor`. Never version or publish by hand: see [PUBLISHING.md](PUBLISHING.md).
+Every change to the package's behaviour or its emitted `.d.ts` (doc comments included, as a `patch`) needs a changeset: run `pnpm changeset` and commit the file with the change. Docs, CI and tooling changes need none. While the package is `0.x`, a breaking change is a `minor`. Never version or publish by hand: the Release workflow publishes the checked tarball with `vp pm publish` (`vp run release:dry-run` shows what it would publish); see [PUBLISHING.md](PUBLISHING.md).

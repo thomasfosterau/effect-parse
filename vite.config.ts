@@ -530,12 +530,28 @@ export default defineConfig({
         command: "vp exec fallow --summary",
         cache: false
       },
-      // The release tarball, after the dist guard: `pnpm pack` rewrites
+      // The release tarball, after the dist guard: `vp pm pack` (pnpm) rewrites
       // `catalog:peers` to the published range, and has no `--ignore-scripts`
       // flag, so lifecycle scripts are turned off through config. Run by the
-      // Release workflow's build job, which uploads `release-artifact/`.
+      // Release workflow's build job, which uploads `release-artifact/`; its
+      // publish job runs `vp pm publish` on that tarball.
       "release:pack": {
-        command: "pnpm pack --config.ignore-scripts=true --pack-destination release-artifact",
+        command: "vp pm pack --pack-destination release-artifact -- --config.ignore-scripts=true",
+        dependsOn: ["check:dist"],
+        cache: false
+      },
+      // The by-hand release, for a first publish (docs/PUBLISHING.md): pnpm
+      // publishes the package if npm doesn't have its version yet (`-r` is what
+      // checks the registry), then `changeset git-tag` tags it. CI publishes
+      // through the split build and publish jobs instead.
+      release: {
+        command: ["vp pm publish -r --access public --no-git-checks -- --ignore-scripts", "changeset git-tag"],
+        dependsOn: ["check:dist"],
+        cache: false
+      },
+      // What `release` would publish, without publishing or tagging.
+      "release:dry-run": {
+        command: "vp pm publish -r --access public --dry-run --no-git-checks -- --ignore-scripts",
         dependsOn: ["check:dist"],
         cache: false
       },
@@ -548,7 +564,7 @@ export default defineConfig({
       },
       // Run by the Release workflow's version step.
       "changeset:version": {
-        command: "changeset version && vp fmt && pnpm install --lockfile-only",
+        command: "changeset version && vp fmt && vp install --lockfile-only",
         cache: false
       },
       // Benchmarks: run by hand around a change to a hot path, never in CI
