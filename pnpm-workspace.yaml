@@ -30,7 +30,7 @@ catalog:
   "@vitest/coverage-istanbul": 5.1.0
   "@enfect/oxlint": ^0.10.0
   effect: 4.1.4
-  fallow: 3.43.2
+  fallow: 3.44.0
   rolldown: ^1.2.14
   # TS6 for JS-API consumers (the language service, `vp pack`'s declarations);
   # TS7 (`@typescript/native`, bin `tsc`) type-checks and must match @effect/tsgo.
