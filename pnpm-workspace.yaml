@@ -66,3 +66,13 @@ peerDependencyRules:
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - "@thomasfosterau/*"
+
+# Agent skills dependencies ship (pnpm 12.11+). `fallow` ships `fallow` and
+# `fallow-setup`; only `fallow` is linked, since the repository is already set
+# up.
+permissions:
+  fallow:
+    skills: [fallow]
+
+skills:
+  dirs: [.claude/skills]

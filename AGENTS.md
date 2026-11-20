@@ -8,3 +8,7 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 - Other libraries depend on the exported surface: change it only on purpose, with a changeset.
 - `docs/ARCHITECTURE.md` gives the broad view of the compilers, streaming and syntax trees, and each internal module's header comment the details; read both before changing one.
 - The full suite takes about 90 s; run single files while iterating.
+
+## Fallow
+
+- `vp install` links the `fallow` skill into `.claude/skills/fallow` from the installed package (approved under `permissions` in `pnpm-workspace.yaml`). The pre-commit `fallow:audit` gate and the rest of the repository's rules are in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
