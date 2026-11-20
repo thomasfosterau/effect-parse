@@ -107,6 +107,7 @@
     "@changesets/changelog-github": "catalog:",
     "@changesets/cli": "catalog:",
     "@devcontainers/cli": "catalog:",
+    "@effect/docgen": "catalog:",
     "@effect/language-service": "catalog:",
     "@effect/platform-node-shared": "catalog:",
     "@effect/tsgo": "catalog:",

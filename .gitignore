@@ -157,3 +157,6 @@ fallow.sarif
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 .vitest/
+
+# docgen output (`vp run docgen`), published by the Pages workflow.
+docs/api/

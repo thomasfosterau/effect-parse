@@ -12,6 +12,7 @@ catalog:
   "@changesets/cli": ^3.0.3
   # The devcontainers CLI, for the `check:devcontainer` task.
   "@devcontainers/cli": ^0.90.0
+  "@effect/docgen": ^4.1.4
   "@effect/language-service": ^0.87.5
   # For the `effect/cli` jq example only. Moves with `effect`.
   "@effect/platform-node-shared": 4.1.4
@@ -66,6 +67,10 @@ peerDependencyRules:
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - "@thomasfosterau/*"
+
+# docgen pulls in tsx, whose esbuild needs no install script here.
+allowBuilds:
+  esbuild: false
 
 # Agent skills dependencies ship (pnpm 12.11+). `fallow` ships `fallow` and
 # `fallow-setup`; only `fallow` is linked, since the repository is already set
