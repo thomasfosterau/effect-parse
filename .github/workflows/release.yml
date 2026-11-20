@@ -185,16 +185,18 @@ jobs:
           node-version: lts
           cache: false
           run-install: false
-      # pnpm does the OIDC exchange and adds provenance itself. A tarball spec
-      # runs no lifecycle script. Skips a version already on npm, so a re-run
-      # after a partial failure carries on to the release.
+      # `vp pm publish` (pnpm) does the OIDC exchange and adds provenance
+      # itself; a tarball spec runs no lifecycle script. Skips a version
+      # already on npm, so a re-run after a partial failure carries on to the
+      # release. `vp pm view` runs outside the checkout: inside it, the root
+      # `devEngines.runtime: "lts"` makes it fail.
       - name: Publish to npm
         run: |
           set -euo pipefail
-          if pnpm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+          if (cd "$RUNNER_TEMP" && vp pm view "$NAME@$VERSION" version) >/dev/null 2>&1; then
             echo "skip: $NAME@$VERSION is already published"
           else
-            pnpm publish "release-artifact/$TARBALL" --access public --no-git-checks
+            vp pm publish "release-artifact/$TARBALL" --access public --no-git-checks
           fi
       - name: Tag and create the GitHub release
         env:

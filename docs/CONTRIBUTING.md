@@ -63,4 +63,4 @@ Run `vp run ci` (format, lint, type gate, tests, build, dist guard, `pnpm audit`
 
 ## Changesets
 
-Every change to the package's behaviour or its emitted `.d.ts` (doc comments included, as a `patch`) needs a changeset: run `pnpm changeset` and commit the file with the change. Docs, CI and tooling changes need none. While the package is `0.x`, a breaking change is a `minor`. Never version or publish by hand: see [PUBLISHING.md](PUBLISHING.md).
+Every change to the package's behaviour or its emitted `.d.ts` (doc comments included, as a `patch`) needs a changeset: run `pnpm changeset` and commit the file with the change. Docs, CI and tooling changes need none. While the package is `0.x`, a breaking change is a `minor`. Never version or publish by hand: the Release workflow publishes the checked tarball with `vp pm publish` (`vp run release:dry-run` shows what it would publish); see [PUBLISHING.md](PUBLISHING.md).
