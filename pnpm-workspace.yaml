@@ -17,7 +17,7 @@ catalog:
   "@effect/platform-node-shared": 4.1.4
   # Moves with `@typescript/native` and vite-plus's oxlint: read the
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs first.
-  "@effect/tsgo": 0.69.0
+  "@effect/tsgo": 0.70.0
   # Libraries built on this package, for the downstream benchmarks only. Pinned
   # exact; the override below runs them on this checkout's build.
   "@thomasfosterau/effect-bib": 0.2.1
@@ -27,7 +27,7 @@ catalog:
   "@thomasfosterau/effect-xml": 0.3.0
   "@types/node": ^26.6.5
   # Must equal vite-plus's vitest.
-  "@vitest/coverage-istanbul": 5.1.0
+  "@vitest/coverage-istanbul": 5.1.1
   "@enfect/oxlint": ^0.10.0
   effect: 4.1.4
   fallow: 3.44.0
@@ -38,9 +38,9 @@ catalog:
   "@typescript/native": "npm:typescript@7.0.2"
   # `vite` and `vitest` follow vite-plus: after bumping it, run
   # `vp dlx --package=vite-plus@<v> vp migrate --no-interactive`.
-  vite-plus: 1.6.0
+  vite-plus: 1.7.0
   vite: npm:@voidzero-dev/vite-plus-core@1.6.0
-  vitest: 5.1.0
+  vitest: 5.1.1
 
 # Published peer ranges. Raise `effect` only when a dependency requires it
 # (a breaking change).
