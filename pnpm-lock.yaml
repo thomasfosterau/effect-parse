@@ -207,8 +207,8 @@ catalogs:
       specifier: 0.3.0
       version: 0.3.0
     '@thomasfosterau/effect-xml':
-      specifier: 0.2.0
-      version: 0.2.0
+      specifier: 0.3.0
+      version: 0.3.0
     '@types/node':
       specifier: ^26.6.5
       version: 26.6.5
@@ -279,10 +279,10 @@ importers:
         version: 'link:'
       '@thomasfosterau/effect-rdf':
         specifier: 'catalog:'
-        version: 0.3.0(@thomasfosterau/effect-ext@0.3.1(@thomasfosterau/effect-parse@+)(effect@4.1.4))(@thomasfosterau/effect-parse@+)(@thomasfosterau/effect-xml@0.2.0(@thomasfosterau/effect-parse@+)(effect@4.1.4))(effect@4.1.4)
+        version: 0.3.0(@thomasfosterau/effect-ext@0.3.1(@thomasfosterau/effect-parse@+)(effect@4.1.4))(@thomasfosterau/effect-parse@+)(@thomasfosterau/effect-xml@0.3.0(@thomasfosterau/effect-parse@+)(effect@4.1.4))(effect@4.1.4)
       '@thomasfosterau/effect-xml':
         specifier: 'catalog:'
-        version: 0.2.0(@thomasfosterau/effect-parse@+)(effect@4.1.4)
+        version: 0.3.0(@thomasfosterau/effect-parse@+)(effect@4.1.4)
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.5
@@ -1021,8 +1021,8 @@ packages:
       '@thomasfosterau/effect-xml':
         optional: true
 
-  '@thomasfosterau/effect-xml@0.2.0':
-    resolution: {integrity: sha512-i5o+SJVmAgyNGKGK1YwC3nbOJCOSc0Iyy0XRgJ76fOsCBSDetuSvEMCdLnbyW2uKLUqllEzWOBGM4684iuIvFw==}
+  '@thomasfosterau/effect-xml@0.3.0':
+    resolution: {integrity: sha512-nU/Ga/1O0G4iniZ/OLKGCVbaBtLmvAiQzpKNU37AzgpXJPlfPgQsaasQ9kS7pfgXPr0eNsZ/hXNd+1YyZ8J1Rg==}
     engines: {node: '>=22'}
     peerDependencies:
       '@thomasfosterau/effect-parse': workspace:*
@@ -2325,15 +2325,15 @@ snapshots:
       '@thomasfosterau/effect-parse': link:.
       effect: 4.1.4
 
-  '@thomasfosterau/effect-rdf@0.3.0(@thomasfosterau/effect-ext@0.3.1(@thomasfosterau/effect-parse@+)(effect@4.1.4))(@thomasfosterau/effect-parse@+)(@thomasfosterau/effect-xml@0.2.0(@thomasfosterau/effect-parse@+)(effect@4.1.4))(effect@4.1.4)':
+  '@thomasfosterau/effect-rdf@0.3.0(@thomasfosterau/effect-ext@0.3.1(@thomasfosterau/effect-parse@+)(effect@4.1.4))(@thomasfosterau/effect-parse@+)(@thomasfosterau/effect-xml@0.3.0(@thomasfosterau/effect-parse@+)(effect@4.1.4))(effect@4.1.4)':
     dependencies:
       effect: 4.1.4
     optionalDependencies:
       '@thomasfosterau/effect-ext': 0.3.1(@thomasfosterau/effect-parse@+)(effect@4.1.4)
       '@thomasfosterau/effect-parse': link:.
-      '@thomasfosterau/effect-xml': 0.2.0(@thomasfosterau/effect-parse@+)(effect@4.1.4)
+      '@thomasfosterau/effect-xml': 0.3.0(@thomasfosterau/effect-parse@+)(effect@4.1.4)
 
-  '@thomasfosterau/effect-xml@0.2.0(@thomasfosterau/effect-parse@+)(effect@4.1.4)':
+  '@thomasfosterau/effect-xml@0.3.0(@thomasfosterau/effect-parse@+)(effect@4.1.4)':
     dependencies:
       '@thomasfosterau/effect-parse': link:.
       effect: 4.1.4
