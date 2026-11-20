@@ -195,8 +195,8 @@ catalogs:
       specifier: ^0.10.0
       version: 0.10.0
     '@thomasfosterau/effect-bib':
-      specifier: 0.2.0
-      version: 0.2.0
+      specifier: 0.2.1
+      version: 0.2.1
     '@thomasfosterau/effect-ext':
       specifier: 0.3.1
       version: 0.3.1
@@ -267,7 +267,7 @@ importers:
         version: 0.10.0
       '@thomasfosterau/effect-bib':
         specifier: 'catalog:'
-        version: 0.2.0(@thomasfosterau/effect-parse@+)(effect@4.1.4)
+        version: 0.2.1(@thomasfosterau/effect-parse@+)(effect@4.1.4)
       '@thomasfosterau/effect-ext':
         specifier: 'catalog:'
         version: 0.3.1(@thomasfosterau/effect-parse@+)(effect@4.1.4)
@@ -971,8 +971,8 @@ packages:
     peerDependencies:
       '@testing-library/dom': '>=7.21.4'
 
-  '@thomasfosterau/effect-bib@0.2.0':
-    resolution: {integrity: sha512-o+Szu+kj63Tw10b9A1AIw2tO4BZ1BPUr1XDlNEetiAKVZnrkO93qgrqrpHyM9jXeetPuI+FOU8mUxUHfMU6DFA==}
+  '@thomasfosterau/effect-bib@0.2.1':
+    resolution: {integrity: sha512-CnrYGp8QihNSpwERrR5OZ9ENa0JIb/Nod9hhQDCZk7/5CDRllvSAkPKrN3LqyqlZCqwdj6/p2qy8C4RvP1mlrw==}
     engines: {node: '>=22'}
     peerDependencies:
       '@thomasfosterau/effect-parse': workspace:*
@@ -2308,7 +2308,7 @@ snapshots:
     dependencies:
       '@testing-library/dom': 10.4.2
 
-  '@thomasfosterau/effect-bib@0.2.0(@thomasfosterau/effect-parse@+)(effect@4.1.4)':
+  '@thomasfosterau/effect-bib@0.2.1(@thomasfosterau/effect-parse@+)(effect@4.1.4)':
     dependencies:
       effect: 4.1.4
     optionalDependencies:
