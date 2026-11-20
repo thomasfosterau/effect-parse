@@ -8,6 +8,7 @@ packages:
   - examples/ripgrep
 
 catalog:
+  "@effect/docgen": ^4.1.4
   "@changesets/changelog-github": ^1.0.1
   "@changesets/cli": ^3.0.3
   # The devcontainers CLI, for the `check:devcontainer` task.
@@ -70,6 +71,10 @@ minimumReleaseAgeExclude:
 # Agent skills dependencies ship (pnpm 12.11+). `fallow` ships `fallow` and
 # `fallow-setup`; only `fallow` is linked, since the repository is already set
 # up.
+# docgen pulls in tsx, whose esbuild needs no install script here.
+allowBuilds:
+  esbuild: false
+
 permissions:
   fallow:
     skills: [fallow]

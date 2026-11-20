@@ -477,6 +477,9 @@ export default defineConfig({
   },
   run: {
     tasks: {
+      // The API reference the Pages workflow publishes. Examples are
+      // rendered but not compiled (`tscExecutable: "true"` in docgen.json).
+      docgen: { command: "docgen", cache: false },
       // The whole gate, in order, and the only command CI runs
       // (.github/workflows/ci.yml): format + lint, the type gate, the unit
       // suite, the build with its dist guard, and the dependency audit
