@@ -28,9 +28,9 @@ Read the [README](../README.md) first. Agents should also read [AGENTS.md](../AG
 
 ### Dependencies
 
-Every version lives in the `pnpm-workspace.yaml` catalog; `package.json` uses `catalog:` only. After editing the catalog, run `vp install` and commit `pnpm-lock.yaml`. Dependabot can't do these:
+Every version lives in the `pnpm-workspace.yaml` catalog; `package.json` uses `catalog:` only. After editing the catalog, run `vp install` and commit `pnpm-lock.yaml`. Dependabot can't do these, so make them in a PR from a new branch started from its head (never push to a `dependabot/*` branch, which stops it rebasing), and it closes its own PR once yours merges:
 
-- `vite`, `vitest` and `@vitest/coverage-istanbul` must equal what `vite-plus` pins: on its PR, run `vp dlx --package=vite-plus@<v> vp migrate --no-interactive` (it re-pins `vite` and `vitest`; drop the `minimumReleaseAgeExclude` entries it adds), set `@vitest/coverage-istanbul` to the new `vitest`, and run `vp install`.
+- `vite`, `vitest` and `@vitest/coverage-istanbul` must equal what `vite-plus` pins: run `vp dlx --package=vite-plus@<v> vp migrate --no-interactive` (it re-pins `vite` and `vitest`; drop the `minimumReleaseAgeExclude` entries it adds), set `@vitest/coverage-istanbul` to the new `vitest`, and run `vp install`.
 - `@effect/tsgo`, `@typescript/native` (an npm alias) and vite-plus's oxlint must be a combination the `components` table in `node_modules/@effect/tsgo/dist/effect-tsgo.cjs` supports, or `vp install` fails.
 - The devcontainer image tag equals the `vite-plus` pin.
 
