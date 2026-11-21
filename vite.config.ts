@@ -459,14 +459,15 @@ export default defineConfig({
         }
       }
     ],
-    // Type-aware rules run through the oxlint-tsgolint Vite+ bundles (patched
-    // by `effect-tsgo patch --oxlint`, so the `effecttsgo/*` rules see types
-    // too). `typeCheck` adds the compiler's own diagnostics; the one
-    // tsconfig.json covers src, test, examples and bench, so it agrees with
-    // the `check` task, which stays the gate of record.
+    // Type-aware rules run through the tsrs Vite+ bundles (patched by
+    // `effect-tsgo patch --tsrs`, so the `effecttsgo/*` rules see types
+    // too). `typeCheck` is off: tsrs's type check reports the Effect language
+    // service's warnings (tsconfig.base.json's `diagnosticSeverity`) as
+    // errors, ignoring `ignoreEffectWarningsInTscExitCode`. The `check` task
+    // reports them as warnings and stays the type gate.
     options: {
       typeAware: true,
-      typeCheck: true
+      typeCheck: false
     },
     jsPlugins: [
       {
@@ -488,9 +489,9 @@ export default defineConfig({
         command: "vp check && vp run check && vp run test:unit && vp run check:dist && pnpm audit --audit-level high",
         cache: false
       },
-      // The type gate: `src`, the tests, the examples and the benchmarks
-      // under the native, Effect-patched `tsc`. tsconfig.json resolves the
-      // package name to `src/`, so it never needs a build first.
+      // The type gate: `src`, the tests, the examples, the benchmarks and this
+      // config under the native, Effect-patched `tsc`. tsconfig.json resolves
+      // the package name to `src/`, so it never needs a build first.
       check: {
         command: "tsc -p tsconfig.json",
         cache: { input: cacheInputs, output: [] }
@@ -592,7 +593,13 @@ export default defineConfig({
     // namespace re-export (bundling it, even unbundled, makes each subpath
     // export an extra `X_exports` binding the root namespace does not have).
     entry: ["src/**/*.ts"],
-    deps: { neverBundle: [/^\.\.?\//] },
+    deps: {
+      // tsdown <0.23 compatibility: resolve external dependency subpaths.
+      // Remove to preserve subpath imports as written (the new default).
+      // https://tsdown.dev/options/dependencies#deps-resolvedepsubpath
+      resolveDepSubpath: true,
+      neverBundle: [/^\.\.?\//]
+    },
     format: "esm",
     platform: "neutral",
     target: "es2022",

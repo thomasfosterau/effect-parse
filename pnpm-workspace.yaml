@@ -16,9 +16,9 @@ catalog:
   "@effect/language-service": ^0.87.5
   # For the `effect/cli` jq example only. Moves with `effect`.
   "@effect/platform-node-shared": 4.1.4
-  # Moves with `@typescript/native` and vite-plus's oxlint: read the
+  # Moves with `@typescript/native` and vite-plus's oxlint and tsrs: read the
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs first.
-  "@effect/tsgo": 0.69.0
+  "@effect/tsgo": 0.73.2
   # Libraries built on this package, for the downstream benchmarks only. Pinned
   # exact; the override below runs them on this checkout's build.
   "@thomasfosterau/effect-bib": 0.2.1
@@ -37,10 +37,11 @@ catalog:
   # TS7 (`@typescript/native`, bin `tsc`) type-checks and must match @effect/tsgo.
   typescript: "npm:@typescript/typescript6@6.0.2"
   "@typescript/native": "npm:typescript@7.0.2"
-  # `vite` and `vitest` follow vite-plus: after bumping it, run
-  # `vp dlx --package=vite-plus@<v> vp migrate --no-interactive`.
-  vite-plus: 1.6.0
-  vite: npm:@voidzero-dev/vite-plus-core@1.6.0
+  # `vite` and `vitest` equal what vite-plus itself depends on (`npm view
+  # vite-plus@<v> dependencies`; `vite` no longer equals vite-plus): after
+  # bumping it, run `vp dlx --package=vite-plus@<v> vp migrate --no-interactive`.
+  vite-plus: 1.7.0
+  vite: npm:@voidzero-dev/vite-plus-core@8.3.8000
   vitest: 5.1.0
 
 # Published peer ranges. Raise `effect` only when a dependency requires it
@@ -56,14 +57,6 @@ overrides:
   effect: "catalog:"
   "@thomasfosterau/effect-parse": "workspace:*"
 nodeLinker: hoisted
-peerDependencyRules:
-  allowAny:
-    - vite
-    - vitest
-  allowedVersions:
-    vite: "*"
-    vitest: "*"
-
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - "@thomasfosterau/*"
