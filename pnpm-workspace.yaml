@@ -11,7 +11,7 @@ catalog:
   "@changesets/changelog-github": ^1.0.1
   "@changesets/cli": ^3.0.3
   # The devcontainers CLI, for the `check:devcontainer` task.
-  "@devcontainers/cli": ^0.90.0
+  "@devcontainers/cli": ^0.91.0
   "@effect/docgen": ^4.1.4
   "@effect/language-service": ^0.87.5
   # For the `effect/cli` jq example only. Moves with `effect`.
