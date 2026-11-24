@@ -180,8 +180,8 @@ catalogs:
       specifier: ^3.0.3
       version: 3.0.3
     '@devcontainers/cli':
-      specifier: ^0.90.0
-      version: 0.90.0
+      specifier: ^0.91.0
+      version: 0.91.0
     '@effect/docgen':
       specifier: ^4.1.4
       version: 4.1.4
@@ -255,7 +255,7 @@ importers:
         version: 3.0.3
       '@devcontainers/cli':
         specifier: 'catalog:'
-        version: 0.90.0
+        version: 0.91.0
       '@effect/docgen':
         specifier: 'catalog:'
         version: 4.1.4(@typescript/typescript6@6.0.2)(redis@6.3.1)(tsx@4.23.15)
@@ -444,8 +444,8 @@ packages:
     resolution: {integrity: sha512-dlT1m5e/0yUL0kRNcQn7yGLVThkgbB0Ga/1AmfDDC/8ik6AIiSf2QLQO2zPYvefsHP0aFgxO93cVLCCfDp7kzQ==}
     engines: {node: '>= 20.12.0'}
 
-  '@devcontainers/cli@0.90.0':
-    resolution: {integrity: sha512-A4ceztBMlNzd1MUlQNel0dWxnkDlE83+WsgS4JOZfeBkbO0QUKEzBpd3UQ7Xqf7s0KzJaAj+Udnp4E8I3oqK3w==}
+  '@devcontainers/cli@0.91.0':
+    resolution: {integrity: sha512-KrrvqwpODvEakJhoXweaAkoMG3+NZilboT4e4SQTf6dxVXLeiyLDKupnEtUMaVe1FJXHO4Yme7TTjqxskSOucg==}
     engines: {node: '>=20.0.0'}
     hasBin: true
 
@@ -2542,7 +2542,7 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
-  '@devcontainers/cli@0.90.0': {}
+  '@devcontainers/cli@0.91.0': {}
 
   '@effect/docgen@4.1.4(@typescript/typescript6@6.0.2)(redis@6.3.1)(tsx@4.23.15)':
     dependencies:
