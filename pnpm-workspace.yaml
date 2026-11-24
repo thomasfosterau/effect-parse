@@ -15,7 +15,7 @@ catalog:
   "@effect/docgen": ^4.1.4
   "@effect/language-service": ^0.87.5
   # For the `effect/cli` jq example only. Moves with `effect`.
-  "@effect/platform-node-shared": 4.1.4
+  "@effect/platform-node-shared": 4.1.5
   # Moves with `@typescript/native` and vite-plus's oxlint and tsrs: read the
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs first.
   "@effect/tsgo": 0.73.4
@@ -30,7 +30,7 @@ catalog:
   # Must equal vite-plus's vitest.
   "@vitest/coverage-istanbul": 5.1.1
   "@enfect/oxlint": ^0.10.0
-  effect: 4.1.4
+  effect: 4.1.5
   fallow: 3.46.0
   rolldown: ^1.2.14
   # TS6 for JS-API consumers (the language service, `vp pack`'s declarations);
