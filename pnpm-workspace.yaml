@@ -22,7 +22,7 @@ catalog:
   # Libraries built on this package, for the downstream benchmarks only. Pinned
   # exact; the override below runs them on this checkout's build.
   "@thomasfosterau/effect-bib": 0.2.1
-  "@thomasfosterau/effect-ext": 0.3.1
+  "@thomasfosterau/effect-ext": 0.4.0
   "@thomasfosterau/effect-ical": 0.1.0
   "@thomasfosterau/effect-rdf": 0.3.1
   "@thomasfosterau/effect-xml": 0.3.0
