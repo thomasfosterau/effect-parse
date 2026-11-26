@@ -8,7 +8,7 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 - Other libraries depend on the exported surface: change it only on purpose, with a changeset.
 - `docs/ARCHITECTURE.md` gives the broad view of the compilers, streaming and syntax trees, and each internal module's header comment the details; read both before changing one.
 - The full suite takes about 90 s; run single files while iterating.
-- Publish only through the Release workflow; there is no publish script. Release-path registry calls go through `vp pm` (`pack`, `publish`, `view`), never `npm` / `pnpm` directly. `vp pm view` fails inside this repo (`devEngines.runtime` is `lts`); run it outside the checkout.
+- Publish only through the Release workflow; there is no publish script. Release-path registry calls go through `vp pm` (`pack`, `publish`, `view`), never `npm` / `pnpm` directly.
 
 ## Pull requests
 

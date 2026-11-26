@@ -132,12 +132,6 @@
   "peerDependencies": {
     "effect": "catalog:peers"
   },
-  "devEngines": {
-    "runtime": {
-      "name": "node",
-      "version": "lts"
-    }
-  },
   "engines": {
     "node": ">=22"
   },

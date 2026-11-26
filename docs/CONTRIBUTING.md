@@ -28,6 +28,8 @@ Read the [README](../README.md) first. Agents should also read [AGENTS.md](../AG
 
 ### Dependencies
 
+Dependabot ([dependabot.yml](../.github/dependabot.yml)) opens `@thomasfosterau/*` updates daily and every other update weekly, on Wednesday morning Melbourne time: the named runtime sets (`effect` and the like) each in one PR, and every other development dependency in the single `toolchain` group. Security updates skip the schedule and open as soon as an advisory lands, one PR each. Vite+ selects Node.js from `.node-version` and pnpm from `packageManager`; pnpm's own switching is off (`runtimeOnFail` / `pmOnFail`), so one version of each is installed and used.
+
 Every version lives in the `pnpm-workspace.yaml` catalog; `package.json` uses `catalog:` only. After editing the catalog, run `vp install` and commit `pnpm-lock.yaml`. Dependabot can't do these, so make them in a PR from a new branch started from its head (never push to a `dependabot/*` branch, which stops it rebasing), and it closes its own PR once yours merges:
 
 - `vite`, `vitest` and `@vitest/coverage-istanbul` must equal what `vite-plus` pins: run `vp dlx --package=vite-plus@<v> vp migrate --no-interactive` (it re-pins `vite` and `vitest`; drop the `minimumReleaseAgeExclude` entries it adds), set `@vitest/coverage-istanbul` to the new `vitest`, and run `vp install`.

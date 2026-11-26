@@ -40,8 +40,8 @@ catalog:
   # `vite` and `vitest` equal what vite-plus itself depends on (`npm view
   # vite-plus@<v> dependencies`; `vite` no longer equals vite-plus): after
   # bumping it, run `vp dlx --package=vite-plus@<v> vp migrate --no-interactive`.
-  vite-plus: 1.7.0
-  vite: npm:@voidzero-dev/vite-plus-core@8.3.8000
+  vite-plus: 1.8.0
+  vite: npm:@voidzero-dev/vite-plus-core@8.3.8001
   vitest: 5.1.1
 
 # Published peer ranges. Raise `effect` only when a dependency requires it
@@ -74,3 +74,7 @@ permissions:
 
 skills:
   dirs: [.claude/skills]
+# Vite+ selects Node.js (.node-version) and pnpm (packageManager); pnpm
+# must not download or switch to its own.
+runtimeOnFail: ignore
+pmOnFail: ignore
